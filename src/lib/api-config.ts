@@ -66,6 +66,11 @@ function normalizeProviderBaseUrl(providerId: string, rawBaseUrl?: string): stri
   }
 
   const baseUrl = readTrimmedString(rawBaseUrl)
+  if (!baseUrl && providerKey === 'local') {
+    // 本地 provider：如果用户只填了 API Key 而未填 Base URL，则提供一个可用的默认值，
+    // 避免运行时直接报 PROVIDER_BASE_URL_MISSING。
+    return 'http://127.0.0.1:5566'
+  }
   if (!baseUrl) return undefined
   if (providerKey !== 'openai-compatible') return baseUrl
 

@@ -9,6 +9,7 @@ import { ImageGenerator, VideoGenerator, AudioGenerator } from './base'
 import { FalBananaGenerator } from './fal'
 import { ArkSeedreamGenerator, ArkSeedanceVideoGenerator } from './ark'
 import { FalVideoGenerator } from './fal'
+import { LocalImageGenerator, LocalVideoGenerator } from './local'
 import {
     GoogleGeminiImageGenerator,
     GoogleImagenGenerator,
@@ -59,6 +60,8 @@ export function createImageGenerator(provider: string, modelId?: string): ImageG
             return new GoogleImagenGenerator(actualModelId)
         case 'ark':
             return new ArkSeedreamGenerator()
+        case 'local':
+            return new LocalImageGenerator(actualModelId, provider)
         case 'gemini-compatible':
             return new GeminiCompatibleImageGenerator(actualModelId, provider)
         case 'openai-compatible':
@@ -86,6 +89,8 @@ export function createVideoGenerator(provider: string): VideoGenerator {
             return new GoogleVeoVideoGenerator()
         case 'gemini-compatible':
             return new GoogleVeoVideoGenerator(provider)
+        case 'local':
+            return new LocalVideoGenerator(provider)
         case 'minimax':
             return new MinimaxVideoGenerator()
         case 'vidu':

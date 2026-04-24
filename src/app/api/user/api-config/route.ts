@@ -188,6 +188,7 @@ const PRICING_PROVIDER_ALIASES: Readonly<Record<string, string>> = {
 const OPTIONAL_PRICING_PROVIDER_KEYS = new Set([
   'openai-compatible',
   'gemini-compatible',
+  'local',
   'bailian',
   'siliconflow',
 ])

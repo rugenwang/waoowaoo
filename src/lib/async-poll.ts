@@ -48,7 +48,7 @@ function getErrorMessage(error: unknown): string {
  * 解析 externalId 获取 provider、type 和请求信息
  */
 export function parseExternalId(externalId: string): {
-    provider: 'FAL' | 'ARK' | 'GEMINI' | 'GOOGLE' | 'MINIMAX' | 'VIDU' | 'OPENAI' | 'OCOMPAT' | 'BAILIAN' | 'SILICONFLOW' | 'UNKNOWN'
+    provider: 'FAL' | 'ARK' | 'GEMINI' | 'GOOGLE' | 'MINIMAX' | 'VIDU' | 'OPENAI' | 'OCOMPAT' | 'BAILIAN' | 'SILICONFLOW' | 'LOCAL' | 'UNKNOWN'
     type: 'VIDEO' | 'IMAGE' | 'BATCH' | 'UNKNOWN'
     endpoint?: string
     requestId: string
@@ -210,9 +210,25 @@ export function parseExternalId(externalId: string): {
         }
     }
 
+    if (externalId.startsWith('LOCAL:')) {
+        const parts = externalId.split(':')
+        const type = parts[1]
+        const providerToken = parts[2]
+        const requestId = parts.slice(3).join(':')
+        if ((type !== 'VIDEO' && type !== 'IMAGE') || !providerToken || !requestId) {
+            throw new Error(`无效 LOCAL externalId: "${externalId}"，应为 LOCAL:TYPE:providerToken:taskId`)
+        }
+        return {
+            provider: 'LOCAL',
+            type: type as 'VIDEO' | 'IMAGE',
+            providerToken,
+            requestId,
+        }
+    }
+
     throw new Error(
         `无法识别的 externalId 格式: "${externalId}". ` +
-        `支持的格式: FAL:TYPE:endpoint:requestId, ARK:TYPE:requestId, GEMINI:BATCH:batchName, GOOGLE:VIDEO:operationName, MINIMAX:TYPE:taskId, VIDU:TYPE:taskId, OPENAI:VIDEO:providerToken:videoId, OCOMPAT:TYPE:providerToken:modelKeyToken:taskId, BAILIAN:TYPE:requestId, SILICONFLOW:TYPE:requestId`
+        `支持的格式: FAL:TYPE:endpoint:requestId, ARK:TYPE:requestId, GEMINI:BATCH:batchName, GOOGLE:VIDEO:operationName, MINIMAX:TYPE:taskId, VIDU:TYPE:taskId, OPENAI:VIDEO:providerToken:videoId, OCOMPAT:TYPE:providerToken:modelKeyToken:taskId, BAILIAN:TYPE:requestId, SILICONFLOW:TYPE:requestId, LOCAL:TYPE:providerToken:taskId`
     )
 }
 
@@ -252,9 +268,23 @@ export async function pollAsyncTask(
             return await pollBailianTask(parsed.requestId, userId)
         case 'SILICONFLOW':
             return await pollSiliconFlowTask(parsed.requestId)
+        case 'LOCAL':
+            return await pollLocalTask(parsed.type, parsed.requestId, userId, parsed.providerToken)
         default:
             // 🔥 移除 fallback：未知 provider 直接抛出错误
             throw new Error(`未知的 Provider: ${parsed.provider}`)
+    }
+}
+
+function decodeBase64UrlToken(token: string, errorCode: string): string {
+    const raw = token.trim()
+    if (!raw) throw new Error(errorCode)
+    try {
+        const decoded = Buffer.from(raw, 'base64url').toString('utf8').trim()
+        if (!decoded) throw new Error(errorCode)
+        return decoded
+    } catch {
+        throw new Error(errorCode)
     }
 }
 
@@ -306,6 +336,75 @@ function resolveOCompatModelKey(providerId: string, token: string): string {
         throw new Error('OCOMPAT_MODEL_KEY_TOKEN_INVALID')
     }
     return composed
+}
+
+async function pollLocalTask(
+    type: 'VIDEO' | 'IMAGE' | 'BATCH' | 'UNKNOWN',
+    taskId: string,
+    userId: string,
+    providerToken?: string,
+): Promise<PollResult> {
+    if (!providerToken) {
+        throw new Error('LOCAL_PROVIDER_TOKEN_MISSING')
+    }
+    const providerId = decodeBase64UrlToken(providerToken, 'LOCAL_PROVIDER_TOKEN_INVALID')
+    const config = await getProviderConfig(userId, providerId)
+    if (!config.baseUrl) {
+        throw new Error(`PROVIDER_BASE_URL_MISSING: ${config.id}`)
+    }
+
+    const baseUrl = config.baseUrl.replace(/\/+$/, '')
+    const pollUrl = `${baseUrl}/api/integrations/waoowaoo/v1/tasks/${encodeURIComponent(taskId)}`
+    const response = await fetch(pollUrl, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${config.apiKey}` },
+    })
+    const rawText = await response.text().catch(() => '')
+    if (!response.ok) {
+        return {
+            status: 'failed',
+            error: `LOCAL task poll failed: ${response.status} ${rawText.slice(0, 200)}`,
+        }
+    }
+
+    const payload = normalizeResponseJson(rawText) as Record<string, unknown>
+    const statusRaw = payload.status
+    const status = typeof statusRaw === 'string' ? statusRaw.trim().toLowerCase() : ''
+
+    if (status === 'pending' || status === 'processing' || status === 'queued' || status === 'in_progress') {
+        return { status: 'pending' }
+    }
+
+    if (status === 'failed' || status === 'canceled') {
+        const err = payload.error
+        const msg =
+            (typeof err === 'string' && err.trim())
+            || (typeof payload.message === 'string' && payload.message.trim())
+            || `LOCAL task failed: ${taskId}`
+        return { status: 'failed', error: msg }
+    }
+
+    if (status !== 'completed') {
+        return { status: 'pending' }
+    }
+
+    const result = (payload.result && typeof payload.result === 'object' ? payload.result as Record<string, unknown> : null)
+    const contentUrl = typeof result?.content_url === 'string' ? result.content_url.trim() : ''
+    if (!contentUrl) {
+        return { status: 'failed', error: 'LOCAL task completed but content_url missing' }
+    }
+
+    const resolved = contentUrl.startsWith('http') ? contentUrl : `${baseUrl}${contentUrl.startsWith('/') ? '' : '/'}${contentUrl}`
+    return {
+        status: 'completed',
+        resultUrl: resolved,
+        ...(type === 'VIDEO'
+            ? { videoUrl: resolved }
+            : { imageUrl: resolved }),
+        downloadHeaders: {
+            Authorization: `Bearer ${config.apiKey}`,
+        },
+    }
 }
 
 async function pollOCompatTask(

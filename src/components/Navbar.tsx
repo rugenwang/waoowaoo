@@ -10,6 +10,7 @@ import UpdateNoticeModal from './UpdateNoticeModal'
 import { useGithubReleaseUpdate } from '@/hooks/common/useGithubReleaseUpdate'
 import { Link } from '@/i18n/navigation'
 import { buildAuthenticatedHomeTarget } from '@/lib/home/default-route'
+import ConsoleOverlayButton from '@/components/console/ConsoleOverlay'
 
 
 export default function Navbar() {
@@ -126,6 +127,7 @@ export default function Navbar() {
                     {t('profile')}
                   </Link>
                   <LanguageSwitcher />
+                  <ConsoleOverlayButton />
                   <a
                     href={downloadLogsHref}
                     download

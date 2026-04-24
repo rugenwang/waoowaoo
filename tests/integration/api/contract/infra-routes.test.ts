@@ -73,6 +73,11 @@ describe('api contract - infra routes (behavior)', () => {
   it('infra route group exists', () => {
     expect(routes.map((entry) => entry.routeFile)).toEqual(expect.arrayContaining([
       'src/app/api/admin/download-logs/route.ts',
+      'src/app/api/console/local/sse/route.ts',
+      'src/app/api/console/local/tasks/route.ts',
+      'src/app/api/console/local/tasks/[taskId]/logs/route.ts',
+      'src/app/api/console/local/tasks/[taskId]/status/route.ts',
+      'src/app/api/console/local/tasks/[taskId]/sse/route.ts',
       'src/app/api/cos/image/route.ts',
       'src/app/api/files/[...path]/route.ts',
       'src/app/api/storage/sign/route.ts',

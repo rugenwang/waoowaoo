@@ -16,6 +16,8 @@ import {
 import { TaskTerminatedError } from '@/lib/task/errors'
 import { isTaskActive, trySetTaskExternalId } from '@/lib/task/service'
 import { type TaskJobData } from '@/lib/task/types'
+import { publishTaskStreamEvent } from '@/lib/task/publisher'
+import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { reportTaskProgress } from './shared'
 import { prisma } from '@/lib/prisma'
 
@@ -47,6 +49,27 @@ function scopedWorkerUtilLogger(job: Job<TaskJobData>, action: string) {
     projectId: job.data.projectId,
     userId: job.data.userId,
   })
+}
+
+function sanitizeGenerationOptionsForConsole(options: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(options)) {
+    if (k === 'referenceImages' && Array.isArray(v)) {
+      out.referenceImages = { count: v.length, omitted: true }
+      continue
+    }
+    if ((k === 'imageUrl' || k === 'lastFrameImageUrl') && typeof v === 'string') {
+      // 可能是 dataURL/base64，控制台里仅显示长度避免污染
+      out[k] = { length: v.length, omitted: true }
+      continue
+    }
+    if (typeof v === 'string' && v.length > 500) {
+      out[k] = `${v.slice(0, 500)}...(truncated ${v.length})`
+      continue
+    }
+    out[k] = v
+  }
+  return out
 }
 
 export function parseJsonArray(value: unknown): string[] {
@@ -165,6 +188,19 @@ export async function waitExternalResult(
   throw new Error(`External task polling timeout (${Math.round(timeoutMs / 1000)}s): ${externalId}`)
 }
 
+async function downloadToDataUrl(sourceUrl: string, downloadHeaders?: Record<string, string>): Promise<string> {
+  const response = await fetch(sourceUrl, {
+    method: 'GET',
+    headers: downloadHeaders,
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to download image: ${response.status}`)
+  }
+  const contentType = response.headers.get('content-type') || 'image/png'
+  const buffer = Buffer.from(await response.arrayBuffer())
+  return `data:${contentType};base64,${buffer.toString('base64')}`
+}
+
 export async function resolveImageSourceFromGeneration(
   job: Job<TaskJobData>,
   params: {
@@ -198,7 +234,9 @@ export async function resolveImageSourceFromGeneration(
         progressStart: params.pollProgress?.start ?? 40,
         progressEnd: params.pollProgress?.end ?? 92,
       })
-      return polled.url
+      return polled.downloadHeaders
+        ? await downloadToDataUrl(polled.url, polled.downloadHeaders)
+        : polled.url
     }
   }
 
@@ -233,6 +271,30 @@ export async function resolveImageSourceFromGeneration(
     },
   })
 
+  // 控制台可视化：记录请求参数/提示词（脱敏）
+  const parsedModel = parseModelKeyStrict(params.modelId)
+  await publishTaskStreamEvent({
+    taskId: job.data.taskId,
+    projectId: job.data.projectId,
+    userId: params.userId,
+    taskType: job.data.type,
+    targetType: job.data.targetType,
+    targetId: job.data.targetId,
+    episodeId: job.data.episodeId || null,
+    payload: {
+      kind: 'generator_request',
+      mediaType: 'image',
+      provider: parsedModel?.provider || null,
+      modelId: params.modelId,
+      prompt: params.prompt,
+      options: sanitizeGenerationOptionsForConsole({
+        ...(params.options || {}),
+        ...capabilityOptions,
+      }),
+    },
+    persist: true,
+  })
+
   const result = await withLogContext(
     { projectId: job.data.projectId, taskId: job.data.taskId, userId: params.userId },
     () => generateImage(params.userId, params.modelId, params.prompt, {
@@ -241,6 +303,22 @@ export async function resolveImageSourceFromGeneration(
     }),
   )
   if (!result.success) {
+    await publishTaskStreamEvent({
+      taskId: job.data.taskId,
+      projectId: job.data.projectId,
+      userId: params.userId,
+      taskType: job.data.type,
+      targetType: job.data.targetType,
+      targetId: job.data.targetId,
+      episodeId: job.data.episodeId || null,
+      payload: {
+        kind: 'generator_response',
+        mediaType: 'image',
+        ok: false,
+        error: result.error || 'Image generation failed',
+      },
+      persist: true,
+    })
     throw new Error(result.error || 'Image generation failed')
   }
 
@@ -250,6 +328,22 @@ export async function resolveImageSourceFromGeneration(
       provider: params.options?.provider || undefined,
       durationMs: Date.now() - startedAt,
     })
+    await publishTaskStreamEvent({
+      taskId: job.data.taskId,
+      projectId: job.data.projectId,
+      userId: params.userId,
+      taskType: job.data.type,
+      targetType: job.data.targetType,
+      targetId: job.data.targetId,
+      episodeId: job.data.episodeId || null,
+      payload: {
+        kind: 'generator_response',
+        mediaType: 'image',
+        ok: true,
+        mode: 'direct_url',
+      },
+      persist: true,
+    })
     return result.imageUrl
   }
   if (result.imageBase64) {
@@ -258,6 +352,23 @@ export async function resolveImageSourceFromGeneration(
       provider: params.options?.provider || undefined,
       durationMs: Date.now() - startedAt,
     })
+    await publishTaskStreamEvent({
+      taskId: job.data.taskId,
+      projectId: job.data.projectId,
+      userId: params.userId,
+      taskType: job.data.type,
+      targetType: job.data.targetType,
+      targetId: job.data.targetId,
+      episodeId: job.data.episodeId || null,
+      payload: {
+        kind: 'generator_response',
+        mediaType: 'image',
+        ok: true,
+        mode: 'base64',
+        base64Length: result.imageBase64.length,
+      },
+      persist: true,
+    })
     return `data:image/png;base64,${result.imageBase64}`
   }
 
@@ -265,6 +376,22 @@ export async function resolveImageSourceFromGeneration(
   if (!externalId) {
     throw new Error('Image generation returned no image and no external id')
   }
+
+  await publishTaskStreamEvent({
+    taskId: job.data.taskId,
+    projectId: job.data.projectId,
+    userId: params.userId,
+    taskType: job.data.type,
+    targetType: job.data.targetType,
+    targetId: job.data.targetId,
+    episodeId: job.data.episodeId || null,
+    payload: {
+      kind: 'generator_async_submitted',
+      mediaType: 'image',
+      externalId,
+    },
+    persist: true,
+  })
 
   const polled = await waitExternalResult(job, externalId, params.userId, {
     progressStart: params.pollProgress?.start ?? 40,
@@ -278,7 +405,24 @@ export async function resolveImageSourceFromGeneration(
       externalId,
     },
   })
-  return polled.url
+  await publishTaskStreamEvent({
+    taskId: job.data.taskId,
+    projectId: job.data.projectId,
+    userId: params.userId,
+    taskType: job.data.type,
+    targetType: job.data.targetType,
+    targetId: job.data.targetId,
+    episodeId: job.data.episodeId || null,
+    payload: {
+      kind: 'generator_async_completed',
+      mediaType: 'image',
+      externalId,
+    },
+    persist: true,
+  })
+  return polled.downloadHeaders
+    ? await downloadToDataUrl(polled.url, polled.downloadHeaders)
+    : polled.url
 }
 
 /**
@@ -324,6 +468,9 @@ export async function resolveImageSourcesFromGeneration(
         progressStart: params.pollProgress?.start ?? 40,
         progressEnd: params.pollProgress?.end ?? 92,
       })
+      if (polled.downloadHeaders) {
+        return [await downloadToDataUrl(polled.url, polled.downloadHeaders)]
+      }
       return [polled.url]
     }
   }
@@ -402,6 +549,9 @@ export async function resolveImageSourcesFromGeneration(
     durationMs: Date.now() - startedAt,
     details: { externalId },
   })
+  if (polled.downloadHeaders) {
+    return [await downloadToDataUrl(polled.url, polled.downloadHeaders)]
+  }
   return [polled.url]
 }
 
@@ -491,6 +641,30 @@ export async function resolveVideoSourceFromGeneration(
     providerRequestOptions[key] = value
   }
 
+  // 控制台可视化：记录请求参数/提示词（脱敏）
+  const parsedModel = parseModelKeyStrict(params.modelId)
+  await publishTaskStreamEvent({
+    taskId: job.data.taskId,
+    projectId: job.data.projectId,
+    userId: params.userId,
+    taskType: job.data.type,
+    targetType: job.data.targetType,
+    targetId: job.data.targetId,
+    episodeId: job.data.episodeId || null,
+    payload: {
+      kind: 'generator_request',
+      mediaType: 'video',
+      provider: parsedModel?.provider || null,
+      modelId: params.modelId,
+      prompt: params.options?.prompt || '',
+      options: sanitizeGenerationOptionsForConsole({
+        ...(providerRequestOptions || {}),
+        ...(providerCapabilityOptions || {}),
+      }),
+    },
+    persist: true,
+  })
+
   const result = await withLogContext(
     { projectId: job.data.projectId, taskId: job.data.taskId, userId: params.userId },
     () => generateVideo(params.userId, params.modelId, params.imageUrl, {
@@ -499,6 +673,22 @@ export async function resolveVideoSourceFromGeneration(
     }),
   )
   if (!result.success) {
+    await publishTaskStreamEvent({
+      taskId: job.data.taskId,
+      projectId: job.data.projectId,
+      userId: params.userId,
+      taskType: job.data.type,
+      targetType: job.data.targetType,
+      targetId: job.data.targetId,
+      episodeId: job.data.episodeId || null,
+      payload: {
+        kind: 'generator_response',
+        mediaType: 'video',
+        ok: false,
+        error: result.error || 'Video generation failed',
+      },
+      persist: true,
+    })
     throw new Error(result.error || 'Video generation failed')
   }
 
@@ -507,6 +697,22 @@ export async function resolveVideoSourceFromGeneration(
       message: 'video source generation completed',
       durationMs: Date.now() - startedAt,
     })
+    await publishTaskStreamEvent({
+      taskId: job.data.taskId,
+      projectId: job.data.projectId,
+      userId: params.userId,
+      taskType: job.data.type,
+      targetType: job.data.targetType,
+      targetId: job.data.targetId,
+      episodeId: job.data.episodeId || null,
+      payload: {
+        kind: 'generator_response',
+        mediaType: 'video',
+        ok: true,
+        mode: 'direct_url',
+      },
+      persist: true,
+    })
     return { url: result.videoUrl }
   }
 
@@ -514,6 +720,30 @@ export async function resolveVideoSourceFromGeneration(
   if (!externalId) {
     throw new Error('Video generation returned no video and no external id')
   }
+
+  // 控制台可视化：记录请求参数/提示词（脱敏）
+  await publishTaskStreamEvent({
+    taskId: job.data.taskId,
+    projectId: job.data.projectId,
+    userId: params.userId,
+    taskType: job.data.type,
+    targetType: job.data.targetType,
+    targetId: job.data.targetId,
+    episodeId: job.data.episodeId || null,
+    payload: {
+      kind: 'generator_async_submitted',
+      mediaType: 'video',
+      provider: parsedModel?.provider || null,
+      modelId: params.modelId,
+      prompt: params.options?.prompt || '',
+      options: sanitizeGenerationOptionsForConsole({
+        ...(providerRequestOptions || {}),
+        ...(providerCapabilityOptions || {}),
+      }),
+      externalId,
+    },
+    persist: true,
+  })
 
   const polled = await waitExternalResult(job, externalId, params.userId, {
     progressStart: params.pollProgress?.start ?? 45,
@@ -525,6 +755,22 @@ export async function resolveVideoSourceFromGeneration(
     details: {
       externalId,
     },
+  })
+  await publishTaskStreamEvent({
+    taskId: job.data.taskId,
+    projectId: job.data.projectId,
+    userId: params.userId,
+    taskType: job.data.type,
+    targetType: job.data.targetType,
+    targetId: job.data.targetId,
+    episodeId: job.data.episodeId || null,
+    payload: {
+      kind: 'generator_async_completed',
+      mediaType: 'video',
+      externalId,
+      ...(typeof polled.actualVideoTokens === 'number' ? { actualVideoTokens: polled.actualVideoTokens } : {}),
+    },
+    persist: true,
   })
   return {
     url: polled.url,

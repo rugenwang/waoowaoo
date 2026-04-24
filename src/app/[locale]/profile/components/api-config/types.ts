@@ -120,6 +120,7 @@ export const PRESET_MODELS: PresetModel[] = [
     { modelId: 'MiniMax-M2', name: 'MiniMax M2', type: 'llm', provider: 'minimax' },
 
     // 图像模型
+    { modelId: 'local/image', name: 'Local Image', type: 'image', provider: 'local' },
     { modelId: 'banana', name: 'Banana Pro', type: 'image', provider: 'fal' },
     { modelId: 'banana-2', name: 'Banana 2', type: 'image', provider: 'fal' },
     { modelId: 'doubao-seedream-4-5-251128', name: 'Seedream 4.5', type: 'image', provider: 'ark' },
@@ -133,6 +134,7 @@ export const PRESET_MODELS: PresetModel[] = [
     { modelId: 'imagen-4.0-ultra-generate-001', name: 'Imagen 4 Ultra', type: 'image', provider: 'google' },
     { modelId: 'imagen-4.0-fast-generate-001', name: 'Imagen 4 Fast', type: 'image', provider: 'google' },
     // 视频模型
+    { modelId: 'local/video', name: 'Local Video', type: 'video', provider: 'local' },
     { modelId: 'doubao-seedance-1-0-pro-fast-251015', name: 'Seedance 1.0 Pro Fast', type: 'video', provider: 'ark' },
     { modelId: 'doubao-seedance-1-0-lite-i2v-250428', name: 'Seedance 1.0 Lite', type: 'video', provider: 'ark' },
     { modelId: 'doubao-seedance-1-5-pro-251215', name: 'Seedance 1.5 Pro', type: 'video', provider: 'ark' },
@@ -198,6 +200,7 @@ export function isPresetComingSoonModelKey(modelKey: string): boolean {
 
 // 预设提供商（API Key 唯一归属于 provider id）
 export const PRESET_PROVIDERS: Omit<Provider, 'apiKey' | 'hasApiKey'>[] = [
+    { id: 'local', name: 'Local (ltx-2-mlx)', baseUrl: 'http://127.0.0.1:5566' },
     { id: 'ark', name: 'Volcengine Ark' },
     { id: 'google', name: 'Google AI Studio' },
     { id: 'bailian', name: 'Alibaba Bailian' },
@@ -298,6 +301,14 @@ export interface ProviderTutorial {
 // 厂商开通教程配置
 // 注意: text 字段使用 i18n key, 翻译在 apiConfig.tutorials 下
 export const PROVIDER_TUTORIALS: ProviderTutorial[] = [
+    {
+        providerId: 'local',
+        steps: [
+            {
+                text: 'local_step1'
+            }
+        ]
+    },
     {
         providerId: 'ark',
         steps: [

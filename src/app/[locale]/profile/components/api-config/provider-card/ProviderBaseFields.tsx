@@ -13,6 +13,8 @@ interface ProviderBaseFieldsProps {
 export function ProviderBaseFields({ provider, t, state }: ProviderBaseFieldsProps) {
   const baseUrlPlaceholder = (() => {
     switch (state.providerKey) {
+      case 'local':
+        return 'http://127.0.0.1:5566'
       case 'gemini-compatible':
         return 'https://your-api-domain.com'
       case 'openai-compatible':

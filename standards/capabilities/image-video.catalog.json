@@ -14,6 +14,41 @@
     }
   },
   {
+    "modelType": "image",
+    "provider": "local",
+    "modelId": "local/image",
+    "capabilities": {
+      "image": {
+        "resolutionOptions": [
+          "2K",
+          "4K"
+        ]
+      }
+    }
+  },
+  {
+    "modelType": "video",
+    "provider": "local",
+    "modelId": "local/video",
+    "capabilities": {
+      "video": {
+        "generationModeOptions": [
+          "normal"
+        ],
+        "durationOptions": [
+          4
+        ],
+        "resolutionOptions": [
+          "480p",
+          "720p",
+          "1080p"
+        ],
+        "firstlastframe": false,
+        "supportGenerateAudio": false
+      }
+    }
+  },
+  {
     "modelType": "video",
     "provider": "ark",
     "modelId": "doubao-seedance-2-0-260128",
