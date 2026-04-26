@@ -49,7 +49,7 @@ describe('worker utils task stream', () => {
     const job = {
       data: {
         taskId: 'task-1',
-        type: 'IMAGE_PANEL',
+        type: 'image_panel',
         projectId: 'project-1',
         userId: 'user-1',
         locale: 'zh',
@@ -81,4 +81,3 @@ describe('worker utils task stream', () => {
     }))
   })
 })
-

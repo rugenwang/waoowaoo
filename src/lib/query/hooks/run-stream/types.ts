@@ -65,6 +65,15 @@ export type UseRunStreamStateOptions<TParams extends Record<string, unknown>> = 
   buildRequestBody: (params: TParams) => Record<string, unknown>
   validateParams?: (params: TParams) => void
   resolveActiveRunId?: (context: { projectId: string; storageScopeKey?: string }) => Promise<string | null>
+  /**
+   * 控制 dev 环境的“恢复探测”轮询（/api/runs）。
+   * - true/undefined：启用（默认）
+   * - false：禁用（用于 A/B 排查 Next dev 内存持续增长）
+   *
+   * 也可用环境变量全局禁用：
+   *   NEXT_PUBLIC_DISABLE_RUN_RECOVERY_PROBE=1
+   */
+  recoveryProbeEnabled?: boolean
 }
 
 export type RunStreamView = {

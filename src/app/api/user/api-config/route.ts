@@ -191,6 +191,8 @@ const OPTIONAL_PRICING_PROVIDER_KEYS = new Set([
   'local',
   'bailian',
   'siliconflow',
+  // Custom vendor (no built-in pricing catalog yet)
+  'eeeapi',
 ])
 const OFFICIAL_ONLY_PROVIDER_KEYS = new Set(['bailian', 'siliconflow'])
 const RETIRED_PROVIDER_KEYS = new Set(['qwen'])

@@ -59,6 +59,8 @@ export async function generateImage(
         outputFormat?: string
         keepOriginalAspectRatio?: boolean  // 🔥 编辑时保持原图比例
         size?: string  // 🔥 直接指定像素尺寸如 "5016x3344"（优先于 aspectRatio）
+        // 允许透传 provider 特定参数 & 调试字段
+        [key: string]: unknown
     }
 ): Promise<GenerateResult> {
     const selection = await resolveModelSelection(userId, modelKey, 'image')

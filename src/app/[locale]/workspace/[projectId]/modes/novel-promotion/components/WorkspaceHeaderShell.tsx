@@ -51,6 +51,18 @@ interface WorkspaceHeaderShellProps {
   capabilityOverrides: CapabilitySelections
   videoRatio: string | null | undefined
   ttsRate: string | null | undefined
+  // 本地 local 图片模型（wo -> ltx）配置
+  localImageWidth: number
+  localImageHeight: number
+  localImageSteps: number
+  localT2IWidth: number
+  localT2IHeight: number
+  localT2ISteps: number
+  localI2IWidth: number
+  localI2IHeight: number
+  localI2ISteps: number
+  localStoryboardPromptRefineEnabled: boolean
+  localStoryboardPromptRefineLevel: 'conservative' | 'medium' | 'simple'
   onUpdateConfig: (key: string, value: unknown) => Promise<void>
   globalAssetText: string
   projectName: string
@@ -98,6 +110,17 @@ export default function WorkspaceHeaderShell({
   capabilityOverrides,
   videoRatio,
   ttsRate,
+  localImageWidth,
+  localImageHeight,
+  localImageSteps,
+  localT2IWidth,
+  localT2IHeight,
+  localT2ISteps,
+  localI2IWidth,
+  localI2IHeight,
+  localI2ISteps,
+  localStoryboardPromptRefineEnabled,
+  localStoryboardPromptRefineLevel,
   onUpdateConfig,
   globalAssetText,
   projectName,
@@ -137,6 +160,17 @@ export default function WorkspaceHeaderShell({
         videoRatio={videoRatio ?? undefined}
         capabilityOverrides={capabilityOverrides}
         ttsRate={ttsRate ?? undefined}
+        localImageWidth={localImageWidth}
+        localImageHeight={localImageHeight}
+        localImageSteps={localImageSteps}
+        localT2IWidth={localT2IWidth}
+        localT2IHeight={localT2IHeight}
+        localT2ISteps={localT2ISteps}
+        localI2IWidth={localI2IWidth}
+        localI2IHeight={localI2IHeight}
+        localI2ISteps={localI2ISteps}
+        localStoryboardPromptRefineEnabled={localStoryboardPromptRefineEnabled}
+        localStoryboardPromptRefineLevel={localStoryboardPromptRefineLevel}
         onArtStyleChange={(value) => { onUpdateConfig('artStyle', value) }}
         onAnalysisModelChange={(value) => { onUpdateConfig('analysisModel', value) }}
         onCharacterModelChange={(value) => { onUpdateConfig('characterModel', value) }}
@@ -148,6 +182,17 @@ export default function WorkspaceHeaderShell({
         onVideoRatioChange={(value) => { onUpdateConfig('videoRatio', value) }}
         onCapabilityOverridesChange={(value) => { onUpdateConfig('capabilityOverrides', value) }}
         onTTSRateChange={(value) => { onUpdateConfig('ttsRate', value) }}
+        onLocalImageWidthChange={(value) => { onUpdateConfig('localImageWidth', value) }}
+        onLocalImageHeightChange={(value) => { onUpdateConfig('localImageHeight', value) }}
+        onLocalImageStepsChange={(value) => { onUpdateConfig('localImageSteps', value) }}
+        onLocalT2IWidthChange={(value) => { onUpdateConfig('localT2IWidth', value) }}
+        onLocalT2IHeightChange={(value) => { onUpdateConfig('localT2IHeight', value) }}
+        onLocalT2IStepsChange={(value) => { onUpdateConfig('localT2ISteps', value) }}
+        onLocalI2IWidthChange={(value) => { onUpdateConfig('localI2IWidth', value) }}
+        onLocalI2IHeightChange={(value) => { onUpdateConfig('localI2IHeight', value) }}
+        onLocalI2IStepsChange={(value) => { onUpdateConfig('localI2ISteps', value) }}
+        onLocalStoryboardPromptRefineEnabledChange={(value) => { onUpdateConfig('localStoryboardPromptRefineEnabled', value) }}
+        onLocalStoryboardPromptRefineLevelChange={(value) => { onUpdateConfig('localStoryboardPromptRefineLevel', value) }}
       />
 
       <WorldContextModal

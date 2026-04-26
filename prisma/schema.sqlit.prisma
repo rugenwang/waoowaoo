@@ -252,6 +252,21 @@ model NovelPromotionProject {
   characterModel  String? // 用户配置的角色图片模型
   locationModel   String? // 用户配置的场景图片模型
   storyboardModel String? // 用户配置的分镜图片模型
+  // 本地 local 图片模型（wo -> ltx）配置：分辨率与步数（兼容旧字段）
+  localImageWidth  Int                     @default(1024)
+  localImageHeight Int                     @default(1024)
+  localImageSteps  Int                     @default(8)
+  // 新增：文生图（t2i）与图生图（i2i）分开配置
+  localT2IWidth  Int                       @default(1024)
+  localT2IHeight Int                       @default(1024)
+  localT2ISteps  Int                       @default(8)
+  localI2IWidth  Int                       @default(1024)
+  localI2IHeight Int                       @default(1024)
+  localI2ISteps  Int                       @default(8)
+  // 分镜生图 prompt 精炼：开启后先用文本模型把“长 prompt/JSON”压缩成简洁 prompt，再调用本地模型
+  localStoryboardPromptRefineEnabled Boolean @default(false)
+  // 'conservative' | 'medium' | 'simple'
+  localStoryboardPromptRefineLevel   String  @default("medium")
   editModel       String? // 用户配置的修图/编辑模型
   videoResolution String                    @default("720p")
   capabilityOverrides String?

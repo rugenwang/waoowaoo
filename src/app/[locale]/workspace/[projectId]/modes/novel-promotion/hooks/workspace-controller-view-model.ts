@@ -31,6 +31,17 @@ interface ProjectSnapshotInput {
   capabilityOverrides: CapabilitySelections
   ttsRate: string | number | undefined
   artStyle: string | undefined
+  localImageWidth: number
+  localImageHeight: number
+  localImageSteps: number
+  localT2IWidth: number
+  localT2IHeight: number
+  localT2ISteps: number
+  localI2IWidth: number
+  localI2IHeight: number
+  localI2ISteps: number
+  localStoryboardPromptRefineEnabled: boolean
+  localStoryboardPromptRefineLevel: 'conservative' | 'medium' | 'simple'
 }
 
 interface BuildWorkspaceControllerViewModelParams {

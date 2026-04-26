@@ -204,6 +204,7 @@ export const PRESET_PROVIDERS: Omit<Provider, 'apiKey' | 'hasApiKey'>[] = [
     { id: 'ark', name: 'Volcengine Ark' },
     { id: 'google', name: 'Google AI Studio' },
     { id: 'bailian', name: 'Alibaba Bailian' },
+    { id: 'eeeapi', name: 'EEE API', baseUrl: 'https://eeeapi.com' },
     { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1' },
     { id: 'minimax', name: 'MiniMax Hailuo', baseUrl: 'https://api.minimaxi.com/v1' },
     { id: 'vidu', name: 'Vidu' },
@@ -216,6 +217,7 @@ const ZH_PROVIDER_NAME_MAP: Record<string, string> = {
     vidu: '生数科技 Vidu',
     bailian: '阿里云百炼',
     siliconflow: '硅基流动',
+    eeeapi: 'EEE API',
 }
 
 function isZhLocale(locale?: string): boolean {

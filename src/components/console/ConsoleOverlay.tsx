@@ -353,7 +353,21 @@ function LtxConsole() {
       const line = typeof parsed === 'string' ? parsed : ev.data
       setLines((prev) => [...prev.slice(-1999), line])
     })
-    es.addEventListener('error', () => {})
+    // 既处理网络断开，也处理后端主动发送的 `event: error`
+    es.addEventListener('error', (ev: Event) => {
+      const maybe = ev as unknown as { data?: unknown }
+      const data = maybe?.data
+      if (typeof data === 'string' && data.trim()) {
+        const parsed = safeJsonParse(data)
+        const msg =
+          isRecord(parsed) && typeof parsed.message === 'string'
+            ? parsed.message
+            : data
+        setLines((prev) => [...prev.slice(-1999), `[ltx-proxy] ${msg}`])
+        return
+      }
+      setLines((prev) => [...prev.slice(-1999), '[ltx-proxy] EventSource 连接异常，正在自动重连...'])
+    })
     return () => es.close()
   }, [])
 

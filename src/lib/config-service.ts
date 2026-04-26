@@ -109,6 +109,18 @@ export interface ProjectModelConfig {
   artStyle: string | null
   capabilityDefaults: CapabilitySelections
   capabilityOverrides: CapabilitySelections
+  // wo -> ltx local image config（项目级）
+  localImageWidth: number
+  localImageHeight: number
+  localImageSteps: number
+  localT2IWidth: number
+  localT2IHeight: number
+  localT2ISteps: number
+  localI2IWidth: number
+  localI2IHeight: number
+  localI2ISteps: number
+  localStoryboardPromptRefineEnabled: boolean
+  localStoryboardPromptRefineLevel: 'conservative' | 'medium' | 'simple'
 }
 
 export interface UserModelConfig {
@@ -153,6 +165,33 @@ export async function getProjectModelConfig(
     prisma.userPreference.findUnique({ where: { userId } }),
   ])
 
+  // Prisma client type may lag behind schema changes until `prisma generate` is run.
+  // Read newly-added fields defensively to keep typecheck passing.
+  const rawProject = (projectData && typeof projectData === 'object')
+    ? (projectData as unknown as Record<string, unknown>)
+    : null
+  const localImageWidth = typeof rawProject?.localImageWidth === 'number' ? rawProject.localImageWidth : 1024
+  const localImageHeight = typeof rawProject?.localImageHeight === 'number' ? rawProject.localImageHeight : 1024
+  const localImageSteps = typeof rawProject?.localImageSteps === 'number' ? rawProject.localImageSteps : 8
+  const localT2IWidth = typeof rawProject?.localT2IWidth === 'number' ? rawProject.localT2IWidth : localImageWidth
+  const localT2IHeight = typeof rawProject?.localT2IHeight === 'number' ? rawProject.localT2IHeight : localImageHeight
+  const localT2ISteps = typeof rawProject?.localT2ISteps === 'number' ? rawProject.localT2ISteps : localImageSteps
+  const localI2IWidth = typeof rawProject?.localI2IWidth === 'number' ? rawProject.localI2IWidth : localImageWidth
+  const localI2IHeight = typeof rawProject?.localI2IHeight === 'number' ? rawProject.localI2IHeight : localImageHeight
+  const localI2ISteps = typeof rawProject?.localI2ISteps === 'number' ? rawProject.localI2ISteps : localImageSteps
+  const localStoryboardPromptRefineEnabled =
+    typeof rawProject?.localStoryboardPromptRefineEnabled === 'boolean'
+      ? rawProject.localStoryboardPromptRefineEnabled
+      : false
+  const localStoryboardPromptRefineLevelRaw =
+    typeof rawProject?.localStoryboardPromptRefineLevel === 'string' ? rawProject.localStoryboardPromptRefineLevel.trim() : ''
+  const localStoryboardPromptRefineLevel =
+    localStoryboardPromptRefineLevelRaw === 'conservative'
+    || localStoryboardPromptRefineLevelRaw === 'simple'
+    || localStoryboardPromptRefineLevelRaw === 'medium'
+      ? localStoryboardPromptRefineLevelRaw
+      : 'medium'
+
   return {
     analysisModel: extractModelKey(projectData?.analysisModel) || extractModelKey(userPref?.analysisModel) || null,
     characterModel: extractModelKey(projectData?.characterModel) || null,
@@ -165,6 +204,17 @@ export async function getProjectModelConfig(
     artStyle: projectData?.artStyle || null,
     capabilityDefaults: parseCapabilitySelections(userPref?.capabilityDefaults),
     capabilityOverrides: parseCapabilitySelections(projectData?.capabilityOverrides),
+    localImageWidth,
+    localImageHeight,
+    localImageSteps,
+    localT2IWidth,
+    localT2IHeight,
+    localT2ISteps,
+    localI2IWidth,
+    localI2IHeight,
+    localI2ISteps,
+    localStoryboardPromptRefineEnabled,
+    localStoryboardPromptRefineLevel,
   }
 }
 
@@ -225,15 +275,37 @@ export async function resolveProjectModelCapabilityGenerationOptions(input: {
   modelType: 'llm' | 'image' | 'video'
   modelKey: string
   runtimeSelections?: Record<string, CapabilityValue>
+  imageMode?: 't2i' | 'i2i'
 }): Promise<Record<string, CapabilityValue>> {
   const config = await getProjectModelConfig(input.projectId, input.userId)
-  return resolveModelCapabilityGenerationOptions({
+  const resolved = resolveModelCapabilityGenerationOptions({
     modelType: input.modelType,
     modelKey: input.modelKey,
     capabilityDefaults: config.capabilityDefaults,
     capabilityOverrides: config.capabilityOverrides,
     runtimeSelections: input.runtimeSelections,
   })
+
+  // wo -> ltx local image：按 t2i / i2i 注入项目级 width/height/steps（仅影响 local provider 的图片模型）
+  if (input.modelType === 'image') {
+    const parsed = parseModelKeyStrict(input.modelKey)
+    if (parsed?.provider === 'local') {
+      const mode = input.imageMode === 'i2i' ? 'i2i' : 't2i'
+      const width = mode === 'i2i' ? config.localI2IWidth : config.localT2IWidth
+      const height = mode === 'i2i' ? config.localI2IHeight : config.localT2IHeight
+      const steps = mode === 'i2i' ? config.localI2ISteps : config.localT2ISteps
+
+      // MLX/z-image 常见约束：尺寸建议为 64 的倍数；避免出现 reshape 维度不匹配（例如 1080x1920）
+      const snap64 = (v: number) => Math.max(64, Math.floor(v / 64) * 64)
+      return {
+        ...resolved,
+        size: `${snap64(width)}x${snap64(height)}`,
+        steps: Math.max(1, Math.min(200, Math.floor(steps))),
+      }
+    }
+  }
+
+  return resolved
 }
 
 /**

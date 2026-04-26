@@ -30,6 +30,7 @@ export function useRunStreamState<TParams extends Record<string, unknown>>(
     buildRequestBody,
     validateParams,
     resolveActiveRunId,
+    recoveryProbeEnabled,
   } = options
   const [runState, setRunState] = useState<RunState | null>(null)
   const runStateRef = useRef<RunState | null>(null)
@@ -59,9 +60,13 @@ export function useRunStreamState<TParams extends Record<string, unknown>>(
   }, [resolveActiveRunId])
 
   useEffect(() => {
+    const globalDisableProbe = process.env.NEXT_PUBLIC_DISABLE_RUN_RECOVERY_PROBE === '1'
+    const probeEnabled = !globalDisableProbe && recoveryProbeEnabled !== false
+
     if (!projectId || !resolveActiveRunIdRef.current) return
 
     if (runStateRef.current) return
+    if (!probeEnabled) return
 
     return startRecoveryProbe({
       projectId,
@@ -92,7 +97,7 @@ export function useRunStreamState<TParams extends Record<string, unknown>>(
         setIsRecoveredRunning(true)
       },
     })
-  }, [projectId, storageKey, storageScopeKey])
+  }, [projectId, storageKey, storageScopeKey, recoveryProbeEnabled])
 
   useEffect(() => {
     if (!projectId || !isRecoveredRunning || isLiveRunning) return

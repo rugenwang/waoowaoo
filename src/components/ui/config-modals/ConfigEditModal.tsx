@@ -54,6 +54,18 @@ interface SettingsModalProps {
     videoRatio?: string
     capabilityOverrides?: CapabilitySelections
     ttsRate?: string
+    // 本地 local 图片模型（wo -> ltx）配置
+    localImageWidth?: number
+    localImageHeight?: number
+    localImageSteps?: number
+    localT2IWidth?: number
+    localT2IHeight?: number
+    localT2ISteps?: number
+    localI2IWidth?: number
+    localI2IHeight?: number
+    localI2ISteps?: number
+    localStoryboardPromptRefineEnabled?: boolean
+    localStoryboardPromptRefineLevel?: 'conservative' | 'medium' | 'simple'
     onArtStyleChange?: (value: string) => void
     onAnalysisModelChange?: (value: string) => void
     onCharacterModelChange?: (value: string) => void
@@ -66,6 +78,17 @@ interface SettingsModalProps {
     onVideoRatioChange?: (value: string) => void
     onCapabilityOverridesChange?: (value: CapabilitySelections) => void
     onTTSRateChange?: (value: string) => void
+    onLocalImageWidthChange?: (value: number) => void
+    onLocalImageHeightChange?: (value: number) => void
+    onLocalImageStepsChange?: (value: number) => void
+    onLocalT2IWidthChange?: (value: number) => void
+    onLocalT2IHeightChange?: (value: number) => void
+    onLocalT2IStepsChange?: (value: number) => void
+    onLocalI2IWidthChange?: (value: number) => void
+    onLocalI2IHeightChange?: (value: number) => void
+    onLocalI2IStepsChange?: (value: number) => void
+    onLocalStoryboardPromptRefineEnabledChange?: (value: boolean) => void
+    onLocalStoryboardPromptRefineLevelChange?: (value: 'conservative' | 'medium' | 'simple') => void
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -138,6 +161,17 @@ export function SettingsModal({
     videoRatio = '9:16',
     capabilityOverrides,
     ttsRate,
+    localImageWidth,
+    localImageHeight,
+    localImageSteps,
+    localT2IWidth,
+    localT2IHeight,
+    localT2ISteps,
+    localI2IWidth,
+    localI2IHeight,
+    localI2ISteps,
+    localStoryboardPromptRefineEnabled,
+    localStoryboardPromptRefineLevel,
     onArtStyleChange,
     onAnalysisModelChange,
     onCharacterModelChange,
@@ -149,6 +183,17 @@ export function SettingsModal({
     onVideoRatioChange,
     onCapabilityOverridesChange,
     onTTSRateChange,
+    onLocalImageWidthChange,
+    onLocalImageHeightChange,
+    onLocalImageStepsChange,
+    onLocalT2IWidthChange,
+    onLocalT2IHeightChange,
+    onLocalT2IStepsChange,
+    onLocalI2IWidthChange,
+    onLocalI2IHeightChange,
+    onLocalI2IStepsChange,
+    onLocalStoryboardPromptRefineEnabledChange,
+    onLocalStoryboardPromptRefineLevelChange,
 }: SettingsModalProps) {
     const t = useTranslations('configModal')
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle')
@@ -216,6 +261,92 @@ export function SettingsModal({
         () => extractCapabilityFields(selectedStoryboardModelOption?.capabilities, 'image'),
         [selectedStoryboardModelOption],
     )
+
+    const isLocalImageModel = selectedStoryboardModelOption?.provider === 'local'
+    const fallbackWidth = typeof localImageWidth === 'number' ? localImageWidth : 1024
+    const fallbackHeight = typeof localImageHeight === 'number' ? localImageHeight : 1024
+    const fallbackSteps = typeof localImageSteps === 'number' ? localImageSteps : 8
+    const t2iWidth = typeof localT2IWidth === 'number' ? localT2IWidth : fallbackWidth
+    const t2iHeight = typeof localT2IHeight === 'number' ? localT2IHeight : fallbackHeight
+    const t2iSteps = typeof localT2ISteps === 'number' ? localT2ISteps : fallbackSteps
+    const i2iWidth = typeof localI2IWidth === 'number' ? localI2IWidth : fallbackWidth
+    const i2iHeight = typeof localI2IHeight === 'number' ? localI2IHeight : fallbackHeight
+    const i2iSteps = typeof localI2ISteps === 'number' ? localI2ISteps : fallbackSteps
+    const promptRefineEnabled = localStoryboardPromptRefineEnabled === true
+    const promptRefineLevel: 'conservative' | 'medium' | 'simple' =
+        localStoryboardPromptRefineLevel === 'conservative'
+        || localStoryboardPromptRefineLevel === 'simple'
+        || localStoryboardPromptRefineLevel === 'medium'
+            ? localStoryboardPromptRefineLevel
+            : 'medium'
+
+    // 直接把 input 的 value 绑定到 props（并且 onChange 立刻写入数据库）会导致：
+    // - 用户输入中间态（比如先输入 1、再输入 1024）会被后端校验/默认值“回弹”
+    // - Number('') / Number('1') 这种中间值也会触发保存，UI 看起来“变来变去”
+    // 所以这里用本地草稿值：onChange 只更新草稿，onBlur/Enter 时再提交。
+    const [t2iWidthDraft, setT2IWidthDraft] = useState<string>(String(t2iWidth))
+    const [t2iHeightDraft, setT2IHeightDraft] = useState<string>(String(t2iHeight))
+    const [t2iStepsDraft, setT2IStepsDraft] = useState<string>(String(t2iSteps))
+    const [i2iWidthDraft, setI2IWidthDraft] = useState<string>(String(i2iWidth))
+    const [i2iHeightDraft, setI2IHeightDraft] = useState<string>(String(i2iHeight))
+    const [i2iStepsDraft, setI2IStepsDraft] = useState<string>(String(i2iSteps))
+    const [promptRefineEnabledDraft, setPromptRefineEnabledDraft] = useState<boolean>(promptRefineEnabled)
+    const [promptRefineLevelDraft, setPromptRefineLevelDraft] = useState<'conservative' | 'medium' | 'simple'>(promptRefineLevel)
+
+    useEffect(() => {
+        if (!isOpen) return
+        // 打开弹窗时同步一次；切换到 local 模型时也同步一次
+        setT2IWidthDraft(String(t2iWidth))
+        setT2IHeightDraft(String(t2iHeight))
+        setT2IStepsDraft(String(t2iSteps))
+        setI2IWidthDraft(String(i2iWidth))
+        setI2IHeightDraft(String(i2iHeight))
+        setI2IStepsDraft(String(i2iSteps))
+        setPromptRefineEnabledDraft(promptRefineEnabled)
+        setPromptRefineLevelDraft(promptRefineLevel)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, isLocalImageModel])
+
+    const clampInt = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+    const snap64 = (value: number) => Math.max(64, Math.floor(value / 64) * 64)
+
+    const commitT2IWidth = () => {
+        const n = parseInt(t2iWidthDraft, 10)
+        if (Number.isFinite(n)) onLocalT2IWidthChange?.(snap64(clampInt(n, 64, 4096)))
+        else setT2IWidthDraft(String(t2iWidth))
+    }
+    const commitT2IHeight = () => {
+        const n = parseInt(t2iHeightDraft, 10)
+        if (Number.isFinite(n)) onLocalT2IHeightChange?.(snap64(clampInt(n, 64, 4096)))
+        else setT2IHeightDraft(String(t2iHeight))
+    }
+    const commitT2ISteps = () => {
+        const n = parseInt(t2iStepsDraft, 10)
+        if (Number.isFinite(n)) onLocalT2IStepsChange?.(clampInt(n, 1, 200))
+        else setT2IStepsDraft(String(t2iSteps))
+    }
+    const commitI2IWidth = () => {
+        const n = parseInt(i2iWidthDraft, 10)
+        if (Number.isFinite(n)) onLocalI2IWidthChange?.(snap64(clampInt(n, 64, 4096)))
+        else setI2IWidthDraft(String(i2iWidth))
+    }
+    const commitI2IHeight = () => {
+        const n = parseInt(i2iHeightDraft, 10)
+        if (Number.isFinite(n)) onLocalI2IHeightChange?.(snap64(clampInt(n, 64, 4096)))
+        else setI2IHeightDraft(String(i2iHeight))
+    }
+    const commitI2ISteps = () => {
+        const n = parseInt(i2iStepsDraft, 10)
+        if (Number.isFinite(n)) onLocalI2IStepsChange?.(clampInt(n, 1, 200))
+        else setI2IStepsDraft(String(i2iSteps))
+    }
+
+    const commitPromptRefineEnabled = () => {
+        onLocalStoryboardPromptRefineEnabledChange?.(promptRefineEnabledDraft)
+    }
+    const commitPromptRefineLevel = () => {
+        onLocalStoryboardPromptRefineLevelChange?.(promptRefineLevelDraft)
+    }
     const editCapabilityFields = useMemo(
         () => extractCapabilityFields(selectedEditModelOption?.capabilities, 'image'),
         [selectedEditModelOption],
@@ -453,6 +584,181 @@ export function SettingsModal({
                                     }}
                                 />
                             </div>
+
+                            {isLocalImageModel ? (
+                                <div className="space-y-2 md:col-span-2">
+                                    <div className="rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-4">
+                                        <div className="text-sm font-medium text-[var(--glass-text-secondary)]">{t('localImageTitle')}</div>
+                                        <div className="mt-3 space-y-4">
+                                            <div>
+                                                <div className="text-xs font-medium text-[var(--glass-text-tertiary)]">{t('localT2ITitle')}</div>
+                                                <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                    <div>
+                                                        <label className="text-xs text-[var(--glass-text-tertiary)]">{t('localImageWidth')}</label>
+                                                        <input
+                                                            type="number"
+                                                            className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm"
+                                                            value={t2iWidthDraft}
+                                                            min={64}
+                                                            max={4096}
+                                                            step={1}
+                                                            onChange={(e) => setT2IWidthDraft(e.target.value)}
+                                                            onBlur={commitT2IWidth}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    commitT2IWidth()
+                                                                    ;(e.currentTarget as HTMLInputElement).blur()
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs text-[var(--glass-text-tertiary)]">{t('localImageHeight')}</label>
+                                                        <input
+                                                            type="number"
+                                                            className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm"
+                                                            value={t2iHeightDraft}
+                                                            min={64}
+                                                            max={4096}
+                                                            step={1}
+                                                            onChange={(e) => setT2IHeightDraft(e.target.value)}
+                                                            onBlur={commitT2IHeight}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    commitT2IHeight()
+                                                                    ;(e.currentTarget as HTMLInputElement).blur()
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs text-[var(--glass-text-tertiary)]">{t('localImageSteps')}</label>
+                                                        <input
+                                                            type="number"
+                                                            className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm"
+                                                            value={t2iStepsDraft}
+                                                            min={1}
+                                                            max={200}
+                                                            step={1}
+                                                            onChange={(e) => setT2IStepsDraft(e.target.value)}
+                                                            onBlur={commitT2ISteps}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    commitT2ISteps()
+                                                                    ;(e.currentTarget as HTMLInputElement).blur()
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <div className="text-xs font-medium text-[var(--glass-text-tertiary)]">{t('localI2ITitle')}</div>
+                                                <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                    <div>
+                                                        <label className="text-xs text-[var(--glass-text-tertiary)]">{t('localImageWidth')}</label>
+                                                        <input
+                                                            type="number"
+                                                            className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm"
+                                                            value={i2iWidthDraft}
+                                                            min={64}
+                                                            max={4096}
+                                                            step={1}
+                                                            onChange={(e) => setI2IWidthDraft(e.target.value)}
+                                                            onBlur={commitI2IWidth}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    commitI2IWidth()
+                                                                    ;(e.currentTarget as HTMLInputElement).blur()
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs text-[var(--glass-text-tertiary)]">{t('localImageHeight')}</label>
+                                                        <input
+                                                            type="number"
+                                                            className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm"
+                                                            value={i2iHeightDraft}
+                                                            min={64}
+                                                            max={4096}
+                                                            step={1}
+                                                            onChange={(e) => setI2IHeightDraft(e.target.value)}
+                                                            onBlur={commitI2IHeight}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    commitI2IHeight()
+                                                                    ;(e.currentTarget as HTMLInputElement).blur()
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs text-[var(--glass-text-tertiary)]">{t('localImageSteps')}</label>
+                                                        <input
+                                                            type="number"
+                                                            className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm"
+                                                            value={i2iStepsDraft}
+                                                            min={1}
+                                                            max={200}
+                                                            step={1}
+                                                            onChange={(e) => setI2IStepsDraft(e.target.value)}
+                                                            onBlur={commitI2ISteps}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    commitI2ISteps()
+                                                                    ;(e.currentTarget as HTMLInputElement).blur()
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="pt-2 border-t border-[var(--glass-stroke-base)]">
+                                                <div className="text-xs font-medium text-[var(--glass-text-tertiary)]">{t('localPromptRefineTitle')}</div>
+                                                <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                                                    <label className="flex items-center gap-2 text-sm text-[var(--glass-text-secondary)]">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={promptRefineEnabledDraft}
+                                                            onChange={(e) => {
+                                                                setPromptRefineEnabledDraft(e.target.checked)
+                                                                // 立即提交，避免用户忘记点失焦
+                                                                onLocalStoryboardPromptRefineEnabledChange?.(e.target.checked)
+                                                            }}
+                                                        />
+                                                        {t('localPromptRefineEnabled')}
+                                                    </label>
+                                                    <div className="md:col-span-2">
+                                                        <label className="text-xs text-[var(--glass-text-tertiary)]">{t('localPromptRefineLevel')}</label>
+                                                        <select
+                                                            className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm"
+                                                            value={promptRefineLevelDraft}
+                                                            onChange={(e) => {
+                                                                const v = e.target.value as 'conservative' | 'medium' | 'simple'
+                                                                setPromptRefineLevelDraft(v)
+                                                                onLocalStoryboardPromptRefineLevelChange?.(v)
+                                                            }}
+                                                        >
+                                                            <option value="conservative">{t('localPromptRefineLevelConservative')}</option>
+                                                            <option value="medium">{t('localPromptRefineLevelMedium')}</option>
+                                                            <option value="simple">{t('localPromptRefineLevelSimple')}</option>
+                                                        </select>
+                                                        <div className="mt-1 text-xs text-[var(--glass-text-tertiary)]">
+                                                            {t('localPromptRefineHint')}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="mt-2 text-xs text-[var(--glass-text-tertiary)]">
+                                            {t('localImageHint')}
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
 
                             <div className="space-y-2">
                                 <label className="text-sm font-medium text-[var(--glass-text-secondary)]">{t('editModel')}</label>

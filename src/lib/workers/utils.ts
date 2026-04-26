@@ -18,6 +18,7 @@ import { isTaskActive, trySetTaskExternalId } from '@/lib/task/service'
 import { type TaskJobData } from '@/lib/task/types'
 import { publishTaskStreamEvent } from '@/lib/task/publisher'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
+import { getProviderConfig } from '@/lib/api-config'
 import { reportTaskProgress } from './shared'
 import { prisma } from '@/lib/prisma'
 
@@ -252,6 +253,8 @@ export async function resolveImageSourceFromGeneration(
   if (typeof params.options?.resolution === 'string') {
     runtimeSelections.resolution = params.options.resolution
   }
+  const imageMode: 't2i' | 'i2i' =
+    (params.options?.referenceImages?.length || 0) > 0 ? 'i2i' : 't2i'
 
   const capabilityOptions = await resolveProjectModelCapabilityGenerationOptions({
     projectId: job.data.projectId,
@@ -259,6 +262,7 @@ export async function resolveImageSourceFromGeneration(
     modelType: 'image',
     modelKey: params.modelId,
     runtimeSelections,
+    imageMode,
   })
 
   logger.info({
@@ -273,6 +277,45 @@ export async function resolveImageSourceFromGeneration(
 
   // 控制台可视化：记录请求参数/提示词（脱敏）
   const parsedModel = parseModelKeyStrict(params.modelId)
+  const truncateText = (value: unknown, max = 3000) => {
+    const text = typeof value === 'string' ? value : String(value ?? '')
+    if (text.length <= max) return text
+    return `${text.slice(0, max)}…(truncated)`
+  }
+  const providerKey = (parsedModel?.provider || '').trim()
+  const eeeapiRequest = providerKey === 'eeeapi'
+    ? await (async () => {
+        try {
+          const providerConfig = await getProviderConfig(params.userId, parsedModel?.provider || 'eeeapi')
+          const baseUrlRaw = typeof providerConfig.baseUrl === 'string'
+            ? providerConfig.baseUrl.trim().replace(/\/+$/, '')
+            : ''
+          const endpoint = baseUrlRaw
+            ? (baseUrlRaw.endsWith('/v1') ? `${baseUrlRaw}/images/generations` : `${baseUrlRaw}/v1/images/generations`)
+            : 'https://eeeapi.com/v1/images/generations'
+          const optAny = (params.options || {}) as Record<string, unknown>
+          const size = (typeof optAny.size === 'string' && optAny.size.trim())
+            ? optAny.size.trim()
+            : (typeof (capabilityOptions as Record<string, unknown>)?.size === 'string'
+              ? String((capabilityOptions as Record<string, unknown>).size)
+              : '1024x1024')
+          const n = (typeof optAny.n === 'number' && Number.isFinite(optAny.n)) ? Math.max(1, Math.floor(optAny.n)) : 1
+          return {
+            endpoint,
+            body: {
+              model: parsedModel?.modelId || 'gpt-image-1',
+              prompt: truncateText(params.prompt, 3000),
+              n,
+              size,
+            },
+            promptLength: typeof params.prompt === 'string' ? params.prompt.length : 0,
+            referenceImagesCount: params.options?.referenceImages?.length ?? 0,
+          }
+        } catch {
+          return null
+        }
+      })()
+    : null
   await publishTaskStreamEvent({
     taskId: job.data.taskId,
     projectId: job.data.projectId,
@@ -291,6 +334,7 @@ export async function resolveImageSourceFromGeneration(
         ...(params.options || {}),
         ...capabilityOptions,
       }),
+      ...(eeeapiRequest ? { eeeapiRequest } : null),
     },
     persist: true,
   })
@@ -300,6 +344,14 @@ export async function resolveImageSourceFromGeneration(
     () => generateImage(params.userId, params.modelId, params.prompt, {
       ...params.options,
       ...capabilityOptions,
+      // 仅用于调试：让具体 provider 实现可以把最终请求记录到 task stream（不会透传到外部 API）
+      __debugTaskId: job.data.taskId,
+      __debugProjectId: job.data.projectId,
+      __debugTaskType: job.data.type,
+      __debugTargetType: job.data.targetType,
+      __debugTargetId: job.data.targetId,
+      __debugEpisodeId: job.data.episodeId || null,
+      __debugPublishProviderRequest: true,
     }),
   )
   if (!result.success) {

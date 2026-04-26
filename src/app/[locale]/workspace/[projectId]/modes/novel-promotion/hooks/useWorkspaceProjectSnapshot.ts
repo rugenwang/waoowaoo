@@ -46,6 +46,34 @@ export function useWorkspaceProjectSnapshot({
       capabilityOverrides,
       ttsRate: projectData?.ttsRate,
       artStyle: projectData?.artStyle,
+      localImageWidth: typeof projectData?.localImageWidth === 'number' ? projectData.localImageWidth : 1024,
+      localImageHeight: typeof projectData?.localImageHeight === 'number' ? projectData.localImageHeight : 1024,
+      localImageSteps: typeof projectData?.localImageSteps === 'number' ? projectData.localImageSteps : 8,
+      localT2IWidth: typeof projectData?.localT2IWidth === 'number'
+        ? projectData.localT2IWidth
+        : (typeof projectData?.localImageWidth === 'number' ? projectData.localImageWidth : 1024),
+      localT2IHeight: typeof projectData?.localT2IHeight === 'number'
+        ? projectData.localT2IHeight
+        : (typeof projectData?.localImageHeight === 'number' ? projectData.localImageHeight : 1024),
+      localT2ISteps: typeof projectData?.localT2ISteps === 'number'
+        ? projectData.localT2ISteps
+        : (typeof projectData?.localImageSteps === 'number' ? projectData.localImageSteps : 8),
+      localI2IWidth: typeof projectData?.localI2IWidth === 'number'
+        ? projectData.localI2IWidth
+        : (typeof projectData?.localImageWidth === 'number' ? projectData.localImageWidth : 1024),
+      localI2IHeight: typeof projectData?.localI2IHeight === 'number'
+        ? projectData.localI2IHeight
+        : (typeof projectData?.localImageHeight === 'number' ? projectData.localImageHeight : 1024),
+      localI2ISteps: typeof projectData?.localI2ISteps === 'number'
+        ? projectData.localI2ISteps
+        : (typeof projectData?.localImageSteps === 'number' ? projectData.localImageSteps : 8),
+      localStoryboardPromptRefineEnabled: projectData?.localStoryboardPromptRefineEnabled === true,
+      localStoryboardPromptRefineLevel:
+        projectData?.localStoryboardPromptRefineLevel === 'conservative'
+        || projectData?.localStoryboardPromptRefineLevel === 'simple'
+        || projectData?.localStoryboardPromptRefineLevel === 'medium'
+          ? projectData.localStoryboardPromptRefineLevel
+          : 'medium',
     }
   }, [episode?.novelText, episode?.storyboards, project.novelPromotionData, urlStage])
 }

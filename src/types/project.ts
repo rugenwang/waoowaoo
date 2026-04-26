@@ -257,6 +257,18 @@ export interface NovelPromotionProject {
   workflowMode: WorkflowMode  // 新增：工作流模式
   artStyle: string
   artStylePrompt: string | null
+  // 本地 local 图片模型（wo -> ltx）配置
+  localImageWidth?: number
+  localImageHeight?: number
+  localImageSteps?: number
+  localT2IWidth?: number
+  localT2IHeight?: number
+  localT2ISteps?: number
+  localI2IWidth?: number
+  localI2IHeight?: number
+  localI2ISteps?: number
+  localStoryboardPromptRefineEnabled?: boolean
+  localStoryboardPromptRefineLevel?: 'conservative' | 'medium' | 'simple'
   audioUrl: string | null
   media?: MediaRef | null
   srtContent: string | null

@@ -41,6 +41,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
+function normalizeIntField(input: unknown, field: string, opts: { min: number; max: number }): number {
+  if (typeof input !== 'number' || !Number.isFinite(input)) {
+    throw new ApiError('INVALID_PARAMS', { code: 'INVALID_NUMBER', field })
+  }
+  const value = Math.trunc(input)
+  if (value < opts.min || value > opts.max) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'INVALID_NUMBER_RANGE',
+      field,
+      message: `must be between ${opts.min} and ${opts.max}`,
+    })
+  }
+  return value
+}
+
 function normalizeCapabilitySelectionsInput(
   raw: unknown,
   options?: { allowLegacyAspectRatio?: boolean },
@@ -295,6 +310,13 @@ export const PATCH = apiHandler(async (
     'analysisModel', 'characterModel', 'locationModel', 'storyboardModel',
     'editModel', 'videoModel', 'audioModel', 'videoRatio', 'artStyle',
     'ttsRate', 'lipSyncEnabled', 'lipSyncMode', 'capabilityOverrides',
+    // wo -> ltx local image config
+    'localImageWidth', 'localImageHeight', 'localImageSteps',
+    // wo -> ltx local image config (split)
+    'localT2IWidth', 'localT2IHeight', 'localT2ISteps',
+    'localI2IWidth', 'localI2IHeight', 'localI2ISteps',
+    // prompt refine (local storyboard image)
+    'localStoryboardPromptRefineEnabled', 'localStoryboardPromptRefineLevel',
   ] as const
 
   const updateData: Record<string, unknown> = {}
@@ -316,6 +338,60 @@ export const PATCH = apiHandler(async (
       const cleanedOverrides = sanitizeCapabilityOverrides(overrides, modelContextMap)
       validateCapabilityOverrides(cleanedOverrides, modelContextMap)
       updateData.capabilityOverrides = serializeCapabilitySelections(cleanedOverrides)
+      continue
+    }
+
+    if (field === 'localImageWidth') {
+      updateData.localImageWidth = normalizeIntField(body[field], field, { min: 64, max: 4096 })
+      continue
+    }
+    if (field === 'localImageHeight') {
+      updateData.localImageHeight = normalizeIntField(body[field], field, { min: 64, max: 4096 })
+      continue
+    }
+    if (field === 'localImageSteps') {
+      updateData.localImageSteps = normalizeIntField(body[field], field, { min: 1, max: 200 })
+      continue
+    }
+    if (field === 'localT2IWidth') {
+      updateData.localT2IWidth = normalizeIntField(body[field], field, { min: 64, max: 4096 })
+      continue
+    }
+    if (field === 'localT2IHeight') {
+      updateData.localT2IHeight = normalizeIntField(body[field], field, { min: 64, max: 4096 })
+      continue
+    }
+    if (field === 'localT2ISteps') {
+      updateData.localT2ISteps = normalizeIntField(body[field], field, { min: 1, max: 200 })
+      continue
+    }
+    if (field === 'localI2IWidth') {
+      updateData.localI2IWidth = normalizeIntField(body[field], field, { min: 64, max: 4096 })
+      continue
+    }
+    if (field === 'localI2IHeight') {
+      updateData.localI2IHeight = normalizeIntField(body[field], field, { min: 64, max: 4096 })
+      continue
+    }
+    if (field === 'localI2ISteps') {
+      updateData.localI2ISteps = normalizeIntField(body[field], field, { min: 1, max: 200 })
+      continue
+    }
+    if (field === 'localStoryboardPromptRefineEnabled') {
+      const raw = body[field]
+      if (typeof raw !== 'boolean') {
+        throw new ApiError('INVALID_PARAMS', { code: 'INVALID_BOOLEAN', field })
+      }
+      updateData.localStoryboardPromptRefineEnabled = raw
+      continue
+    }
+    if (field === 'localStoryboardPromptRefineLevel') {
+      const raw = body[field]
+      const value = typeof raw === 'string' ? raw.trim() : ''
+      if (value !== 'conservative' && value !== 'medium' && value !== 'simple') {
+        throw new ApiError('INVALID_PARAMS', { code: 'INVALID_ENUM', field })
+      }
+      updateData.localStoryboardPromptRefineLevel = value
       continue
     }
 

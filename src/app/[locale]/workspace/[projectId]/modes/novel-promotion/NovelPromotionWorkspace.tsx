@@ -94,6 +94,17 @@ function NovelPromotionWorkspaceContent(props: NovelPromotionWorkspaceProps) {
         capabilityOverrides={vm.project.capabilityOverrides}
         videoRatio={vm.project.videoRatio}
         ttsRate={vm.project.ttsRate !== undefined && vm.project.ttsRate !== null ? String(vm.project.ttsRate) : undefined}
+        localImageWidth={vm.project.localImageWidth}
+        localImageHeight={vm.project.localImageHeight}
+        localImageSteps={vm.project.localImageSteps}
+        localT2IWidth={vm.project.localT2IWidth}
+        localT2IHeight={vm.project.localT2IHeight}
+        localT2ISteps={vm.project.localT2ISteps}
+        localI2IWidth={vm.project.localI2IWidth}
+        localI2IHeight={vm.project.localI2IHeight}
+        localI2ISteps={vm.project.localI2ISteps}
+        localStoryboardPromptRefineEnabled={vm.project.localStoryboardPromptRefineEnabled}
+        localStoryboardPromptRefineLevel={vm.project.localStoryboardPromptRefineLevel}
         onUpdateConfig={vm.actions.handleUpdateConfig}
         globalAssetText={vm.project.globalAssetText}
         projectName={project.name}

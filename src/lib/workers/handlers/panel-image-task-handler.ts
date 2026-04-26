@@ -24,6 +24,8 @@ import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
 import {
   parseLocationAvailableSlots,
 } from '@/lib/location-available-slots'
+import { executeAiTextStep } from '@/lib/ai-runtime/client'
+import { parseModelKeyStrict } from '@/lib/model-config-contract'
 
 function parseJsonUnknown(raw: string | null | undefined): unknown | null {
   if (!raw) return null
@@ -157,6 +159,16 @@ function buildPanelPrompt(params: {
   })
 }
 
+function cleanupRefinedPrompt(raw: string): string {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  // 去掉可能的 code fence 或多余引号
+  const noFence = text.replace(/^```[\s\S]*?\n/, '').replace(/```$/, '').trim()
+  const unquoted = noFence.replace(/^["'“”]+/, '').replace(/["'“”]+$/, '').trim()
+  // 防止输出过长影响本地模型（保守截断）
+  return unquoted.length > 1200 ? unquoted.slice(0, 1200) : unquoted
+}
+
 export async function handlePanelImageTask(job: Job<TaskJobData>) {
   const payload = (job.data.payload || {}) as AnyObj
   const panelId = pickFirstString(payload.panelId, job.data.targetId)
@@ -228,10 +240,66 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     sourceText: panel.srtSegment || panel.description || '',
     contextJson,
   })
+
+  // 可选：本地模型前先用文本模型精炼 prompt（把 JSON/规则压成一条更适合本地模型的提示词）
+  const parsedStoryboardModel = parseModelKeyStrict(modelKey)
+  const shouldRefinePrompt =
+    parsedStoryboardModel?.provider === 'local'
+    && modelConfig.localStoryboardPromptRefineEnabled === true
+    && !!modelConfig.analysisModel
+
+  const finalPrompt = shouldRefinePrompt ? await (async () => {
+    try {
+      const strength = modelConfig.localStoryboardPromptRefineLevel || 'medium'
+      const refineUserPrompt = buildPrompt({
+        promptId: PROMPT_IDS.NP_STORYBOARD_PROMPT_REFINE,
+        locale: job.data.locale,
+        variables: {
+          aspect_ratio: aspectRatio,
+          storyboard_text_json_input: contextJson,
+          source_text: panel.srtSegment || panel.description || '无',
+          style: artStyle || '与参考图风格一致',
+          strength,
+          reference_images_count: String(normalizedRefs.length),
+        },
+      })
+
+      const res = await executeAiTextStep({
+        userId: job.data.userId,
+        projectId: job.data.projectId,
+        model: modelConfig.analysisModel!,
+        action: 'NP_STORYBOARD_PROMPT_REFINE',
+        meta: {
+          stepId: 'np_storyboard_prompt_refine',
+          stepTitle: 'storyboard_prompt_refine',
+          stepIndex: 1,
+          stepTotal: 1,
+          stepAttempt: 1,
+        },
+        reasoning: false,
+        temperature: 0.2,
+        messages: [
+          { role: 'user', content: refineUserPrompt },
+        ],
+      })
+
+      const refined = cleanupRefinedPrompt(res.text)
+      return refined || prompt
+    } catch (err) {
+      logger.warn({
+        message: 'storyboard prompt refine failed, fallback to original prompt',
+        details: { error: String(err) },
+      })
+      return prompt
+    }
+  })() : prompt
+
   logger.info({
     message: 'panel image prompt resolved',
     details: {
-      promptLength: prompt.length,
+      promptLength: finalPrompt.length,
+      promptRefined: shouldRefinePrompt,
+      promptRefineLevel: modelConfig.localStoryboardPromptRefineLevel || null,
     },
   })
 
@@ -246,7 +314,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     const source = await resolveImageSourceFromGeneration(job, {
       userId: job.data.userId,
       modelId: modelKey,
-      prompt,
+      prompt: finalPrompt,
       options: {
         referenceImages: normalizedRefs,
         aspectRatio,
