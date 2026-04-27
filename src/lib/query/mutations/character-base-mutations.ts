@@ -112,7 +112,10 @@ function removeCharacterFromProject(
 export function useGenerateProjectCharacterImage(projectId: string) {
     const queryClient = useQueryClient()
     const invalidateProjectAssets = () =>
-        invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+        invalidateQueryTemplates(queryClient, [
+            queryKeys.projectAssets.all(projectId),
+            queryKeys.assets.all('project', projectId),
+        ])
 
     return useMutation({
         mutationFn: async ({
@@ -162,7 +165,10 @@ export function useGenerateProjectCharacterImage(projectId: string) {
 export function useUploadProjectCharacterImage(projectId: string) {
     const queryClient = useQueryClient()
     const invalidateProjectAssets = () =>
-        invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+        invalidateQueryTemplates(queryClient, [
+            queryKeys.projectAssets.all(projectId),
+            queryKeys.assets.all('project', projectId),
+        ])
 
     return useMutation({
         mutationFn: async ({
@@ -199,7 +205,11 @@ export function useSelectProjectCharacterImage(projectId: string) {
     const queryClient = useQueryClient()
     const latestRequestIdByTargetRef = useRef<Record<string, number>>({})
     const invalidateProjectAssets = () =>
-        invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+        invalidateQueryTemplates(queryClient, [
+            queryKeys.projectAssets.all(projectId),
+            // 资产库/AssetsStage 实际渲染用的是 unified assets（/api/assets）
+            queryKeys.assets.all('project', projectId),
+        ])
 
     return useMutation({
         mutationFn: async ({
@@ -257,10 +267,9 @@ export function useSelectProjectCharacterImage(projectId: string) {
             queryClient.setQueryData(queryKeys.projectAssets.all(projectId), context.previousAssets)
             queryClient.setQueryData(queryKeys.projectData(projectId), context.previousProject)
         },
-        onSettled: (_data, _error, variables) => {
-            if (variables.confirm) {
-                void invalidateProjectAssets()
-            }
+        onSettled: () => {
+            // 无论 confirm 与否都要刷新 unified assets，否则 UI 需要关掉弹窗重开才会看到选中状态
+            void invalidateProjectAssets()
         },
     })
 }
@@ -272,7 +281,10 @@ export function useSelectProjectCharacterImage(projectId: string) {
 export function useUndoProjectCharacterImage(projectId: string) {
     const queryClient = useQueryClient()
     const invalidateProjectAssets = () =>
-        invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+        invalidateQueryTemplates(queryClient, [
+            queryKeys.projectAssets.all(projectId),
+            queryKeys.assets.all('project', projectId),
+        ])
 
     return useMutation({
         mutationFn: async ({ characterId, appearanceId }: { characterId: string; appearanceId: string }) => {
@@ -298,7 +310,10 @@ export function useUndoProjectCharacterImage(projectId: string) {
 export function useDeleteProjectCharacter(projectId: string) {
     const queryClient = useQueryClient()
     const invalidateProjectAssets = () =>
-        invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+        invalidateQueryTemplates(queryClient, [
+            queryKeys.projectAssets.all(projectId),
+            queryKeys.assets.all('project', projectId),
+        ])
 
     return useMutation({
         mutationFn: async (characterId: string) => {

@@ -66,6 +66,7 @@ interface SettingsModalProps {
     localI2ISteps?: number
     localStoryboardPromptRefineEnabled?: boolean
     localStoryboardPromptRefineLevel?: 'conservative' | 'medium' | 'simple'
+    localStoryboardUsePanelDescriptionEnabled?: boolean
     onArtStyleChange?: (value: string) => void
     onAnalysisModelChange?: (value: string) => void
     onCharacterModelChange?: (value: string) => void
@@ -89,6 +90,7 @@ interface SettingsModalProps {
     onLocalI2IStepsChange?: (value: number) => void
     onLocalStoryboardPromptRefineEnabledChange?: (value: boolean) => void
     onLocalStoryboardPromptRefineLevelChange?: (value: 'conservative' | 'medium' | 'simple') => void
+    onLocalStoryboardUsePanelDescriptionEnabledChange?: (value: boolean) => void
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -172,6 +174,7 @@ export function SettingsModal({
     localI2ISteps,
     localStoryboardPromptRefineEnabled,
     localStoryboardPromptRefineLevel,
+    localStoryboardUsePanelDescriptionEnabled,
     onArtStyleChange,
     onAnalysisModelChange,
     onCharacterModelChange,
@@ -194,6 +197,7 @@ export function SettingsModal({
     onLocalI2IStepsChange,
     onLocalStoryboardPromptRefineEnabledChange,
     onLocalStoryboardPromptRefineLevelChange,
+    onLocalStoryboardUsePanelDescriptionEnabledChange,
 }: SettingsModalProps) {
     const t = useTranslations('configModal')
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle')
@@ -273,6 +277,7 @@ export function SettingsModal({
     const i2iHeight = typeof localI2IHeight === 'number' ? localI2IHeight : fallbackHeight
     const i2iSteps = typeof localI2ISteps === 'number' ? localI2ISteps : fallbackSteps
     const promptRefineEnabled = localStoryboardPromptRefineEnabled === true
+    const promptUseDescriptionEnabled = localStoryboardUsePanelDescriptionEnabled === true
     const promptRefineLevel: 'conservative' | 'medium' | 'simple' =
         localStoryboardPromptRefineLevel === 'conservative'
         || localStoryboardPromptRefineLevel === 'simple'
@@ -292,6 +297,7 @@ export function SettingsModal({
     const [i2iStepsDraft, setI2IStepsDraft] = useState<string>(String(i2iSteps))
     const [promptRefineEnabledDraft, setPromptRefineEnabledDraft] = useState<boolean>(promptRefineEnabled)
     const [promptRefineLevelDraft, setPromptRefineLevelDraft] = useState<'conservative' | 'medium' | 'simple'>(promptRefineLevel)
+    const [promptUseDescriptionEnabledDraft, setPromptUseDescriptionEnabledDraft] = useState<boolean>(promptUseDescriptionEnabled)
 
     useEffect(() => {
         if (!isOpen) return
@@ -304,6 +310,7 @@ export function SettingsModal({
         setI2IStepsDraft(String(i2iSteps))
         setPromptRefineEnabledDraft(promptRefineEnabled)
         setPromptRefineLevelDraft(promptRefineLevel)
+        setPromptUseDescriptionEnabledDraft(promptUseDescriptionEnabled)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen, isLocalImageModel])
 
@@ -731,6 +738,18 @@ export function SettingsModal({
                                                         />
                                                         {t('localPromptRefineEnabled')}
                                                     </label>
+                                                    <label className="flex items-center gap-2 text-sm text-[var(--glass-text-secondary)]">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={promptUseDescriptionEnabledDraft}
+                                                            onChange={(e) => {
+                                                                setPromptUseDescriptionEnabledDraft(e.target.checked)
+                                                                // 立即提交，避免用户忘记点失焦
+                                                                onLocalStoryboardUsePanelDescriptionEnabledChange?.(e.target.checked)
+                                                            }}
+                                                        />
+                                                        {t('localPromptUseDescriptionEnabled')}
+                                                    </label>
                                                     <div className="md:col-span-2">
                                                         <label className="text-xs text-[var(--glass-text-tertiary)]">{t('localPromptRefineLevel')}</label>
                                                         <select
@@ -748,6 +767,9 @@ export function SettingsModal({
                                                         </select>
                                                         <div className="mt-1 text-xs text-[var(--glass-text-tertiary)]">
                                                             {t('localPromptRefineHint')}
+                                                        </div>
+                                                        <div className="mt-1 text-xs text-[var(--glass-text-tertiary)]">
+                                                            {t('localPromptUseDescriptionHint')}
                                                         </div>
                                                     </div>
                                                 </div>

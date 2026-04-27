@@ -108,12 +108,14 @@ async function generateImageToStorage(params: {
     size?: string
   }
   label?: string
+  allowTaskExternalIdResume?: boolean
 }) {
   const source = await resolveImageSourceFromGeneration(params.job, {
     userId: params.userId,
     modelId: params.modelId,
     prompt: params.prompt,
     options: params.options,
+    allowTaskExternalIdResume: params.allowTaskExternalIdResume,
   })
 
   const uploadSource = params.label
@@ -135,6 +137,7 @@ export async function generateCleanImageToStorage(params: {
     aspectRatio?: string
     size?: string
   }
+  allowTaskExternalIdResume?: boolean
 }) {
   return await generateImageToStorage(params)
 }
@@ -152,6 +155,7 @@ export async function generateProjectLabeledImageToStorage(params: {
     aspectRatio?: string
     size?: string
   }
+  allowTaskExternalIdResume?: boolean
 }) {
   return await generateImageToStorage(params)
 }

@@ -63,6 +63,7 @@ interface WorkspaceHeaderShellProps {
   localI2ISteps: number
   localStoryboardPromptRefineEnabled: boolean
   localStoryboardPromptRefineLevel: 'conservative' | 'medium' | 'simple'
+  localStoryboardUsePanelDescriptionEnabled: boolean
   onUpdateConfig: (key: string, value: unknown) => Promise<void>
   globalAssetText: string
   projectName: string
@@ -121,6 +122,7 @@ export default function WorkspaceHeaderShell({
   localI2ISteps,
   localStoryboardPromptRefineEnabled,
   localStoryboardPromptRefineLevel,
+  localStoryboardUsePanelDescriptionEnabled,
   onUpdateConfig,
   globalAssetText,
   projectName,
@@ -171,6 +173,7 @@ export default function WorkspaceHeaderShell({
         localI2ISteps={localI2ISteps}
         localStoryboardPromptRefineEnabled={localStoryboardPromptRefineEnabled}
         localStoryboardPromptRefineLevel={localStoryboardPromptRefineLevel}
+        localStoryboardUsePanelDescriptionEnabled={localStoryboardUsePanelDescriptionEnabled}
         onArtStyleChange={(value) => { onUpdateConfig('artStyle', value) }}
         onAnalysisModelChange={(value) => { onUpdateConfig('analysisModel', value) }}
         onCharacterModelChange={(value) => { onUpdateConfig('characterModel', value) }}
@@ -193,6 +196,7 @@ export default function WorkspaceHeaderShell({
         onLocalI2IStepsChange={(value) => { onUpdateConfig('localI2ISteps', value) }}
         onLocalStoryboardPromptRefineEnabledChange={(value) => { onUpdateConfig('localStoryboardPromptRefineEnabled', value) }}
         onLocalStoryboardPromptRefineLevelChange={(value) => { onUpdateConfig('localStoryboardPromptRefineLevel', value) }}
+        onLocalStoryboardUsePanelDescriptionEnabledChange={(value) => { onUpdateConfig('localStoryboardUsePanelDescriptionEnabled', value) }}
       />
 
       <WorldContextModal

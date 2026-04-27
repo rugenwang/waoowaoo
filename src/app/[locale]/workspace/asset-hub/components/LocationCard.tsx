@@ -332,10 +332,11 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
-                    if (!img.imageUrl || phase === 'generating' || phase === 'regenerating') return
+                    // 允许在“组任务仍在跑”的情况下先选中已生成的图片，避免 taskState 卡住导致必须重开页面才能点选
+                    if (!img.imageUrl || slotTaskRunning) return
                     handleSelectImage(isThisSelected ? null : img.imageIndex)
                   }}
-                  disabled={!img.imageUrl || phase === 'generating' || phase === 'regenerating'}
+                  disabled={!img.imageUrl || slotTaskRunning}
                   className={`absolute top-2 right-2 glass-btn-base h-7 w-7 rounded-full ${isThisSelected ? 'glass-btn-tone-success' : 'glass-btn-secondary'} disabled:opacity-50`}
                 >
                   <AppIcon name="check" className="w-4 h-4" />

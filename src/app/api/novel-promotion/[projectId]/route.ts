@@ -317,6 +317,8 @@ export const PATCH = apiHandler(async (
     'localI2IWidth', 'localI2IHeight', 'localI2ISteps',
     // prompt refine (local storyboard image)
     'localStoryboardPromptRefineEnabled', 'localStoryboardPromptRefineLevel',
+    // prompt source (local storyboard image)
+    'localStoryboardUsePanelDescriptionEnabled',
   ] as const
 
   const updateData: Record<string, unknown> = {}
@@ -392,6 +394,14 @@ export const PATCH = apiHandler(async (
         throw new ApiError('INVALID_PARAMS', { code: 'INVALID_ENUM', field })
       }
       updateData.localStoryboardPromptRefineLevel = value
+      continue
+    }
+    if (field === 'localStoryboardUsePanelDescriptionEnabled') {
+      const raw = body[field]
+      if (typeof raw !== 'boolean') {
+        throw new ApiError('INVALID_PARAMS', { code: 'INVALID_BOOLEAN', field })
+      }
+      updateData.localStoryboardUsePanelDescriptionEnabled = raw
       continue
     }
 

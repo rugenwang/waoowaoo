@@ -74,6 +74,7 @@ export function useWorkspaceProjectSnapshot({
         || projectData?.localStoryboardPromptRefineLevel === 'medium'
           ? projectData.localStoryboardPromptRefineLevel
           : 'medium',
+      localStoryboardUsePanelDescriptionEnabled: projectData?.localStoryboardUsePanelDescriptionEnabled === true,
     }
   }, [episode?.novelText, episode?.storyboards, project.novelPromotionData, urlStage])
 }

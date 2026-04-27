@@ -188,6 +188,43 @@ export function getArtStylePrompt(
   return locale === 'en' ? style.promptEn : style.promptZh
 }
 
+export function getArtStyleLabel(artStyle: string | null | undefined): string {
+  if (!artStyle) return ''
+  const style = ART_STYLES.find(s => s.value === artStyle)
+  return style?.label ?? ''
+}
+
+const ANIME_STYLE_VALUES = new Set(['american-comic', 'chinese-comic', 'japanese-anime'])
+
+/**
+ * 当项目风格选择为「漫画风 / 精致国漫 / 日系动漫风」时，在提示词最前面加上：
+ * - 中文：动漫风格：{label}，{prompt}
+ * - 英文：Anime style: {label}, {prompt}
+ */
+export function prependAnimeStyleLabel(params: {
+  prompt: string
+  artStyle: string | null | undefined
+  locale: 'zh' | 'en'
+}): string {
+  const rawPrompt = (params.prompt || '').trim()
+  if (!rawPrompt) return rawPrompt
+
+  const styleValue = (params.artStyle || '').trim()
+  if (!ANIME_STYLE_VALUES.has(styleValue)) return rawPrompt
+
+  // 避免重复加前缀
+  if (rawPrompt.startsWith('动漫风格：') || rawPrompt.toLowerCase().startsWith('anime style:')) {
+    return rawPrompt
+  }
+
+  const label = getArtStyleLabel(styleValue)
+  if (!label) return rawPrompt
+
+  return params.locale === 'en'
+    ? `Anime style: ${label}, ${rawPrompt}`
+    : `动漫风格：${label}，${rawPrompt}`
+}
+
 // 角色形象生成的系统后缀（始终添加到提示词末尾，不显示给用户）- 左侧面部特写+右侧三视图
 export const CHARACTER_PROMPT_SUFFIX = '角色设定图，画面分为左右两个区域：【左侧区域】占约1/3宽度，是角色的正面特写（如果是人类则展示完整正脸，如果是动物/生物则展示最具辨识度的正面形态）；【右侧区域】占约2/3宽度，是角色三视图横向排列（从左到右依次为：正面全身、侧面全身、背面全身），三视图高度一致。纯白色背景，无其他元素。'
 

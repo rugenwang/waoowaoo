@@ -197,7 +197,10 @@ export function useCreateProjectCharacterAppearance(projectId: string) {
 export function useConfirmProjectCharacterSelection(projectId: string) {
     const queryClient = useQueryClient()
     const invalidateProjectAssets = () =>
-        invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+        invalidateQueryTemplates(queryClient, [
+            queryKeys.projectAssets.all(projectId),
+            queryKeys.assets.all('project', projectId),
+        ])
     return useMutation({
         mutationFn: async ({ characterId, appearanceId }: { characterId: string; appearanceId: string }) =>
             await requestJsonWithError(

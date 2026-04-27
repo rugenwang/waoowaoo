@@ -52,7 +52,9 @@ export default async function LocaleLayout({
     const messages = await getMessages();
 
     return (
-        <html lang={locale}>
+        // 某些浏览器插件会在 <html>/<body> 注入属性（例如 data-atm-ext-installed），导致 hydration mismatch 警告。
+        // 这里抑制该类无害的 warning，避免开发时控制台刷屏。
+        <html lang={locale} suppressHydrationWarning>
             <head>
                 {process.env.NODE_ENV === "development" && (
                     <Script
@@ -64,6 +66,7 @@ export default async function LocaleLayout({
             </head>
             <body
                 className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}
+                suppressHydrationWarning
             >
                 <NextIntlClientProvider messages={messages}>
                     <Providers>

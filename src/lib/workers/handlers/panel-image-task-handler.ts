@@ -1,6 +1,6 @@
 import { type Job } from 'bullmq'
 import { prisma } from '@/lib/prisma'
-import { getArtStylePrompt } from '@/lib/constants'
+import { getArtStylePrompt, prependAnimeStyleLabel } from '@/lib/constants'
 import { createScopedLogger } from '@/lib/logging/core'
 import { type TaskJobData } from '@/lib/task/types'
 import { reportTaskProgress } from '../shared'
@@ -159,6 +159,159 @@ function buildPanelPrompt(params: {
   })
 }
 
+function buildPanelStructuredPrompt(params: {
+  locale: TaskJobData['locale']
+  aspectRatio: string
+  styleText: string
+  context: ReturnType<typeof buildPanelPromptContext>
+}): string {
+  const shotType = String(params.context.panel.shot_type || '').trim()
+  const cameraMove = String(params.context.panel.camera_move || '').trim()
+  const description = String(params.context.panel.description || '').trim()
+  const location = String(params.context.panel.location || '').trim()
+  const videoPrompt = String(params.context.panel.video_prompt || '').trim()
+
+  const characterLines = (() => {
+    const chars = Array.isArray(params.context.panel.characters) ? params.context.panel.characters : []
+    if (chars.length === 0) return ''
+    if (params.locale === 'en') {
+      return `Characters: ${chars.map((c: any) => {
+        const name = String(c?.name || '').trim()
+        const appearance = String(c?.appearance || '').trim()
+        const slot = String(c?.slot || '').trim()
+        const extras = [
+          appearance ? `appearance: ${appearance}` : '',
+          slot ? `fixed position: ${slot}` : '',
+        ].filter(Boolean).join(', ')
+        return extras ? `${name} (${extras})` : name
+      }).filter(Boolean).join('; ')}`
+    }
+    return `角色：${chars.map((c: any) => {
+      const name = String(c?.name || '').trim()
+      const appearance = String(c?.appearance || '').trim()
+      const slot = String(c?.slot || '').trim()
+      const extras = [
+        appearance ? `形象：${appearance}` : '',
+        slot ? `固定位置：${slot}` : '',
+      ].filter(Boolean).join('，')
+      return extras ? `${name}（${extras}）` : name
+    }).filter(Boolean).join('、')}`
+  })()
+
+  const photographyText = (() => {
+    const rules = params.context.panel.photography_rules as any
+    if (!rules || typeof rules !== 'object') return ''
+    const lighting = rules.lighting || null
+    const direction = String(lighting?.direction || '').trim()
+    const quality = String(lighting?.quality || '').trim()
+    const parts = [
+      direction ? (params.locale === 'en' ? `lighting direction: ${direction}` : `光照方向：${direction}`) : '',
+      quality ? (params.locale === 'en' ? `lighting quality: ${quality}` : `光照质感：${quality}`) : '',
+    ].filter(Boolean)
+    if (parts.length === 0) return ''
+    return params.locale === 'en'
+      ? `Photography rules: ${parts.join(', ')}`
+      : `摄影规则：${parts.join('，')}`
+  })()
+
+  const actingText = (() => {
+    const notes = params.context.panel.acting_notes as any
+    if (!notes) return ''
+    // 常见结构：[{ name, acting }]
+    if (Array.isArray(notes)) {
+      const lines = notes.map((row) => {
+        const name = String(row?.name || '').trim()
+        const acting = String(row?.acting || '').trim()
+        if (!acting) return ''
+        return name ? `${name}：${acting}` : acting
+      }).filter(Boolean)
+      if (lines.length === 0) return ''
+      return params.locale === 'en'
+        ? `Acting notes: ${lines.join(' | ')}`
+        : `演技指导：${lines.join('；')}`
+    }
+    // 或者对象结构
+    try {
+      const raw = JSON.stringify(notes)
+      return params.locale === 'en' ? `Acting notes: ${raw}` : `演技指导：${raw}`
+    } catch {
+      return ''
+    }
+  })()
+
+  if (params.locale === 'en') {
+    const parts = [
+      `Aspect ratio: ${params.aspectRatio}`,
+      shotType || cameraMove ? `Shot: ${[shotType, cameraMove].filter(Boolean).join(', ')}` : '',
+      description ? `Description: ${description}` : '',
+      location ? `Location: ${location}` : '',
+      characterLines,
+      actingText,
+      photographyText,
+      videoPrompt ? `Additional prompt: ${videoPrompt}` : '',
+      params.styleText ? `Style: ${params.styleText}` : '',
+    ].filter(Boolean)
+    return parts.join('\n')
+  }
+
+  const parts = [
+    `画面比例：${params.aspectRatio}`,
+    shotType || cameraMove ? `镜头：${[shotType, cameraMove].filter(Boolean).join('，')}` : '',
+    description ? `画面描述：${description}` : '',
+    location ? `场景：${location}` : '',
+    characterLines,
+    actingText,
+    photographyText,
+    videoPrompt ? `补充提示：${videoPrompt}` : '',
+    params.styleText ? `风格：${params.styleText}` : '',
+  ].filter(Boolean)
+  return parts.join('\n')
+}
+
+function buildPanelDescriptionPrompt(params: {
+  description: string
+  styleText: string
+  locale: TaskJobData['locale']
+}): string {
+  const clean = String(params.description || '').trim()
+  if (!clean) return ''
+  // 直接用画面描述作为 prompt，风格放末尾（与其他生图链路保持一致）
+  return params.styleText ? `${clean}，${params.styleText}` : clean
+}
+
+function buildStoryboardHardConstraints(params: {
+  locale: TaskJobData['locale']
+  aspectRatio: string
+  styleText: string
+  referenceImagesCount: number
+}): string {
+  const ratio = String(params.aspectRatio || '').trim()
+  const style = String(params.styleText || '').trim()
+  const hasRefs = params.referenceImagesCount > 0
+
+  if (params.locale === 'en') {
+    return [
+      'ABSOLUTE CONSTRAINTS (must follow):',
+      '- No text in image (no subtitles/labels/numbers/watermarks/symbols).',
+      '- Output exactly ONE frame (no collage / no multi-panel).',
+      '- Do NOT include duplicated identical characters (no clones of the same person with identical appearance in the same frame).',
+      ratio ? `- Aspect ratio must be EXACT: ${ratio}.` : null,
+      hasRefs ? '- Match the reference images for identity/style/composition; do NOT draw any text from references.' : null,
+      style ? `- Keep visual style consistent: ${style}.` : null,
+    ].filter(Boolean).join('\n')
+  }
+
+  return [
+    '【强制规则 - 必须遵守】',
+    '- 画面中绝对禁止出现任何文字（字幕/标签/编号/水印/符号）。',
+    '- 只生成一张镜头画面（禁止拼图/多镜头/多格）。',
+    '- 禁止在同一个镜头中出现“形象完全一样的人”（禁止克隆同一人物外貌/服装/发型完全一致的多个个体）。',
+    ratio ? `- 画面比例必须严格为：${ratio}` : null,
+    hasRefs ? '- 有参考图时：外貌/风格/构图需与参考图一致；参考图上的文字标签仅供识别，禁止画入图中。' : null,
+    style ? `- 风格必须与参考一致：${style}` : null,
+  ].filter(Boolean).join('\n')
+}
+
 function cleanupRefinedPrompt(raw: string): string {
   const text = String(raw || '').trim()
   if (!text) return ''
@@ -184,6 +337,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   const modelConfig = await getProjectModels(job.data.projectId, job.data.userId)
   const modelKey = modelConfig.storyboardModel
   if (!modelKey) throw new Error('Storyboard model not configured')
+  const parsedStoryboardModel = parseModelKeyStrict(modelKey)
 
   const candidateCount = clampCount(payload.candidateCount ?? payload.count, 1, 4, 1)
   const refs = await collectPanelReferenceImages(projectData, panel)
@@ -216,48 +370,79 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   const artStyle = getArtStylePrompt(modelConfig.artStyle, job.data.locale)
   if (!projectData.videoRatio) throw new Error('Project videoRatio not configured')
   const aspectRatio = projectData.videoRatio
-  const promptContext = buildPanelPromptContext({
-    panel: {
-      id: panel.id,
-      shotType: panel.shotType,
-      cameraMove: panel.cameraMove,
-      description: panel.description,
-      imagePrompt: panel.imagePrompt,
-      videoPrompt: panel.videoPrompt,
-      location: panel.location,
-      characters: panel.characters,
-      srtSegment: panel.srtSegment,
-      photographyRules: panel.photographyRules,
-      actingNotes: panel.actingNotes,
-    },
-    projectData,
-  })
-  const contextJson = JSON.stringify(promptContext, null, 2)
-  const prompt = buildPanelPrompt({
-    locale: job.data.locale,
-    aspectRatio,
-    styleText: artStyle || '与参考图风格一致',
-    sourceText: panel.srtSegment || panel.description || '',
-    contextJson,
-  })
+
+  const usePanelDescriptionEnabled = modelConfig.localStoryboardUsePanelDescriptionEnabled === true
+  const panelDescriptionText = String(panel.description || '').trim()
+
+  // 默认走 JSON 模板；只有在开启“启用画面描述”且 panel.description 有内容时，才用画面描述直出。
+  let contextJson = ''
+  let prompt = ''
+  let promptContext: ReturnType<typeof buildPanelPromptContext> | null = null
+  if (usePanelDescriptionEnabled && panelDescriptionText) {
+    prompt = buildPanelDescriptionPrompt({
+      description: panelDescriptionText,
+      styleText: artStyle || '',
+      locale: job.data.locale,
+    })
+  } else {
+    promptContext = buildPanelPromptContext({
+      panel: {
+        id: panel.id,
+        shotType: panel.shotType,
+        cameraMove: panel.cameraMove,
+        description: panel.description,
+        imagePrompt: panel.imagePrompt,
+        videoPrompt: panel.videoPrompt,
+        location: panel.location,
+        characters: panel.characters,
+        srtSegment: panel.srtSegment,
+        photographyRules: panel.photographyRules,
+        actingNotes: panel.actingNotes,
+      },
+      projectData,
+    })
+    contextJson = JSON.stringify(promptContext, null, 2)
+
+    // 对本地模型（ltx/MLX），不把 JSON 串当作最终 prompt；而是把结构化数据整理成“整洁的自然语言 prompt”
+    // （与项目里其它生图链路一致：最终 prompt 是一段可读文本，而不是大段 JSON）。
+    if (parsedStoryboardModel?.provider === 'local') {
+      prompt = buildPanelStructuredPrompt({
+        locale: job.data.locale,
+        aspectRatio,
+        styleText: artStyle || '',
+        context: promptContext,
+      })
+    } else {
+      // 非本地模型仍沿用模板（模板内部会引用 storyboard_text_json_input）
+      prompt = buildPanelPrompt({
+        locale: job.data.locale,
+        aspectRatio,
+        styleText: artStyle || '与参考图风格一致',
+        sourceText: panel.srtSegment || panel.description || '',
+        contextJson,
+      })
+    }
+  }
 
   // 可选：本地模型前先用文本模型精炼 prompt（把 JSON/规则压成一条更适合本地模型的提示词）
-  const parsedStoryboardModel = parseModelKeyStrict(modelKey)
   const shouldRefinePrompt =
     parsedStoryboardModel?.provider === 'local'
     && modelConfig.localStoryboardPromptRefineEnabled === true
     && !!modelConfig.analysisModel
 
-  const finalPrompt = shouldRefinePrompt ? await (async () => {
+  const refinedOrRawPrompt = shouldRefinePrompt ? await (async () => {
     try {
       const strength = modelConfig.localStoryboardPromptRefineLevel || 'medium'
+      // 本地模型精炼：优先精炼“最终会用于生图的那段整洁 prompt”
+      // - 勾选画面描述：精炼画面描述
+      // - 未勾选画面描述：精炼 buildPanelStructuredPrompt 生成的整洁 prompt
+      // 复用 NP_STORYBOARD_PROMPT_REFINE_DESCRIPTION 模板即可（其输入本质是一段待精炼文本）。
       const refineUserPrompt = buildPrompt({
-        promptId: PROMPT_IDS.NP_STORYBOARD_PROMPT_REFINE,
+        promptId: PROMPT_IDS.NP_STORYBOARD_PROMPT_REFINE_DESCRIPTION,
         locale: job.data.locale,
         variables: {
+          panel_description: usePanelDescriptionEnabled && panelDescriptionText ? panelDescriptionText : prompt,
           aspect_ratio: aspectRatio,
-          storyboard_text_json_input: contextJson,
-          source_text: panel.srtSegment || panel.description || '无',
           style: artStyle || '与参考图风格一致',
           strength,
           reference_images_count: String(normalizedRefs.length),
@@ -293,6 +478,25 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       return prompt
     }
   })() : prompt
+
+  const withAnimeStyle = prependAnimeStyleLabel({
+    prompt: refinedOrRawPrompt,
+    artStyle: modelConfig.artStyle,
+    locale: job.data.locale === 'en' ? 'en' : 'zh',
+  })
+
+  // 本地模型（ltx/MLX）在启用“精炼/画面描述”后最终 prompt 可能过于“自由”，
+  // 这里把关键的限制性规则重新加回 prompt，防止模型乱加文字/拼图/比例跑偏。
+  const hardConstraints = buildStoryboardHardConstraints({
+    locale: job.data.locale,
+    aspectRatio,
+    styleText: artStyle || '',
+    referenceImagesCount: normalizedRefs.length,
+  })
+
+  const finalPrompt = hardConstraints
+    ? `${hardConstraints}\n\n${withAnimeStyle}`
+    : withAnimeStyle
 
   logger.info({
     message: 'panel image prompt resolved',

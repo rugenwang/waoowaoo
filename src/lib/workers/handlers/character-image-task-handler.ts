@@ -1,6 +1,6 @@
 import { type Job } from 'bullmq'
 import { prisma } from '@/lib/prisma'
-import { CHARACTER_ASSET_IMAGE_RATIO, addCharacterPromptSuffix, getArtStylePrompt, isArtStyleValue, PRIMARY_APPEARANCE_INDEX, type ArtStyleValue } from '@/lib/constants'
+import { CHARACTER_ASSET_IMAGE_RATIO, addCharacterPromptSuffix, getArtStylePrompt, isArtStyleValue, prependAnimeStyleLabel, PRIMARY_APPEARANCE_INDEX, type ArtStyleValue } from '@/lib/constants'
 import { type TaskJobData } from '@/lib/task/types'
 import { encodeImageUrls } from '@/lib/contracts/image-urls-contract'
 import { normalizeImageGenerationCount } from '@/lib/image-generation/count'
@@ -107,7 +107,8 @@ export async function handleCharacterImageTask(job: Job<TaskJobData>) {
   if (!appearance) throw new Error('Character appearance not found')
 
   const payloadArtStyle = resolvePayloadArtStyle(payload)
-  const artStyle = getArtStylePrompt(payloadArtStyle ?? models.artStyle, job.data.locale)
+  const selectedArtStyle = payloadArtStyle ?? models.artStyle
+  const artStyle = getArtStylePrompt(selectedArtStyle, job.data.locale)
   const descriptions = parseJsonStringArray(appearance.descriptions)
   const baseDescriptions = descriptions.length > 0 ? descriptions : [appearance.description || '']
 
@@ -145,7 +146,12 @@ export async function handleCharacterImageTask(job: Job<TaskJobData>) {
   for (let i = 0; i < indexes.length; i++) {
     const index = indexes[i]
     const raw = baseDescriptions[index] || baseDescriptions[0]
-    const prompt = artStyle ? `${addCharacterPromptSuffix(raw)}，${artStyle}` : addCharacterPromptSuffix(raw)
+    const basePrompt = artStyle ? `${addCharacterPromptSuffix(raw)}，${artStyle}` : addCharacterPromptSuffix(raw)
+    const prompt = prependAnimeStyleLabel({
+      prompt: basePrompt,
+      artStyle: selectedArtStyle,
+      locale: job.data.locale === 'en' ? 'en' : 'zh',
+    })
 
     await reportTaskProgress(job, 15 + Math.floor((i / Math.max(indexes.length, 1)) * 55), {
       stage: 'generate_character_image',
@@ -160,6 +166,8 @@ export async function handleCharacterImageTask(job: Job<TaskJobData>) {
       label,
       targetId: `${appearance.id}-${index}`,
       keyPrefix: 'character',
+      // 同一个 task 内会循环生成多张：不能复用 task.externalId，否则会一直“续接”到第一张导致每张都一样
+      allowTaskExternalIdResume: indexes.length === 1,
       options: {
         referenceImages: primaryReferenceImages.length > 0 ? primaryReferenceImages : undefined,
         aspectRatio: CHARACTER_ASSET_IMAGE_RATIO,

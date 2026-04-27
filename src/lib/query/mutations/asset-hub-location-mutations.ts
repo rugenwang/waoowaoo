@@ -6,6 +6,7 @@ import {
 } from '../task-target-overlay'
 import { queryKeys } from '../keys'
 import type { GlobalLocation } from '../hooks/useGlobalAssets'
+import type { AssetSummary } from '@/lib/assets/contracts'
 import {
   requestJsonWithError,
   requestVoidWithError,
@@ -19,6 +20,10 @@ interface SelectLocationImageContext {
   previousQueries: Array<{
     queryKey: readonly unknown[]
     data: GlobalLocation[] | undefined
+  }>
+  previousAssetQueries: Array<{
+    queryKey: readonly unknown[]
+    data: AssetSummary[] | undefined
   }>
   targetKey: string
   requestId: number
@@ -49,6 +54,33 @@ function applyLocationSelection(
   })
 }
 
+function applyUnifiedAssetLocationSelection(
+  assets: AssetSummary[] | undefined,
+  locationId: string,
+  imageIndex: number | null,
+): AssetSummary[] | undefined {
+  if (!assets) return assets
+  return assets.map((asset) => {
+    // 资产库里“道具”也复用了 LocationCard；这里按 id 更新，避免 kind 不一致导致 UI 不更新
+    if (asset.id !== locationId) return asset
+    if (asset.kind !== 'location' && asset.kind !== 'prop') return asset
+    return {
+      ...asset,
+      variants: (asset.variants || []).map((variant) => {
+        const selected = imageIndex !== null && variant.index === imageIndex
+        const nextRenders = (variant.renders || []).map((render) => ({
+          ...render,
+          isSelected: selected,
+        }))
+        return {
+          ...variant,
+          renders: nextRenders,
+        }
+      }),
+    }
+  })
+}
+
 function captureLocationQuerySnapshots(queryClient: ReturnType<typeof useQueryClient>) {
   return queryClient
     .getQueriesData<GlobalLocation[]>({
@@ -58,9 +90,27 @@ function captureLocationQuerySnapshots(queryClient: ReturnType<typeof useQueryCl
     .map(([queryKey, data]) => ({ queryKey, data }))
 }
 
+function captureUnifiedAssetQuerySnapshots(queryClient: ReturnType<typeof useQueryClient>) {
+  return queryClient
+    .getQueriesData<AssetSummary[]>({
+      queryKey: queryKeys.assets.all('global', null),
+      exact: false,
+    })
+    .map(([queryKey, data]) => ({ queryKey, data }))
+}
+
 function restoreLocationQuerySnapshots(
   queryClient: ReturnType<typeof useQueryClient>,
   snapshots: Array<{ queryKey: readonly unknown[]; data: GlobalLocation[] | undefined }>,
+) {
+  snapshots.forEach((snapshot) => {
+    queryClient.setQueryData(snapshot.queryKey, snapshot.data)
+  })
+}
+
+function restoreUnifiedAssetQuerySnapshots(
+  queryClient: ReturnType<typeof useQueryClient>,
+  snapshots: Array<{ queryKey: readonly unknown[]; data: AssetSummary[] | undefined }>,
 ) {
   snapshots.forEach((snapshot) => {
     queryClient.setQueryData(snapshot.queryKey, snapshot.data)
@@ -193,7 +243,12 @@ export function useSelectLocationImage() {
         queryKey: queryKeys.globalAssets.locations(),
         exact: false,
       })
+      await queryClient.cancelQueries({
+        queryKey: queryKeys.assets.all('global', null),
+        exact: false,
+      })
       const previousQueries = captureLocationQuerySnapshots(queryClient)
+      const previousAssetQueries = captureUnifiedAssetQuerySnapshots(queryClient)
 
       queryClient.setQueriesData<GlobalLocation[] | undefined>(
         {
@@ -202,9 +257,17 @@ export function useSelectLocationImage() {
         },
         (previous) => applyLocationSelection(previous, variables.locationId, variables.imageIndex),
       )
+      queryClient.setQueriesData<AssetSummary[] | undefined>(
+        {
+          queryKey: queryKeys.assets.all('global', null),
+          exact: false,
+        },
+        (previous) => applyUnifiedAssetLocationSelection(previous, variables.locationId, variables.imageIndex),
+      )
 
       return {
         previousQueries,
+        previousAssetQueries,
         targetKey,
         requestId,
       }
@@ -214,6 +277,7 @@ export function useSelectLocationImage() {
       const latestRequestId = latestRequestIdByTargetRef.current[context.targetKey]
       if (latestRequestId !== context.requestId) return
       restoreLocationQuerySnapshots(queryClient, context.previousQueries)
+      restoreUnifiedAssetQuerySnapshots(queryClient, context.previousAssetQueries)
     },
     onSettled: (_data, _error, variables) => {
       if (variables.confirm) {

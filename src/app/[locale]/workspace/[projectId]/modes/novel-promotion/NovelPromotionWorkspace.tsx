@@ -105,6 +105,7 @@ function NovelPromotionWorkspaceContent(props: NovelPromotionWorkspaceProps) {
         localI2ISteps={vm.project.localI2ISteps}
         localStoryboardPromptRefineEnabled={vm.project.localStoryboardPromptRefineEnabled}
         localStoryboardPromptRefineLevel={vm.project.localStoryboardPromptRefineLevel}
+        localStoryboardUsePanelDescriptionEnabled={vm.project.localStoryboardUsePanelDescriptionEnabled}
         onUpdateConfig={vm.actions.handleUpdateConfig}
         globalAssetText={vm.project.globalAssetText}
         projectName={project.name}

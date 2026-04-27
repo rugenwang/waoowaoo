@@ -267,6 +267,8 @@ model NovelPromotionProject {
   localStoryboardPromptRefineEnabled Boolean @default(false)
   // 'conservative' | 'medium' | 'simple'
   localStoryboardPromptRefineLevel   String  @default("medium")
+  // 分镜生图 prompt 来源：启用后直接使用“画面描述”字段作为 prompt（可与精炼同时使用）
+  localStoryboardUsePanelDescriptionEnabled Boolean @default(false)
   editModel       String? // 用户配置的修图/编辑模型
   videoResolution String                    @default("720p")
   capabilityOverrides String?

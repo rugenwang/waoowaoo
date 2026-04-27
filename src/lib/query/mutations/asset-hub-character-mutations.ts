@@ -6,6 +6,7 @@ import {
 } from '../task-target-overlay'
 import { queryKeys } from '../keys'
 import type { GlobalCharacter } from '../hooks/useGlobalAssets'
+import type { AssetSummary } from '@/lib/assets/contracts'
 import {
   requestJsonWithError,
   requestVoidWithError,
@@ -19,6 +20,10 @@ interface SelectCharacterImageContext {
   previousQueries: Array<{
     queryKey: readonly unknown[]
     data: GlobalCharacter[] | undefined
+  }>
+  previousAssetQueries: Array<{
+    queryKey: readonly unknown[]
+    data: AssetSummary[] | undefined
   }>
   targetKey: string
   requestId: number
@@ -58,6 +63,36 @@ function applyCharacterSelection(
   })
 }
 
+function applyUnifiedAssetCharacterSelection(
+  assets: AssetSummary[] | undefined,
+  characterId: string,
+  appearanceIndex: number,
+  imageIndex: number | null,
+  confirm: boolean,
+): AssetSummary[] | undefined {
+  if (!assets) return assets
+  return assets.map((asset) => {
+    if (asset.kind !== 'character' || asset.id !== characterId) return asset
+    return {
+      ...asset,
+      variants: (asset.variants || []).map((variant) => {
+        if (variant.index !== appearanceIndex) return variant
+        const nextRenders = (confirm && imageIndex !== null)
+          ? (variant.renders || []).map((render) => ({ ...render, isSelected: render.index === imageIndex }))
+          : (variant.renders || [])
+        return {
+          ...variant,
+          selectionState: {
+            ...variant.selectionState,
+            selectedRenderIndex: imageIndex,
+          },
+          renders: nextRenders,
+        }
+      }),
+    }
+  })
+}
+
 function captureCharacterQuerySnapshots(queryClient: ReturnType<typeof useQueryClient>) {
   return queryClient
     .getQueriesData<GlobalCharacter[]>({
@@ -67,9 +102,27 @@ function captureCharacterQuerySnapshots(queryClient: ReturnType<typeof useQueryC
     .map(([queryKey, data]) => ({ queryKey, data }))
 }
 
+function captureUnifiedAssetQuerySnapshots(queryClient: ReturnType<typeof useQueryClient>) {
+  return queryClient
+    .getQueriesData<AssetSummary[]>({
+      queryKey: queryKeys.assets.all('global', null),
+      exact: false,
+    })
+    .map(([queryKey, data]) => ({ queryKey, data }))
+}
+
 function restoreCharacterQuerySnapshots(
   queryClient: ReturnType<typeof useQueryClient>,
   snapshots: Array<{ queryKey: readonly unknown[]; data: GlobalCharacter[] | undefined }>,
+) {
+  snapshots.forEach((snapshot) => {
+    queryClient.setQueryData(snapshot.queryKey, snapshot.data)
+  })
+}
+
+function restoreUnifiedAssetQuerySnapshots(
+  queryClient: ReturnType<typeof useQueryClient>,
+  snapshots: Array<{ queryKey: readonly unknown[]; data: AssetSummary[] | undefined }>,
 ) {
   snapshots.forEach((snapshot) => {
     queryClient.setQueryData(snapshot.queryKey, snapshot.data)
@@ -211,7 +264,12 @@ export function useSelectCharacterImage() {
         queryKey: queryKeys.globalAssets.characters(),
         exact: false,
       })
+      await queryClient.cancelQueries({
+        queryKey: queryKeys.assets.all('global', null),
+        exact: false,
+      })
       const previousQueries = captureCharacterQuerySnapshots(queryClient)
+      const previousAssetQueries = captureUnifiedAssetQuerySnapshots(queryClient)
 
       queryClient.setQueriesData<GlobalCharacter[] | undefined>(
         {
@@ -225,9 +283,23 @@ export function useSelectCharacterImage() {
           variables.imageIndex,
         ),
       )
+      queryClient.setQueriesData<AssetSummary[] | undefined>(
+        {
+          queryKey: queryKeys.assets.all('global', null),
+          exact: false,
+        },
+        (previous) => applyUnifiedAssetCharacterSelection(
+          previous,
+          variables.characterId,
+          variables.appearanceIndex,
+          variables.imageIndex,
+          variables.confirm === true,
+        ),
+      )
 
       return {
         previousQueries,
+        previousAssetQueries,
         targetKey,
         requestId,
       }
@@ -237,6 +309,7 @@ export function useSelectCharacterImage() {
       const latestRequestId = latestRequestIdByTargetRef.current[context.targetKey]
       if (latestRequestId !== context.requestId) return
       restoreCharacterQuerySnapshots(queryClient, context.previousQueries)
+      restoreUnifiedAssetQuerySnapshots(queryClient, context.previousAssetQueries)
     },
     onSettled: (_data, _error, variables) => {
       if (variables.confirm) {

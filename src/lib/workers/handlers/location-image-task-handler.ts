@@ -1,6 +1,6 @@
 import { type Job } from 'bullmq'
 import { prisma } from '@/lib/prisma'
-import { LOCATION_IMAGE_RATIO, PROP_IMAGE_RATIO, addLocationPromptSuffix, addPropPromptSuffix, getArtStylePrompt, isArtStyleValue, type ArtStyleValue } from '@/lib/constants'
+import { LOCATION_IMAGE_RATIO, PROP_IMAGE_RATIO, addLocationPromptSuffix, addPropPromptSuffix, getArtStylePrompt, isArtStyleValue, prependAnimeStyleLabel, type ArtStyleValue } from '@/lib/constants'
 import { normalizeImageGenerationCount } from '@/lib/image-generation/count'
 import { type TaskJobData } from '@/lib/task/types'
 import { reportTaskProgress } from '../shared'
@@ -67,7 +67,8 @@ export async function handleLocationImageTask(job: Job<TaskJobData>) {
   const requestedCount = resolveRequestedLocationCount(payload)
 
   const payloadArtStyle = resolvePayloadArtStyle(payload)
-  const artStyle = getArtStylePrompt(payloadArtStyle ?? models.artStyle, job.data.locale)
+  const selectedArtStyle = payloadArtStyle ?? models.artStyle
+  const artStyle = getArtStylePrompt(selectedArtStyle, job.data.locale)
   const assetType = payload.type === 'prop' ? 'prop' : 'location'
 
   // targetId may be locationId (group) or locationImageId (single)
@@ -156,7 +157,12 @@ export async function handleLocationImageTask(job: Job<TaskJobData>) {
     const promptWithSuffix = assetType === 'prop'
       ? addPropPromptSuffix(promptCore)
       : addLocationPromptSuffix(promptCore)
-    const prompt = artStyle ? `${promptWithSuffix}，${artStyle}` : promptWithSuffix
+    const basePrompt = artStyle ? `${promptWithSuffix}，${artStyle}` : promptWithSuffix
+    const prompt = prependAnimeStyleLabel({
+      prompt: basePrompt,
+      artStyle: selectedArtStyle,
+      locale: job.data.locale === 'en' ? 'en' : 'zh',
+    })
     const aspectRatio = assetType === 'prop' ? PROP_IMAGE_RATIO : LOCATION_IMAGE_RATIO
     await reportTaskProgress(job, 20 + Math.floor((i / Math.max(locationImages.length, 1)) * 55), {
       stage: 'generate_location_image',
@@ -171,6 +177,8 @@ export async function handleLocationImageTask(job: Job<TaskJobData>) {
       label: name,
       targetId: item.id,
       keyPrefix: 'location',
+      // 同一个 task 内会循环生成多张：不能复用 task.externalId，否则会一直“续接”到第一张导致每张都一样
+      allowTaskExternalIdResume: locationImages.length === 1,
       options: {
         aspectRatio,
       },

@@ -121,6 +121,7 @@ export interface ProjectModelConfig {
   localI2ISteps: number
   localStoryboardPromptRefineEnabled: boolean
   localStoryboardPromptRefineLevel: 'conservative' | 'medium' | 'simple'
+  localStoryboardUsePanelDescriptionEnabled: boolean
 }
 
 export interface UserModelConfig {
@@ -192,6 +193,11 @@ export async function getProjectModelConfig(
       ? localStoryboardPromptRefineLevelRaw
       : 'medium'
 
+  const localStoryboardUsePanelDescriptionEnabled =
+    typeof rawProject?.localStoryboardUsePanelDescriptionEnabled === 'boolean'
+      ? rawProject.localStoryboardUsePanelDescriptionEnabled
+      : false
+
   return {
     analysisModel: extractModelKey(projectData?.analysisModel) || extractModelKey(userPref?.analysisModel) || null,
     characterModel: extractModelKey(projectData?.characterModel) || null,
@@ -215,6 +221,7 @@ export async function getProjectModelConfig(
     localI2ISteps,
     localStoryboardPromptRefineEnabled,
     localStoryboardPromptRefineLevel,
+    localStoryboardUsePanelDescriptionEnabled,
   }
 }
 

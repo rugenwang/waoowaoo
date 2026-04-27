@@ -42,6 +42,7 @@ interface ProjectSnapshotInput {
   localI2ISteps: number
   localStoryboardPromptRefineEnabled: boolean
   localStoryboardPromptRefineLevel: 'conservative' | 'medium' | 'simple'
+  localStoryboardUsePanelDescriptionEnabled: boolean
 }
 
 interface BuildWorkspaceControllerViewModelParams {

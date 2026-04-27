@@ -1,6 +1,6 @@
 import { type Job } from 'bullmq'
 import { prisma } from '@/lib/prisma'
-import { getArtStylePrompt } from '@/lib/constants'
+import { getArtStylePrompt, prependAnimeStyleLabel } from '@/lib/constants'
 import { logInfo as _ulogInfo } from '@/lib/logging/core'
 import { type TaskJobData } from '@/lib/task/types'
 import {
@@ -242,7 +242,7 @@ export async function handlePanelVariantTask(job: Job<TaskJobData>) {
     : (job.data.locale === 'en' ? 'Character reference images disabled' : '未使用角色参考图')
   const locationName = newPanel.location || sourcePanel.location || ''
 
-  const prompt = buildVariantPrompt({
+  const rawPrompt = buildVariantPrompt({
     locale: job.data.locale,
     originalDescription: sourcePanel.description || '',
     originalShotType: sourcePanel.shotType || '',
@@ -263,6 +263,11 @@ export async function handlePanelVariantTask(job: Job<TaskJobData>) {
     }),
     aspectRatio,
     style: artStyle || '与参考图风格一致',
+  })
+  const prompt = prependAnimeStyleLabel({
+    prompt: rawPrompt,
+    artStyle: modelConfig.artStyle,
+    locale: job.data.locale === 'en' ? 'en' : 'zh',
   })
 
   _ulogInfo('[panel-variant] resolved variant prompt', prompt)
