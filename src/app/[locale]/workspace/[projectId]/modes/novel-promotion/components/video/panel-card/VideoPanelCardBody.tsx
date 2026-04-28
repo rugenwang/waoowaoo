@@ -1,9 +1,10 @@
-import React from 'react'
+import React, { useMemo, useState } from 'react'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapabilityDropdown'
 import { AppIcon } from '@/components/ui/icons'
 import type { VideoPanelRuntime } from './hooks/useVideoPanelActions'
+import { useUpdateProjectPanelDuration } from '@/lib/query/mutations/useVideoMutations'
 
 interface VideoPanelCardBodyProps {
   runtime: VideoPanelRuntime
@@ -25,6 +26,29 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
     lipSync,
     computed,
   } = runtime
+
+  const updateDurationMutation = useUpdateProjectPanelDuration(runtime.layout.projectId)
+  const currentDuration = panel.textPanel?.duration
+  const [isEditingDuration, setIsEditingDuration] = useState(false)
+  const [editingDuration, setEditingDuration] = useState<string>('')
+  const durationSuffix = useMemo(() => t('promptModal.duration'), [t])
+
+  const beginEditDuration = () => {
+    setEditingDuration(currentDuration ? String(currentDuration) : '')
+    setIsEditingDuration(true)
+  }
+
+  const saveDuration = async () => {
+    const raw = editingDuration.trim()
+    const next = raw === '' ? null : Number(raw)
+    if (next !== null && (!Number.isFinite(next) || next <= 0 || !Number.isInteger(next))) return
+    await updateDurationMutation.mutateAsync({
+      storyboardId: panel.storyboardId,
+      panelIndex: panel.panelIndex,
+      duration: next,
+    })
+    setIsEditingDuration(false)
+  }
   const safeTranslate = (key: string | undefined, fallback = ''): string => {
     if (!key) return fallback
     try {
@@ -55,7 +79,39 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
     <div className="p-4 space-y-2">
       <div className="flex items-center justify-between text-xs">
         <span className="px-2 py-0.5 bg-[var(--glass-tone-info-bg)] text-[var(--glass-tone-info-fg)] rounded font-medium">{panel.textPanel?.shot_type || t('panelCard.unknownShotType')}</span>
-        {panel.textPanel?.duration && <span className="text-[var(--glass-text-tertiary)]">{panel.textPanel.duration}{t('promptModal.duration')}</span>}
+        {isEditingDuration ? (
+          <span className="flex items-center gap-1 text-[var(--glass-text-tertiary)]">
+            <input
+              className="w-14 rounded border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-1 py-0.5 text-xs text-[var(--glass-text-secondary)] focus:outline-none focus:ring-1 focus:ring-[var(--glass-tone-info-fg)]"
+              value={editingDuration}
+              onChange={(e) => setEditingDuration(e.target.value)}
+              placeholder="4"
+            />
+            <span>{durationSuffix}</span>
+            <button
+              onClick={saveDuration}
+              disabled={updateDurationMutation.isPending}
+              className="ml-1 text-[var(--glass-tone-info-fg)] hover:underline disabled:opacity-50"
+            >
+              {updateDurationMutation.isPending ? '...' : t('panelCard.save')}
+            </button>
+            <button
+              onClick={() => setIsEditingDuration(false)}
+              disabled={updateDurationMutation.isPending}
+              className="text-[var(--glass-text-tertiary)] hover:text-[var(--glass-tone-info-fg)] disabled:opacity-50"
+            >
+              {t('panelCard.cancel')}
+            </button>
+          </span>
+        ) : (
+          <span
+            className="text-[var(--glass-text-tertiary)] cursor-pointer hover:text-[var(--glass-tone-info-fg)]"
+            title="点击编辑镜头时长"
+            onClick={beginEditDuration}
+          >
+            {(panel.textPanel?.duration ? `${panel.textPanel.duration}${durationSuffix}` : `—${durationSuffix}`)}
+          </span>
+        )}
       </div>
 
       <p className="text-sm text-[var(--glass-text-secondary)] line-clamp-2">{panel.textPanel?.description}</p>

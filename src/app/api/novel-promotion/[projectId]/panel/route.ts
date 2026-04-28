@@ -14,6 +14,16 @@ function parseNullableNumberField(value: unknown): number | null {
   throw new ApiError('INVALID_PARAMS')
 }
 
+function parseNullableIntField(value: unknown): number | null {
+  const parsed = parseNullableNumberField(value)
+  if (parsed === null) return null
+  const intVal = Math.floor(parsed)
+  if (!Number.isFinite(intVal) || intVal <= 0) {
+    throw new ApiError('INVALID_PARAMS')
+  }
+  return intVal
+}
+
 function toStructuredJsonField(value: unknown, fieldName: string): string | null {
   try {
     return serializeStructuredJsonField(value, fieldName)
@@ -94,7 +104,7 @@ export const POST = apiHandler(async (
       props: props ?? null,
       srtStart: srtStart ?? null,
       srtEnd: srtEnd ?? null,
-      duration: duration ?? null,
+      duration: duration !== undefined ? parseNullableIntField(duration) : null,
       videoPrompt: videoPrompt ?? null,
       firstLastFramePrompt: firstLastFramePrompt ?? null,
     }
@@ -229,7 +239,7 @@ export const PATCH = apiHandler(async (
   const panelModel = prisma.novelPromotionPanel as unknown as {
     create: (args: { data: Record<string, unknown> }) => Promise<unknown>
   }
-  const { panelId, storyboardId, panelIndex, videoPrompt, firstLastFramePrompt } = body
+  const { panelId, storyboardId, panelIndex, videoPrompt, firstLastFramePrompt, duration } = body
 
   // 🔥 方式1：通过 panelId 直接更新（优先）
   if (panelId) {
@@ -245,9 +255,11 @@ export const PATCH = apiHandler(async (
     const updateData: {
       videoPrompt?: string | null
       firstLastFramePrompt?: string | null
+      duration?: number | null
     } = {}
     if (videoPrompt !== undefined) updateData.videoPrompt = videoPrompt
     if (firstLastFramePrompt !== undefined) updateData.firstLastFramePrompt = firstLastFramePrompt
+    if (duration !== undefined) updateData.duration = parseNullableIntField(duration)
 
     await prisma.novelPromotionPanel.update({
       where: { id: panelId },
@@ -275,12 +287,16 @@ export const PATCH = apiHandler(async (
   const updateData: {
     videoPrompt?: string | null
     firstLastFramePrompt?: string | null
+    duration?: number | null
   } = {}
   if (videoPrompt !== undefined) {
     updateData.videoPrompt = videoPrompt
   }
   if (firstLastFramePrompt !== undefined) {
     updateData.firstLastFramePrompt = firstLastFramePrompt
+  }
+  if (duration !== undefined) {
+    updateData.duration = parseNullableIntField(duration)
   }
 
   // 尝试更新 Panel
@@ -303,6 +319,7 @@ export const PATCH = apiHandler(async (
         imageUrl: null,
         videoPrompt: videoPrompt ?? null,
         firstLastFramePrompt: firstLastFramePrompt ?? null,
+        duration: duration !== undefined ? parseNullableIntField(duration) : null,
       }
     })
   }
@@ -386,7 +403,8 @@ export const PUT = apiHandler(async (
   if (props !== undefined) updateData.props = props
   if (srtStart !== undefined) updateData.srtStart = parseNullableNumberField(srtStart)
   if (srtEnd !== undefined) updateData.srtEnd = parseNullableNumberField(srtEnd)
-  if (duration !== undefined) updateData.duration = parseNullableNumberField(duration)
+  // duration 必须为整数秒
+  if (duration !== undefined) updateData.duration = parseNullableIntField(duration)
   if (videoPrompt !== undefined) updateData.videoPrompt = videoPrompt
   if (firstLastFramePrompt !== undefined) updateData.firstLastFramePrompt = firstLastFramePrompt
   // JSON 字段存为规范化 JSON 字符串

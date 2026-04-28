@@ -39,6 +39,13 @@ export function toPositiveInt(value: unknown): number | null {
   return n >= 0 ? n : null
 }
 
+function normalizeDurationSeconds(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  const n = Math.floor(value)
+  return n > 0 ? n : null
+}
+
 function parsePanelCharacters(raw: string | null): string[] {
   if (!raw) return []
   try {
@@ -198,7 +205,7 @@ export async function persistStoryboardsAndPanels(params: {
             srtSegment: panel.source_text || null,
             photographyRules: panel.photographyPlan ? JSON.stringify(panel.photographyPlan) : null,
             actingNotes: panel.actingNotes ? JSON.stringify(panel.actingNotes) : null,
-            duration: panel.duration || null,
+            duration: normalizeDurationSeconds(panel.duration),
           },
           select: {
             id: true,
@@ -292,7 +299,7 @@ export async function persistStoryboardOutputs(params: {
             srtSegment: panel.source_text || null,
             photographyRules: panel.photographyPlan ? JSON.stringify(panel.photographyPlan) : null,
             actingNotes: panel.actingNotes ? JSON.stringify(panel.actingNotes) : null,
-            duration: panel.duration || null,
+            duration: normalizeDurationSeconds(panel.duration),
           },
           select: {
             id: true,

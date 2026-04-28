@@ -416,7 +416,9 @@ async function handleRegenerateStoryboardTextTask(job: Job<TaskJobData>) {
           props: panel.props ? JSON.stringify(panel.props) : null,
           srtStart,
           srtEnd,
-          duration: panel.duration || null,
+          duration: (typeof panel.duration === 'number' && Number.isFinite(panel.duration) && panel.duration > 0)
+            ? Math.floor(panel.duration)
+            : null,
           videoPrompt: panel.video_prompt || null,
           sceneType: typeof panel.scene_type === 'string' ? panel.scene_type : null,
           srtSegment: panel.source_text || null,

@@ -283,6 +283,21 @@ export async function resolveImageSourceFromGeneration(
     return `${text.slice(0, max)}…(truncated)`
   }
   const providerKey = (parsedModel?.provider || '').trim()
+
+  // GPT Image 2（api.img.dengche.cc / eeeapi）质量策略：
+  // 为了稳定与速度，固定透传 quality=medium（不允许被上层覆盖）。
+  // 说明：该服务端把 gpt-image-1 / gpt-image-2 / dall-e-2 / dall-e-3 都路由到 gpt-image-2。
+  const shouldForceMediumQuality = providerKey === 'eeeapi' && (() => {
+    const modelRef = (parsedModel?.modelId || '').trim()
+    return modelRef === 'gpt-image-1'
+      || modelRef === 'gpt-image-2'
+      || modelRef === 'dall-e-2'
+      || modelRef === 'dall-e-3'
+  })()
+  if (shouldForceMediumQuality) {
+    ;(capabilityOptions as Record<string, unknown>).quality = 'medium'
+  }
+
   const eeeapiRequest = providerKey === 'eeeapi'
     ? await (async () => {
         try {

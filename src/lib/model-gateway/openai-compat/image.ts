@@ -191,6 +191,26 @@ function readAllImagePayloads(response: unknown): ImagePayloads {
   }
 }
 
+function summarizeEmptyImageResponse(response: unknown): string {
+  try {
+    if (!response || typeof response !== 'object') return String(response)
+    const obj = response as Record<string, unknown>
+    const detail = typeof obj.detail === 'string' ? obj.detail : null
+    if (detail) return `detail=${detail}`
+    const data = obj.data
+    if (!Array.isArray(data)) {
+      return `keys=[${Object.keys(obj).slice(0, 20).join(',')}], dataType=${typeof data}`
+    }
+    const first = data[0]
+    const firstKeys = first && typeof first === 'object' && !Array.isArray(first)
+      ? Object.keys(first as Record<string, unknown>).slice(0, 20).join(',')
+      : typeof first
+    return `keys=[${Object.keys(obj).slice(0, 20).join(',')}], data.length=${data.length}, firstKeys=${firstKeys}`
+  } catch (e) {
+    return `unreadable_response:${String(e)}`
+  }
+}
+
 export async function generateImageViaOpenAICompat(request: OpenAICompatImageRequest): Promise<GenerateResult> {
   const {
     userId,
@@ -245,7 +265,7 @@ export async function generateImageViaOpenAICompat(request: OpenAICompatImageReq
         ...(imagePayload.urls.length > 1 ? { imageUrls: imagePayload.urls } : {}),
       }
     }
-    throw new Error('OPENAI_COMPAT_IMAGE_EMPTY_RESPONSE: no image data returned')
+    throw new Error(`OPENAI_COMPAT_IMAGE_EMPTY_RESPONSE: no image data returned (${summarizeEmptyImageResponse(response)})`)
   }
 
   const response = await client.images.generate({
@@ -277,5 +297,5 @@ export async function generateImageViaOpenAICompat(request: OpenAICompatImageReq
       ...(imagePayload.urls.length > 1 ? { imageUrls: imagePayload.urls } : {}),
     }
   }
-  throw new Error('OPENAI_COMPAT_IMAGE_EMPTY_RESPONSE: no image data returned')
+  throw new Error(`OPENAI_COMPAT_IMAGE_EMPTY_RESPONSE: no image data returned (${summarizeEmptyImageResponse(response)})`)
 }

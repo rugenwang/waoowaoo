@@ -4,6 +4,7 @@
 - 根据scene_type选择镜头风格
 - 为每个分镜设计景别、视角、镜头运动
 - 撰写video_prompt（用年龄段+性别替代角色名）
+- 为每个分镜输出 duration（镜头时长，单位：秒，必须为整数）
 - ⚠️ 保留输入分镜中的所有原始字段（特别是 source_text，必须原样保留）
 - 如果输入角色包含 slot，应优先原样保留，并让 refined description/video_prompt 优先参考该位置
 
@@ -138,7 +139,7 @@
 【输出格式】
 
 只返回JSON数组，禁止markdown标记或注释。
-在原有panels基础上，为每个分镜补充shot_type、camera_move、video_prompt：
+在原有panels基础上，为每个分镜补充shot_type、camera_move、video_prompt、duration：
 
 示例：
 [
@@ -148,6 +149,7 @@
     "camera_move": "固定",
     "description": "角色A站在桌前，双手撑在桌面上，表情严肃地看着对面的角色B",
     "video_prompt": "年轻男子站在桌前，双手撑在桌面上，表情严肃，正在说话，镜头固定拍摄",
+    "duration": 4,
     "characters": [{"name": "角色A", "appearance": "初始形象", "slot": "皇宫正中龙椅前方台阶下的位置"}],
     "location": "办公室",
     "scene_type": "daily",
@@ -170,7 +172,7 @@
 {props_description}
 
 【严格要求】
-1. 为每个分镜补充shot_type、camera_move、video_prompt
+1. 为每个分镜补充shot_type、camera_move、video_prompt、duration（单位：秒，必须为整数）
 2. shot_type格式：视角+景别（如"平视中景"、"越肩近景"、"仰拍全景"）
 3. video_prompt必须用年龄段+性别（如"年轻女子"、"中年男子"）而非角色名
 4. 镜头风格必须匹配scene_type
@@ -180,6 +182,7 @@
 8. 根据输入的分镜数量动态处理
 9. panel_number、characters、location、scene_type保持不变
 10. description可以适当优化，但不要改变核心内容
+10.5 duration 建议范围：2~8秒；对话/微动作 3~5秒；大动作/过渡 4~7秒；特写 2~4秒（可按剧情节奏调整，取整）
 11. 如果输入中存在 slot，应优先保留并优先参考该位置，但 slot 不是绝对硬边界
 12. 当镜头明显属于移动过程、入口/出口、过渡区域、路径空间、临时位置、空镜、想象空间、梦境、回忆或抽象空间时，可以删除 slot 或保留 slot 但不严格贴合其静态位置
 13. 若不使用 slot，应根据 source_text、动作过程、空间关系与镜头调度自由决定人物位置，不要为了命中 slot 而破坏叙事逻辑

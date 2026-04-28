@@ -83,3 +83,38 @@ export function useUpdateProjectPanelVideoPrompt(projectId: string) {
     },
   })
 }
+
+/**
+ * 更新 Panel 镜头时长（秒）
+ */
+export function useUpdateProjectPanelDuration(projectId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      storyboardId,
+      panelIndex,
+      duration,
+    }: {
+      storyboardId: string
+      panelIndex: number
+      duration: number | null
+    }) =>
+      await requestJsonWithError(
+        `/api/novel-promotion/${projectId}/panel`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            storyboardId,
+            panelIndex,
+            duration,
+          }),
+        },
+        'update failed',
+      ),
+    onSettled: () => {
+      invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+    },
+  })
+}

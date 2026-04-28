@@ -134,6 +134,8 @@ export function useVideoPanelActions({
       nextPanel,
       prevPanel,
       hasNext,
+      projectId,
+      episodeId,
       flModel,
       flModelOptions,
       flGenerationOptions,

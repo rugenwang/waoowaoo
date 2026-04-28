@@ -25,7 +25,7 @@ Required fields per panel:
 - shot_type
 - camera_move
 - video_prompt
-- duration (optional)
+- duration (seconds, integer)
 
 Output schema example (field names must be preserved):
 [

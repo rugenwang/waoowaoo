@@ -37,9 +37,31 @@ export async function resolveOpenAICompatClientConfig(userId: string, providerId
   if (!config.baseUrl) {
     throw new Error(`PROVIDER_BASE_URL_MISSING: ${config.id}`)
   }
+  const rawBaseUrl = String(config.baseUrl || '').trim()
+  const normalizedBaseUrl = (() => {
+    const trimmed = rawBaseUrl.replace(/\/+$/, '')
+    // GPT Image 2（eeeapi）要求 SDK 直连 api.img.dengche.cc/v1，避免 CDN/前端页面导致的 HTML 响应。
+    if (providerId === 'eeeapi' || config.id === 'eeeapi') {
+      // 用户可能填了浏览器入口 img.dengche.cc，或漏掉 /v1
+      if (/^https?:\/\/img\.dengche\.cc(\/.*)?$/i.test(trimmed)) {
+        return 'https://api.img.dengche.cc/v1'
+      }
+      if (/^https?:\/\/api\.img\.dengche\.cc$/i.test(trimmed)) {
+        return 'https://api.img.dengche.cc/v1'
+      }
+      if (/^https?:\/\/api\.img\.dengche\.cc\/v1\/?$/i.test(trimmed)) {
+        return 'https://api.img.dengche.cc/v1'
+      }
+      // api.img.dengche.cc 但路径不是 /v1，补齐
+      if (/^https?:\/\/api\.img\.dengche\.cc(\/.*)?$/i.test(trimmed) && !/\/v1(\/|$)/i.test(trimmed)) {
+        return `${trimmed}/v1`
+      }
+    }
+    return trimmed
+  })()
   return {
     providerId: config.id,
-    baseUrl: config.baseUrl,
+    baseUrl: normalizedBaseUrl,
     apiKey: config.apiKey,
   }
 }
