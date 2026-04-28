@@ -6,6 +6,7 @@ import WorkspaceTopActions from './WorkspaceTopActions'
 import type { NovelPromotionPanel } from '@/types/project'
 import type { CapabilitySelections, ModelCapabilities } from '@/lib/model-config-contract'
 import { resolveEpisodeStageArtifacts } from '@/lib/novel-promotion/stage-readiness'
+import { apiFetch } from '@/lib/api-fetch'
 
 interface EpisodeSummary {
   id: string
@@ -64,6 +65,7 @@ interface WorkspaceHeaderShellProps {
   localStoryboardPromptRefineEnabled: boolean
   localStoryboardPromptRefineLevel: 'conservative' | 'medium' | 'simple'
   localStoryboardUsePanelDescriptionEnabled: boolean
+  progressPopupEnabled: boolean
   onUpdateConfig: (key: string, value: unknown) => Promise<void>
   globalAssetText: string
   projectName: string
@@ -123,6 +125,7 @@ export default function WorkspaceHeaderShell({
   localStoryboardPromptRefineEnabled,
   localStoryboardPromptRefineLevel,
   localStoryboardUsePanelDescriptionEnabled,
+  progressPopupEnabled,
   onUpdateConfig,
   globalAssetText,
   projectName,
@@ -174,6 +177,7 @@ export default function WorkspaceHeaderShell({
         localStoryboardPromptRefineEnabled={localStoryboardPromptRefineEnabled}
         localStoryboardPromptRefineLevel={localStoryboardPromptRefineLevel}
         localStoryboardUsePanelDescriptionEnabled={localStoryboardUsePanelDescriptionEnabled}
+        progressPopupEnabled={progressPopupEnabled}
         onArtStyleChange={(value) => { onUpdateConfig('artStyle', value) }}
         onAnalysisModelChange={(value) => { onUpdateConfig('analysisModel', value) }}
         onCharacterModelChange={(value) => { onUpdateConfig('characterModel', value) }}
@@ -197,6 +201,15 @@ export default function WorkspaceHeaderShell({
         onLocalStoryboardPromptRefineEnabledChange={(value) => { onUpdateConfig('localStoryboardPromptRefineEnabled', value) }}
         onLocalStoryboardPromptRefineLevelChange={(value) => { onUpdateConfig('localStoryboardPromptRefineLevel', value) }}
         onLocalStoryboardUsePanelDescriptionEnabledChange={(value) => { onUpdateConfig('localStoryboardUsePanelDescriptionEnabled', value) }}
+        onProgressPopupEnabledChange={(value) => {
+          onUpdateConfig('progressPopupEnabled', value)
+          // 同步到用户偏好：让全局资产库也能复用该开关
+          void apiFetch('/api/user-preference', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ progressPopupEnabled: value }),
+          })
+        }}
       />
 
       <WorldContextModal

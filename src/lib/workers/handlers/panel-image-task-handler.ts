@@ -426,28 +426,39 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
 
   // 可选：本地模型前先用文本模型精炼 prompt（把 JSON/规则压成一条更适合本地模型的提示词）
   const shouldRefinePrompt =
-    parsedStoryboardModel?.provider === 'local'
-    && modelConfig.localStoryboardPromptRefineEnabled === true
+    modelConfig.localStoryboardPromptRefineEnabled === true
     && !!modelConfig.analysisModel
 
   const refinedOrRawPrompt = shouldRefinePrompt ? await (async () => {
     try {
       const strength = modelConfig.localStoryboardPromptRefineLevel || 'medium'
-      // 本地模型精炼：优先精炼“最终会用于生图的那段整洁 prompt”
-      // - 勾选画面描述：精炼画面描述
-      // - 未勾选画面描述：精炼 buildPanelStructuredPrompt 生成的整洁 prompt
-      // 复用 NP_STORYBOARD_PROMPT_REFINE_DESCRIPTION 模板即可（其输入本质是一段待精炼文本）。
-      const refineUserPrompt = buildPrompt({
-        promptId: PROMPT_IDS.NP_STORYBOARD_PROMPT_REFINE_DESCRIPTION,
-        locale: job.data.locale,
-        variables: {
-          panel_description: usePanelDescriptionEnabled && panelDescriptionText ? panelDescriptionText : prompt,
-          aspect_ratio: aspectRatio,
-          style: artStyle || '与参考图风格一致',
-          strength,
-          reference_images_count: String(normalizedRefs.length),
-        },
-      })
+      // 本地模型精炼：
+      // - 勾选“使用画面描述”：精炼画面描述（纯文本）
+      // - 否则：用完整分镜 JSON 做精炼（你在 lib/prompts/novel-promotion/storyboard_prompt_refine.zh.txt 里配置的那个）
+      const refineUserPrompt = (usePanelDescriptionEnabled && panelDescriptionText)
+        ? buildPrompt({
+          promptId: PROMPT_IDS.NP_STORYBOARD_PROMPT_REFINE_DESCRIPTION,
+          locale: job.data.locale,
+          variables: {
+            panel_description: panelDescriptionText,
+            aspect_ratio: aspectRatio,
+            style: artStyle || '与参考图风格一致',
+            strength,
+            reference_images_count: String(normalizedRefs.length),
+          },
+        })
+        : buildPrompt({
+          promptId: PROMPT_IDS.NP_STORYBOARD_PROMPT_REFINE,
+          locale: job.data.locale,
+          variables: {
+            storyboard_text_json_input: contextJson,
+            source_text: panel.srtSegment || panel.description || '',
+            aspect_ratio: aspectRatio,
+            style: artStyle || '与参考图风格一致',
+            strength,
+            reference_images_count: String(normalizedRefs.length),
+          },
+        })
 
       const res = await executeAiTextStep({
         userId: job.data.userId,
@@ -485,17 +496,22 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     locale: job.data.locale === 'en' ? 'en' : 'zh',
   })
 
-  // 本地模型（ltx/MLX）在启用“精炼/画面描述”后最终 prompt 可能过于“自由”，
-  // 这里把关键的限制性规则重新加回 prompt，防止模型乱加文字/拼图/比例跑偏。
-  const hardConstraints = buildStoryboardHardConstraints({
-    locale: job.data.locale,
-    aspectRatio,
-    styleText: artStyle || '',
-    referenceImagesCount: normalizedRefs.length,
-  })
+  // 在启用“精炼 / 使用画面描述”时，把关键的限制性规则追加在提示词末尾，
+  // 防止模型乱加文字/拼图/比例跑偏。该规则应对任意模型均适用。
+  const shouldAppendHardConstraints =
+    modelConfig.localStoryboardPromptRefineEnabled === true
+    || modelConfig.localStoryboardUsePanelDescriptionEnabled === true
+  const hardConstraints = shouldAppendHardConstraints
+    ? buildStoryboardHardConstraints({
+      locale: job.data.locale,
+      aspectRatio,
+      styleText: artStyle || '',
+      referenceImagesCount: normalizedRefs.length,
+    })
+    : ''
 
   const finalPrompt = hardConstraints
-    ? `${hardConstraints}\n\n${withAnimeStyle}`
+    ? `${withAnimeStyle}\n\n${hardConstraints}`
     : withAnimeStyle
 
   logger.info({

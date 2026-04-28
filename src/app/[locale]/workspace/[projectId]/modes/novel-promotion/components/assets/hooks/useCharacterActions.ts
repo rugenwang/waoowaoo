@@ -12,6 +12,7 @@ import { useTranslations } from 'next-intl'
 import { useCallback } from 'react'
 import { CharacterAppearance } from '@/types/project'
 import { isAbortError } from '@/lib/error-utils'
+import { useTaskQueue } from '@/lib/task-queue'
 import {
     useProjectAssets,
     useRefreshProjectAssets,
@@ -44,6 +45,8 @@ export function useCharacterActions({
     showToast
 }: UseCharacterActionsProps) {
     const t = useTranslations('assets')
+    const taskQueue = useTaskQueue()
+    const queueMode = taskQueue.enabled
     // 🔥 直接订阅缓存 - 消除 props drilling
     const { data: assets } = useProjectAssets(projectId)
     const characters = assets?.characters ?? []
@@ -133,6 +136,32 @@ export function useCharacterActions({
         imageIndex: number
     ) => {
         try {
+            if (queueMode) {
+                const appearanceIndex = characters
+                    .find((c) => c.id === characterId)
+                    ?.appearances?.find((a) => a.id === appearanceId)
+                    ?.appearanceIndex
+                const characterName = characters.find((c) => c.id === characterId)?.name || characterId
+                taskQueue.enqueue({
+                    id: `character-single:${characterId}:${appearanceId}:${imageIndex}:${Date.now()}`,
+                    group: 'assets',
+                    projectId,
+                    target: { targetType: 'CharacterAppearance', targetId: appearanceId },
+                    uiKey: typeof appearanceIndex === 'number'
+                        ? `character-${characterId}-${appearanceIndex}-${imageIndex}`
+                        : `character-${characterId}-${appearanceId}-${imageIndex}`,
+                    label: typeof appearanceIndex === 'number'
+                        ? `角色：${characterName}（形象 ${appearanceIndex} 图 ${imageIndex}）`
+                        : `角色：${characterName}（图 ${imageIndex}）`,
+                    submit: async () => {
+                        const res = await regenerateSingleImage.mutateAsync({ characterId, appearanceId, imageIndex }) as any
+                        return { taskId: String(res?.taskId || '') }
+                    },
+                    onDone: async () => { refreshAssets() },
+                    onFail: async () => { refreshAssets() },
+                })
+                return
+            }
             await regenerateSingleImage.mutateAsync({ characterId, appearanceId, imageIndex })
         } catch (error: unknown) {
             if (!isAbortError(error)) {
@@ -140,7 +169,7 @@ export function useCharacterActions({
             }
             throw error
         }
-    }, [regenerateSingleImage, t])
+    }, [characters, projectId, queueMode, refreshAssets, regenerateSingleImage, t, taskQueue])
 
     // 整组重新生成角色图片 - 🔥 V6.7: 使用mutation hook
     const handleRegenerateCharacterGroup = useCallback(async (
@@ -149,6 +178,32 @@ export function useCharacterActions({
         count?: number,
     ) => {
         try {
+            if (queueMode) {
+                const appearanceIndex = characters
+                    .find((c) => c.id === characterId)
+                    ?.appearances?.find((a) => a.id === appearanceId)
+                    ?.appearanceIndex
+                const characterName = characters.find((c) => c.id === characterId)?.name || characterId
+                taskQueue.enqueue({
+                    id: `character-group:${characterId}:${appearanceId}:${Date.now()}`,
+                    group: 'assets',
+                    projectId,
+                    target: { targetType: 'CharacterAppearance', targetId: appearanceId },
+                    uiKey: typeof appearanceIndex === 'number'
+                        ? `character-${characterId}-${appearanceIndex}-group`
+                        : `character-${characterId}-${appearanceId}-group`,
+                    label: typeof appearanceIndex === 'number'
+                        ? `角色：${characterName}（形象 ${appearanceIndex}）`
+                        : `角色：${characterName}`,
+                    submit: async () => {
+                        const res = await regenerateGroup.mutateAsync({ characterId, appearanceId, count }) as any
+                        return { taskId: String(res?.taskId || '') }
+                    },
+                    onDone: async () => { refreshAssets() },
+                    onFail: async () => { refreshAssets() },
+                })
+                return
+            }
             await regenerateGroup.mutateAsync({ characterId, appearanceId, count })
         } catch (error: unknown) {
             if (!isAbortError(error)) {
@@ -156,7 +211,7 @@ export function useCharacterActions({
             }
             throw error
         }
-    }, [regenerateGroup, t])
+    }, [characters, projectId, queueMode, refreshAssets, regenerateGroup, t, taskQueue])
 
     // 更新形象描述 - 🔥 仍需保存到服务器
     const handleUpdateAppearanceDescription = useCallback(async (

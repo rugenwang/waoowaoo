@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../keys'
 import type { Character, Location, MediaRef, Prop } from '@/types/project'
 import { useAssets } from './useAssets'
+import type { TaskTargetStateQuery } from './useTaskTargetStateMap'
 import type { AssetGroupMap } from '@/lib/assets/grouping'
 import { groupAssetsByKind } from '@/lib/assets/grouping'
 
@@ -110,11 +111,17 @@ export function mapAssetGroupsToProjectAssetsData(groups: AssetGroupMap): Projec
 /**
  * 获取项目资产（角色 + 场景）
  */
-export function useProjectAssets(projectId: string | null) {
-    const assetsQuery = useAssets({
-        scope: 'project',
-        projectId,
-    })
+export function useProjectAssets(
+    projectId: string | null,
+    options?: { taskTargets?: TaskTargetStateQuery[] },
+) {
+    const assetsQuery = useAssets(
+        {
+            scope: 'project',
+            projectId,
+        },
+        options,
+    )
     const groups = groupAssetsByKind(assetsQuery.data)
     const data = mapAssetGroupsToProjectAssetsData(groups)
 

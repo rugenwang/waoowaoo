@@ -14,6 +14,7 @@ import { useProjectAssets } from '@/lib/query/hooks/useProjectAssets'
 import LocationCard from './LocationCard'
 import { AppIcon } from '@/components/ui/icons'
 import { resolveLocationBackedGenerateType } from './location-backed-asset'
+import { useTaskQueue } from '@/lib/task-queue'
 
 interface LocationSectionProps {
     // 🔥 V6.5 删除：locations prop - 现在内部直接订阅
@@ -62,6 +63,8 @@ export default function LocationSection({
     filterIds = null,
 }: LocationSectionProps) {
     const t = useTranslations('assets')
+    const taskQueue = useTaskQueue()
+    const queueMode = taskQueue.enabled
 
     const { data: assets } = useProjectAssets(projectId)
     const allLocations: Array<Location | Prop> = assetType === 'prop'
@@ -119,26 +122,26 @@ export default function LocationSection({
                                 const imageIndex = validImages[0].imageIndex
                                 const taskKey = `location-${location.id}-${imageIndex}`
                                 _ulogInfo('[LocationSection] 调用单张重新生成, imageIndex:', imageIndex)
-                                onRegisterTransientTaskKey(taskKey)
+                                if (!queueMode) onRegisterTransientTaskKey(taskKey)
                                 void onRegenerateSingle(location.id, imageIndex).catch(() => {
-                                    onClearTaskKey(taskKey)
+                                    if (!queueMode) onClearTaskKey(taskKey)
                                 })
                             }
                             // 多图或无图：重新生成整组
                             else {
                                 const taskKey = `location-${location.id}-group`
                                 _ulogInfo('[LocationSection] 调用整组重新生成')
-                                onRegisterTransientTaskKey(taskKey)
+                                if (!queueMode) onRegisterTransientTaskKey(taskKey)
                                 void onRegenerateGroup(location.id, count).catch(() => {
-                                    onClearTaskKey(taskKey)
+                                    if (!queueMode) onClearTaskKey(taskKey)
                                 })
                             }
                         }}
                         onGenerate={(count) => {
                             const taskKey = `location-${location.id}-group`
-                            onRegisterTransientTaskKey(taskKey)
+                            if (!queueMode) onRegisterTransientTaskKey(taskKey)
                             void handleGenerateImage(generateType, location.id, undefined, count).catch(() => {
-                                onClearTaskKey(taskKey)
+                                if (!queueMode) onClearTaskKey(taskKey)
                             })
                         }}
                         onUndo={() => onUndo(location.id)}

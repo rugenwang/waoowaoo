@@ -11,6 +11,7 @@ import { useTranslations } from 'next-intl'
 
 import { useCallback } from 'react'
 import { isAbortError } from '@/lib/error-utils'
+import { useTaskQueue } from '@/lib/task-queue'
 import {
     useAssetActions,
     useProjectAssets,
@@ -44,6 +45,8 @@ export function useLocationActions({
     showToast
 }: UseLocationActionsProps) {
     const t = useTranslations('assets')
+    const taskQueue = useTaskQueue()
+    const queueMode = taskQueue.enabled
     // 🔥 直接订阅缓存 - 消除 props drilling
     const { data: assets } = useProjectAssets(projectId)
     const locations = assetType === 'prop' ? assets?.props ?? [] : assets?.locations ?? []
@@ -111,6 +114,28 @@ export function useLocationActions({
     // 单张重新生成场景图片 - 🔥 V6.7: 使用mutation hook
     const handleRegenerateSingleLocation = useCallback(async (locationId: string, imageIndex: number) => {
         try {
+            if (queueMode) {
+                const locationName = locations.find((l) => l.id === locationId)?.name || locationId
+                taskQueue.enqueue({
+                    id: `${assetKey}-single:${locationId}:${imageIndex}:${Date.now()}`,
+                    group: 'assets',
+                    projectId,
+                    target: { targetType: 'LocationImage', targetId: locationId },
+                    uiKey: `${assetKey}-${locationId}-${imageIndex}`,
+                    label: `${assetType === 'prop' ? '道具' : '场景'}：${locationName}（图 ${imageIndex}）`,
+                    submit: async () => {
+                        if (assetType === 'prop') {
+                            const res = await propActions.generate({ id: locationId, imageIndex }) as any
+                            return { taskId: String(res?.taskId || '') }
+                        }
+                        const res = await regenerateSingleImage.mutateAsync({ locationId, imageIndex }) as any
+                        return { taskId: String(res?.taskId || '') }
+                    },
+                    onDone: async () => { refreshAssets() },
+                    onFail: async () => { refreshAssets() },
+                })
+                return
+            }
             if (assetType === 'prop') {
                 await propActions.generate({ id: locationId, imageIndex })
             } else {
@@ -122,11 +147,33 @@ export function useLocationActions({
             }
             throw error
         }
-    }, [assetType, propActions, regenerateSingleImage, t])
+    }, [assetKey, assetType, projectId, propActions, queueMode, refreshAssets, regenerateSingleImage, t, taskQueue])
 
     // 整组重新生成场景图片 - 🔥 V6.7: 使用mutation hook
     const handleRegenerateLocationGroup = useCallback(async (locationId: string, count?: number) => {
         try {
+            if (queueMode) {
+                const locationName = locations.find((l) => l.id === locationId)?.name || locationId
+                taskQueue.enqueue({
+                    id: `${assetKey}-group:${locationId}:${Date.now()}`,
+                    group: 'assets',
+                    projectId,
+                    target: { targetType: 'LocationImage', targetId: locationId },
+                    uiKey: `${assetKey}-${locationId}-group`,
+                    label: `${assetType === 'prop' ? '道具' : '场景'}：${locationName}`,
+                    submit: async () => {
+                        if (assetType === 'prop') {
+                            const res = await propActions.generate({ id: locationId, count }) as any
+                            return { taskId: String(res?.taskId || '') }
+                        }
+                        const res = await regenerateGroup.mutateAsync({ locationId, count }) as any
+                        return { taskId: String(res?.taskId || '') }
+                    },
+                    onDone: async () => { refreshAssets() },
+                    onFail: async () => { refreshAssets() },
+                })
+                return
+            }
             if (assetType === 'prop') {
                 await propActions.generate({ id: locationId, count })
             } else {
@@ -138,7 +185,7 @@ export function useLocationActions({
             }
             throw error
         }
-    }, [assetType, propActions, regenerateGroup, t])
+    }, [assetKey, assetType, projectId, propActions, queueMode, refreshAssets, regenerateGroup, t, taskQueue])
 
     // 更新场景描述 - 🔥 保存到服务器
     const handleUpdateLocationDescription = useCallback(async (

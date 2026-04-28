@@ -18,6 +18,10 @@ import { useState, useCallback, useMemo } from 'react'
 // 移除了 useRouter 导入，因为不再需要在组件中操作 URL
 import { Character, CharacterAppearance, NovelPromotionClip } from '@/types/project'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
+import { apiFetch } from '@/lib/api-fetch'
+import { upsertTaskTargetOverlay, clearTaskTargetOverlay } from '@/lib/query/task-target-overlay'
+import { useTaskQueue } from '@/lib/task-queue'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   useAssetActions,
   useGenerateProjectCharacterImage,
@@ -69,10 +73,18 @@ export default function AssetsStage({
   triggerGlobalAnalyze = false,
   onGlobalAnalyzeComplete
 }: AssetsStageProps) {
-  const { data: assets = [] } = useAssets({
-    scope: 'project',
-    projectId,
-  })
+  const queryClient = useQueryClient()
+  const taskQueue = useTaskQueue()
+  const queueMode = taskQueue.enabled
+  const { data: assets = [] } = useAssets(
+    {
+      scope: 'project',
+      projectId,
+    },
+    {
+      taskTargets: queueMode ? (taskQueue.activeTarget ? [taskQueue.activeTarget] : []) : undefined,
+    },
+  )
   const characters = useMemo(
     () => assets.filter((asset) => asset.kind === 'character'),
     [assets],
@@ -105,14 +117,156 @@ export default function AssetsStage({
     appearanceId?: string,
     count?: number,
   ) => {
-    if (type === 'character' && appearanceId) {
-      await generateCharacterImage.mutateAsync({ characterId: id, appearanceId, count })
-    } else if (type === 'location') {
-      await generateLocationImage.mutateAsync({ locationId: id, count })
-    } else if (type === 'prop') {
-      await propAssetActions.generate({ id, count })
+    if (!queueMode) {
+      if (type === 'character' && appearanceId) {
+        await generateCharacterImage.mutateAsync({ characterId: id, appearanceId, count })
+      } else if (type === 'location') {
+        await generateLocationImage.mutateAsync({ locationId: id, count })
+      } else if (type === 'prop') {
+        await propAssetActions.generate({ id, count })
+      }
+      return
     }
-  }, [generateCharacterImage, generateLocationImage, propAssetActions])
+
+    // 队列模式：一次只提交 1 个任务；提交时不做全量刷新，完成后再刷新
+    if (type === 'character' && appearanceId) {
+      const characterName = characters.find((c) => c.id === id)?.name || id
+      taskQueue.enqueue({
+        id: `asset-generate:character:${appearanceId}:${Date.now()}`,
+        group: 'assets',
+        projectId,
+        target: { targetType: 'CharacterAppearance', targetId: appearanceId },
+        uiKey: `character-${id}-${appearanceId}-group`,
+        label: `角色：${characterName}`,
+        submit: async () => {
+          upsertTaskTargetOverlay(queryClient, {
+            projectId,
+            targetType: 'CharacterAppearance',
+            targetId: appearanceId,
+            intent: 'generate',
+          })
+          const response = await apiFetch(`/api/assets/${encodeURIComponent(id)}/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              scope: 'project',
+              kind: 'character',
+              projectId,
+              appearanceId,
+              count,
+            }),
+          })
+          if (!response.ok) {
+            clearTaskTargetOverlay(queryClient, {
+              projectId,
+              targetType: 'CharacterAppearance',
+              targetId: appearanceId,
+            })
+          }
+          const data = await response.json().catch(() => ({}))
+          return { taskId: String((data as any)?.taskId || '') }
+        },
+        onDone: async () => {
+          refreshAssets()
+        },
+        onFail: async () => {
+          refreshAssets()
+        },
+      })
+      return
+    }
+
+    if (type === 'location') {
+      const locationName = locations.find((l) => l.id === id)?.name || id
+      taskQueue.enqueue({
+        id: `asset-generate:location:${id}:${Date.now()}`,
+        group: 'assets',
+        projectId,
+        target: { targetType: 'LocationImage', targetId: id },
+        uiKey: `location-${id}-group`,
+        label: `场景：${locationName}`,
+        submit: async () => {
+          upsertTaskTargetOverlay(queryClient, {
+            projectId,
+            targetType: 'LocationImage',
+            targetId: id,
+            intent: 'generate',
+          })
+          const response = await apiFetch(`/api/assets/${encodeURIComponent(id)}/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              scope: 'project',
+              kind: 'location',
+              projectId,
+              count,
+            }),
+          })
+          if (!response.ok) {
+            clearTaskTargetOverlay(queryClient, {
+              projectId,
+              targetType: 'LocationImage',
+              targetId: id,
+            })
+          }
+          const data = await response.json().catch(() => ({}))
+          return { taskId: String((data as any)?.taskId || '') }
+        },
+        onDone: async () => {
+          refreshAssets()
+        },
+        onFail: async () => {
+          refreshAssets()
+        },
+      })
+      return
+    }
+
+    if (type === 'prop') {
+      const propName = props.find((p) => p.id === id)?.name || id
+      taskQueue.enqueue({
+        id: `asset-generate:prop:${id}:${Date.now()}`,
+        group: 'assets',
+        projectId,
+        target: { targetType: 'LocationImage', targetId: id },
+        uiKey: `prop-${id}-group`,
+        label: `道具：${propName}`,
+        submit: async () => {
+          upsertTaskTargetOverlay(queryClient, {
+            projectId,
+            targetType: 'LocationImage',
+            targetId: id,
+            intent: 'generate',
+          })
+          const response = await apiFetch(`/api/assets/${encodeURIComponent(id)}/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              scope: 'project',
+              kind: 'prop',
+              projectId,
+              count,
+            }),
+          })
+          if (!response.ok) {
+            clearTaskTargetOverlay(queryClient, {
+              projectId,
+              targetType: 'LocationImage',
+              targetId: id,
+            })
+          }
+          const data = await response.json().catch(() => ({}))
+          return { taskId: String((data as any)?.taskId || '') }
+        },
+        onDone: async () => {
+          refreshAssets()
+        },
+        onFail: async () => {
+          refreshAssets()
+        },
+      })
+    }
+  }, [generateCharacterImage, generateLocationImage, projectId, propAssetActions, queryClient, queueMode, refreshAssets, taskQueue])
 
   const t = useTranslations('assets')
   // 计算资产总数

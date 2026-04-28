@@ -6,6 +6,7 @@ import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import type { TaskPresentationState } from '@/lib/task/presentation'
 import { PRIMARY_APPEARANCE_INDEX } from '@/lib/constants'
+import { useTaskQueue } from '@/lib/task-queue'
 
 /**
  * CharacterSection - 角色资产区块组件
@@ -106,6 +107,8 @@ export default function CharacterSection({
     onDeleteProfile,
 }: CharacterSectionProps) {
     const t = useTranslations('assets')
+    const taskQueue = useTaskQueue()
+    const queueMode = taskQueue.enabled
     const analyzingAssetsState = isAnalyzingAssets
         ? resolveTaskPresentationState({
             phase: 'processing',
@@ -336,26 +339,26 @@ export default function CharacterSection({
                                                     const selectedIndex = appearance.selectedIndex ?? 0
                                                     const taskKey = `character-${character.id}-${appearance.appearanceIndex}-${selectedIndex}`
                                                     _ulogInfo('[CharacterSection] 调用单张重新生成, imageIndex:', selectedIndex)
-                                                    onRegisterTransientTaskKey(taskKey)
+                                                    if (!queueMode) onRegisterTransientTaskKey(taskKey)
                                                     void onRegenerateSingle(character.id, appearance.id, selectedIndex).catch(() => {
-                                                        onClearTaskKey(taskKey)
+                                                        if (!queueMode) onClearTaskKey(taskKey)
                                                     })
                                                 }
                                                 // 多图或无图：重新生成整组
                                                 else {
                                                     const taskKey = `character-${character.id}-${appearance.appearanceIndex}-group`
                                                     _ulogInfo('[CharacterSection] 调用整组重新生成')
-                                                    onRegisterTransientTaskKey(taskKey)
+                                                    if (!queueMode) onRegisterTransientTaskKey(taskKey)
                                                     void onRegenerateGroup(character.id, appearance.id, count).catch(() => {
-                                                        onClearTaskKey(taskKey)
+                                                        if (!queueMode) onClearTaskKey(taskKey)
                                                     })
                                                 }
                                             }}
                                             onGenerate={(count) => {
                                                 const taskKey = `character-${character.id}-${appearance.appearanceIndex}-group`
-                                                onRegisterTransientTaskKey(taskKey)
+                                                if (!queueMode) onRegisterTransientTaskKey(taskKey)
                                                 void handleGenerateImage('character', character.id, appearance.id, count).catch(() => {
-                                                    onClearTaskKey(taskKey)
+                                                    if (!queueMode) onClearTaskKey(taskKey)
                                                 })
                                             }}
                                             onUndo={() => onUndo(character.id, appearance.id)}

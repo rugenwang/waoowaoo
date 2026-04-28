@@ -73,6 +73,10 @@ export const queryKeys = {
         all: () => ['user-models'] as const,
     },
 
+    userPreference: {
+        all: () => ['user-preference'] as const,
+    },
+
     // ============ 任务轮询 ============
     tasks: {
         all: (projectId: string) => ['tasks', projectId] as const,

@@ -13,9 +13,16 @@ type UseSSEOptions = {
   episodeId?: string | null
   enabled?: boolean
   onEvent?: (event: SSEEvent) => void
+  invalidateMode?: 'default' | 'minimal'
 }
 
-export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSEOptions) {
+export function useSSE({
+  projectId,
+  episodeId,
+  enabled = true,
+  onEvent,
+  invalidateMode = 'default',
+}: UseSSEOptions) {
   const queryClient = useQueryClient()
   const sourceRef = useRef<EventSource | null>(null)
   const targetStatesInvalidateTimerRef = useRef<number | null>(null)
@@ -137,11 +144,12 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
         const shouldInvalidateTargetStates =
           normalizedLifecycleType === TASK_EVENT_TYPE.COMPLETED ||
           normalizedLifecycleType === TASK_EVENT_TYPE.FAILED
+        const shouldInvalidateQueries = invalidateMode !== 'minimal'
 
-        if (isLifecycleEvent && shouldInvalidateTasksList) {
+        if (shouldInvalidateQueries && isLifecycleEvent && shouldInvalidateTasksList) {
           queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(projectId) })
         }
-        if (isLifecycleEvent && shouldInvalidateTargetStates) {
+        if (shouldInvalidateQueries && isLifecycleEvent && shouldInvalidateTargetStates) {
           if (targetStatesInvalidateTimerRef.current === null) {
             targetStatesInvalidateTimerRef.current = window.setTimeout(() => {
               queryClient.invalidateQueries({ queryKey: queryKeys.tasks.targetStatesAll(projectId), exact: false })
@@ -176,6 +184,11 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
           stageLabel: typeof eventPayload?.stageLabel === 'string' ? eventPayload.stageLabel : null,
           eventTs: typeof payload.ts === 'string' ? payload.ts : null,
         })
+
+        // 队列模式下避免 completed/failed 触发大面积 invalidate，数据刷新交给队列 onDone 精准控制
+        if (!shouldInvalidateQueries) {
+          return
+        }
 
         if (
           normalizedLifecycleType === TASK_EVENT_TYPE.CREATED ||

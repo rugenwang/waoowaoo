@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api-fetch'
 import { resolveTaskResponse } from '@/lib/task/client'
 import { queryKeys } from '@/lib/query/keys'
 import { useTaskTargetStateMap } from '@/lib/query/hooks/useTaskTargetStateMap'
+import type { TaskTargetStateQuery } from '@/lib/query/hooks/useTaskTargetStateMap'
 import {
   clearTaskTargetOverlay,
   upsertTaskTargetOverlay,
@@ -136,7 +137,18 @@ function buildQueryPath(input: AssetQueryInput): string {
   return `/api/assets?${searchParams.toString()}`
 }
 
-export function useAssets(input: AssetQueryInput) {
+export function useAssets(
+  input: AssetQueryInput,
+  options?: {
+    /**
+     * 覆盖 task-target-states 的 targets。
+     * - 不传：默认按 assets 展开全量 taskRefs（现状）
+     * - 传空数组：关闭轮询
+     * - 传单个：实现“队列模式只追踪当前目标”
+     */
+    taskTargets?: TaskTargetStateQuery[]
+  },
+) {
   const assetsQuery = useQuery({
     queryKey: queryKeys.assets.list(input),
     queryFn: async () => {
@@ -153,11 +165,14 @@ export function useAssets(input: AssetQueryInput) {
 
   const taskProjectId = input.scope === 'global' ? 'global-asset-hub' : input.projectId ?? ''
   const taskRefs = useMemo(() => flattenTaskRefs(assetsQuery.data ?? []), [assetsQuery.data])
-  const taskTargets = useMemo(() => taskRefs.map((ref) => ({
-    targetType: ref.targetType,
-    targetId: ref.targetId,
-    types: ref.types,
-  })), [taskRefs])
+  const taskTargets = useMemo(() => {
+    if (Array.isArray(options?.taskTargets)) return options.taskTargets
+    return taskRefs.map((ref) => ({
+      targetType: ref.targetType,
+      targetId: ref.targetId,
+      types: ref.types,
+    }))
+  }, [options?.taskTargets, taskRefs])
   const taskStatesQuery = useTaskTargetStateMap(taskProjectId, taskTargets, {
     enabled: taskProjectId.length > 0 && taskTargets.length > 0,
   })

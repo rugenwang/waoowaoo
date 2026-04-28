@@ -28,12 +28,13 @@ interface WorkspaceContextValue {
 interface WorkspaceProviderProps {
   projectId: string
   episodeId?: string
+  invalidateMode?: 'default' | 'minimal'
   children: ReactNode
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)
 
-export function WorkspaceProvider({ projectId, episodeId, children }: WorkspaceProviderProps) {
+export function WorkspaceProvider({ projectId, episodeId, invalidateMode = 'default', children }: WorkspaceProviderProps) {
   const queryClient = useQueryClient()
   const listenersRef = useRef(new Set<TaskEventListener>())
 
@@ -79,6 +80,7 @@ export function WorkspaceProvider({ projectId, episodeId, children }: WorkspaceP
     episodeId,
     enabled: !!projectId,
     onEvent: handleTaskEvent,
+    invalidateMode,
   })
 
   const value = useMemo<WorkspaceContextValue>(() => ({

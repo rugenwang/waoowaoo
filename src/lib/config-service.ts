@@ -122,6 +122,7 @@ export interface ProjectModelConfig {
   localStoryboardPromptRefineEnabled: boolean
   localStoryboardPromptRefineLevel: 'conservative' | 'medium' | 'simple'
   localStoryboardUsePanelDescriptionEnabled: boolean
+  progressPopupEnabled: boolean
 }
 
 export interface UserModelConfig {
@@ -133,6 +134,7 @@ export interface UserModelConfig {
   videoModel: string | null
   audioModel: string | null
   capabilityDefaults: CapabilitySelections
+  progressPopupEnabled: boolean
 }
 
 export async function getUserWorkflowConcurrencyConfig(
@@ -198,6 +200,13 @@ export async function getProjectModelConfig(
       ? rawProject.localStoryboardUsePanelDescriptionEnabled
       : false
 
+  const progressPopupEnabled =
+    typeof rawProject?.progressPopupEnabled === 'boolean'
+      ? rawProject.progressPopupEnabled
+      : (typeof (userPref as unknown as Record<string, unknown> | null)?.progressPopupEnabled === 'boolean'
+        ? (userPref as unknown as Record<string, unknown>).progressPopupEnabled as boolean
+        : false)
+
   return {
     analysisModel: extractModelKey(projectData?.analysisModel) || extractModelKey(userPref?.analysisModel) || null,
     characterModel: extractModelKey(projectData?.characterModel) || null,
@@ -222,6 +231,7 @@ export async function getProjectModelConfig(
     localStoryboardPromptRefineEnabled,
     localStoryboardPromptRefineLevel,
     localStoryboardUsePanelDescriptionEnabled,
+    progressPopupEnabled,
   }
 }
 
@@ -233,6 +243,10 @@ export async function getUserModelConfig(userId: string): Promise<UserModelConfi
     where: { userId },
   })
 
+  const rawPref = (userPref && typeof userPref === 'object')
+    ? (userPref as unknown as Record<string, unknown>)
+    : null
+
   return {
     analysisModel: extractModelKey(userPref?.analysisModel) || null,
     characterModel: extractModelKey(userPref?.characterModel) || null,
@@ -242,6 +256,7 @@ export async function getUserModelConfig(userId: string): Promise<UserModelConfi
     videoModel: extractModelKey(userPref?.videoModel) || null,
     audioModel: extractModelKey(userPref?.audioModel) || null,
     capabilityDefaults: parseCapabilitySelections(userPref?.capabilityDefaults),
+    progressPopupEnabled: typeof rawPref?.progressPopupEnabled === 'boolean' ? rawPref.progressPopupEnabled : false,
   }
 }
 

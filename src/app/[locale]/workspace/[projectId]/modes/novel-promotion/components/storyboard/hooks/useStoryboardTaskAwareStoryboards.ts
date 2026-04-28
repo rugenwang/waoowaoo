@@ -3,6 +3,7 @@
 import { useMemo } from 'react'
 import { NovelPromotionStoryboard } from '@/types/project'
 import { useStoryboardTaskPresentation } from '@/lib/query/hooks/useTaskPresentation'
+import { useTaskQueue } from '@/lib/task-queue'
 
 interface TaskTarget {
   key: string
@@ -90,22 +91,64 @@ export function useStoryboardTaskAwareStoryboards({
   initialStoryboards,
   isRunningPhase,
 }: UseStoryboardTaskAwareStoryboardsProps) {
+  const taskQueue = useTaskQueue()
+  const queueMode = taskQueue.enabled
+  const activeTarget = taskQueue.activeTarget
+
   const storyboardTextTargets = useMemo(
     () => buildStoryboardTextTargets(initialStoryboards),
     [initialStoryboards],
   )
-  const panelImageTargets = useMemo(
-    () => buildPanelTargets(initialStoryboards, 'image'),
-    [initialStoryboards],
-  )
-  const panelVideoTargets = useMemo(
-    () => buildPanelTargets(initialStoryboards, 'video'),
-    [initialStoryboards],
-  )
-  const panelLipSyncTargets = useMemo(
-    () => buildPanelTargets(initialStoryboards, 'lip-sync'),
-    [initialStoryboards],
-  )
+  const panelTargetsByType = useMemo(() => {
+    if (!queueMode) {
+      return {
+        image: buildPanelTargets(initialStoryboards, 'image'),
+        video: buildPanelTargets(initialStoryboards, 'video'),
+        lip: buildPanelTargets(initialStoryboards, 'lip-sync'),
+      }
+    }
+    if (!activeTarget || activeTarget.targetType !== 'NovelPromotionPanel') {
+      return { image: [] as TaskTarget[], video: [] as TaskTarget[], lip: [] as TaskTarget[] }
+    }
+    const isVideo = (activeTarget.types || []).includes('video_panel')
+    const isLip = (activeTarget.types || []).includes('lip_sync')
+    const panelId = activeTarget.targetId
+    const makeOne = (type: 'image' | 'video' | 'lip-sync'): TaskTarget[] => {
+      if (type === 'image') {
+        return [{
+          key: `panel-image:${panelId}`,
+          targetType: 'NovelPromotionPanel',
+          targetId: panelId,
+          types: ['image_panel', 'panel_variant', 'modify_asset_image'],
+          resource: 'image',
+          hasOutput: true,
+        }]
+      }
+      if (type === 'video') {
+        return [{
+          key: `panel-video:${panelId}`,
+          targetType: 'NovelPromotionPanel',
+          targetId: panelId,
+          types: ['video_panel'],
+          resource: 'video',
+          hasOutput: true,
+        }]
+      }
+      return [{
+        key: `panel-lip:${panelId}`,
+        targetType: 'NovelPromotionPanel',
+        targetId: panelId,
+        types: ['lip_sync'],
+        resource: 'video',
+        hasOutput: true,
+      }]
+    }
+    return {
+      image: (!isVideo && !isLip) ? makeOne('image') : [],
+      video: isVideo ? makeOne('video') : [],
+      lip: isLip ? makeOne('lip-sync') : [],
+    }
+  }, [activeTarget, initialStoryboards, queueMode])
 
   const storyboardTextStates = useStoryboardTaskPresentation(
     projectId,
@@ -114,18 +157,18 @@ export function useStoryboardTaskAwareStoryboards({
   )
   const panelImageStates = useStoryboardTaskPresentation(
     projectId,
-    panelImageTargets,
-    !!projectId && panelImageTargets.length > 0,
+    panelTargetsByType.image,
+    !!projectId && panelTargetsByType.image.length > 0,
   )
   const panelVideoStates = useStoryboardTaskPresentation(
     projectId,
-    panelVideoTargets,
-    !!projectId && panelVideoTargets.length > 0,
+    panelTargetsByType.video,
+    !!projectId && panelTargetsByType.video.length > 0,
   )
   const panelLipSyncStates = useStoryboardTaskPresentation(
     projectId,
-    panelLipSyncTargets,
-    !!projectId && panelLipSyncTargets.length > 0,
+    panelTargetsByType.lip,
+    !!projectId && panelTargetsByType.lip.length > 0,
   )
 
   const taskAwareStoryboards = useMemo(() => {

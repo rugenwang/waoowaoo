@@ -3,7 +3,7 @@ import { logError as _ulogError } from '@/lib/logging/core'
 import { apiFetch } from '@/lib/api-fetch'
 import JSZip from 'jszip'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { useQueryClient } from '@tanstack/react-query'
 import Navbar from '@/components/Navbar'
@@ -23,14 +23,21 @@ import {
     useGlobalFolders,
     useSSE,
 } from '@/lib/query/hooks'
+import { useUserPreference } from '@/lib/query/hooks/useUserPreference'
 import { queryKeys } from '@/lib/query/keys'
 import { AppIcon } from '@/components/ui/icons'
 import { Link } from '@/i18n/navigation'
 import { useImageGenerationCount } from '@/lib/image-generation/use-image-generation-count'
+import type { SSEEvent } from '@/lib/task/types'
+import { TaskQueueProvider } from '@/lib/task-queue'
+import QueueProgressPopup from '@/components/task/QueueProgressPopup'
 
 export default function AssetHubPage() {
     const t = useTranslations('assetHub')
     const queryClient = useQueryClient()
+    const userPrefQuery = useUserPreference()
+    const queueEnabled = userPrefQuery.data?.progressPopupEnabled === true
+    const taskEventListeners = useMemo(() => new Set<(event: SSEEvent) => void>(), [])
     const { count: characterGenerationCount } = useImageGenerationCount('character')
     const { count: locationGenerationCount } = useImageGenerationCount('location')
 
@@ -49,7 +56,14 @@ export default function AssetHubPage() {
     const refreshAssets = useRefreshAssets({ scope: 'global' })
 
     const loading = foldersLoading || assetsLoading
-    useSSE({ projectId: 'global-asset-hub', enabled: true })
+    useSSE({
+        projectId: 'global-asset-hub',
+        enabled: true,
+        invalidateMode: queueEnabled ? 'minimal' : 'default',
+        onEvent: (event) => {
+            taskEventListeners.forEach((fn) => fn(event))
+        },
+    })
 
     // 弹窗状态
     const [showAddCharacter, setShowAddCharacter] = useState(false)
@@ -451,8 +465,17 @@ export default function AssetHubPage() {
     }
 
     return (
-        <div className="glass-page min-h-screen">
-            <Navbar />
+        <TaskQueueProvider
+            projectId="global-asset-hub"
+            enabled={queueEnabled}
+            subscribeTaskEvents={(listener) => {
+                taskEventListeners.add(listener)
+                return () => taskEventListeners.delete(listener)
+            }}
+        >
+            <div className="glass-page min-h-screen">
+                <Navbar />
+                <QueueProgressPopup />
             <div className="max-w-7xl mx-auto px-4 py-6">
                 {/* 页面标题 */}
                 <div className="mb-6">
@@ -656,6 +679,7 @@ export default function AssetHubPage() {
                     onSelect={handleVoiceSelect}
                 />
             )}
-        </div>
+            </div>
+        </TaskQueueProvider>
     )
 }

@@ -2,6 +2,7 @@ import { NovelPromotionPanel, NovelPromotionStoryboard } from '@/types/project'
 
 export interface StoryboardImageMutationResult {
   async?: boolean
+  taskId?: string
   imageUrl?: string
 }
 

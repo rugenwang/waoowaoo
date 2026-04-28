@@ -10,6 +10,7 @@ interface VideoToolbarProps {
   videosWithUrl: number
   failedCount: number
   isAnyTaskRunning: boolean
+  queueModeEnabled?: boolean
   isDownloading: boolean
   onGenerateAll: () => void
   onDownloadAll: () => void
@@ -24,6 +25,7 @@ export default function VideoToolbar({
   videosWithUrl,
   failedCount,
   isAnyTaskRunning,
+  queueModeEnabled = false,
   isDownloading,
   onGenerateAll,
   onDownloadAll,
@@ -71,7 +73,7 @@ export default function VideoToolbar({
         <div className="flex items-center gap-2">
           <button
             onClick={onGenerateAll}
-            disabled={isAnyTaskRunning}
+            disabled={isAnyTaskRunning && !queueModeEnabled}
             className="glass-btn-base glass-btn-primary flex items-center gap-2 px-4 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isAnyTaskRunning ? (
@@ -79,7 +81,7 @@ export default function VideoToolbar({
             ) : (
               <>
                 <AppIcon name="plus" className="w-4 h-4" />
-                <span>{t('toolbar.generateAll')}</span>
+                <span>{queueModeEnabled ? '加入队列生成' : t('toolbar.generateAll')}</span>
               </>
             )}
           </button>

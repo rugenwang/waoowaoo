@@ -270,6 +270,7 @@ export interface NovelPromotionProject {
   localStoryboardPromptRefineEnabled?: boolean
   localStoryboardPromptRefineLevel?: 'conservative' | 'medium' | 'simple'
   localStoryboardUsePanelDescriptionEnabled?: boolean
+  progressPopupEnabled?: boolean
   audioUrl: string | null
   media?: MediaRef | null
   srtContent: string | null

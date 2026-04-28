@@ -3,6 +3,7 @@
 import { logError as _ulogError } from '@/lib/logging/core'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { apiFetch } from '@/lib/api-fetch'
 import {
   VideoToolbar,
   type VideoGenerationOptionValue,
@@ -45,6 +46,7 @@ import {
   shouldResolveVideoSubmissionLock,
   type VideoSubmissionBaseline,
 } from './video-stage-runtime/immediate-video-submission'
+import { useTaskQueue } from '@/lib/task-queue'
 
 export type { VideoStageShellProps } from './video-stage-runtime/types'
 
@@ -81,6 +83,8 @@ export function useVideoStageRuntime({
   onEnterEditor,
 }: VideoStageShellProps) {
   const t = useTranslations('video')
+  const taskQueue = useTaskQueue()
+  const queueMode = taskQueue.enabled
 
   const {
     panelVideoPreference,
@@ -339,6 +343,35 @@ export function useVideoStageRuntime({
     generationOptions?: VideoGenerationOptions,
     panelId?: string,
   ) => {
+    if (queueMode) {
+      const panelKey = buildVideoSubmissionKey({ panelId, storyboardId, panelIndex })
+      taskQueue.enqueue({
+        id: `video-single:${Date.now()}:${panelKey}`,
+        group: 'video',
+        projectId,
+        target: { targetType: 'NovelPromotionPanel', targetId: String(panelId || ''), types: ['video_panel'] },
+        uiKey: panelKey,
+        label: `视频：镜头 ${panelIndex + 1}`,
+        submit: async () => {
+          const response = await apiFetch(`/api/novel-promotion/${encodeURIComponent(projectId)}/generate-video`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              storyboardId,
+              panelIndex,
+              panelId,
+              videoModel,
+              firstLastFrame,
+              generationOptions,
+            }),
+          })
+          const data = await response.json().catch(() => ({}))
+          return { taskId: String((data as any)?.taskId || '') }
+        },
+      })
+      return
+    }
+
     if (isSubmittingVideoBatch) return
 
     const panelKey = buildVideoSubmissionKey({ panelId, storyboardId, panelIndex })
@@ -378,9 +411,12 @@ export function useVideoStageRuntime({
     }
   }, [
     isSubmittingVideoBatch,
+    projectId,
     onGenerateVideo,
+    queueMode,
     panelBySubmissionKey,
     submittingVideoPanelKeys,
+    taskQueue,
   ])
 
   const {
@@ -478,9 +514,9 @@ export function useVideoStageRuntime({
   const canSubmitBatchGenerate = !!batchSelectedModel && batchMissingCapabilityFields.length === 0
 
   const handleOpenBatchGenerateModal = useCallback(() => {
-    if (isAnyTaskRunning) return
+    if (isAnyTaskRunning && !queueMode) return
     setIsBatchConfigOpen(true)
-  }, [isAnyTaskRunning])
+  }, [isAnyTaskRunning, queueMode])
 
   const handleCloseBatchGenerateModal = useCallback(() => {
     setIsBatchConfigOpen(false)
@@ -491,20 +527,53 @@ export function useVideoStageRuntime({
 
     setIsConfirming(true)
     try {
-      await handleGenerateAllVideosWithImmediateLock({
-        videoModel: batchSelectedModel,
-        generationOptions: batchGenerationOptions,
-      })
-      setIsBatchConfigOpen(false)
+      if (queueMode) {
+        const candidates = allPanels.filter((panel) => !panel.videoUrl && !panel.videoTaskRunning)
+        const now = Date.now()
+        taskQueue.enqueueMany(candidates.map((panel, index) => ({
+          id: `video-generate:${now}:${index}:${panel.panelId || panel.panelIndex}`,
+          group: 'video',
+          projectId,
+          target: { targetType: 'NovelPromotionPanel', targetId: String(panel.panelId || ''), types: ['video_panel'] },
+          uiKey: buildVideoSubmissionKey(panel),
+          label: `视频：镜头 ${panel.panelIndex + 1}`,
+          submit: async () => {
+            const response = await apiFetch(`/api/novel-promotion/${encodeURIComponent(projectId)}/generate-video`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                storyboardId: panel.storyboardId,
+                panelIndex: panel.panelIndex,
+                panelId: panel.panelId,
+                videoModel: batchSelectedModel,
+                generationOptions: batchGenerationOptions,
+              }),
+            })
+            const data = await response.json().catch(() => ({}))
+            return { taskId: String((data as any)?.taskId || '') }
+          },
+        })))
+        setIsBatchConfigOpen(false)
+      } else {
+        await handleGenerateAllVideosWithImmediateLock({
+          videoModel: batchSelectedModel,
+          generationOptions: batchGenerationOptions,
+        })
+        setIsBatchConfigOpen(false)
+      }
     } finally {
       setIsConfirming(false)
     }
   }, [
+    allPanels,
     batchGenerationOptions,
     batchSelectedModel,
     canSubmitBatchGenerate,
     handleGenerateAllVideosWithImmediateLock,
     isConfirming,
+    projectId,
+    queueMode,
+    taskQueue,
   ])
 
   return (
@@ -515,6 +584,7 @@ export function useVideoStageRuntime({
         videosWithUrl={videosWithUrl}
         failedCount={failedCount}
         isAnyTaskRunning={isAnyTaskRunning}
+        queueModeEnabled={queueMode}
         isDownloading={isDownloading}
         onGenerateAll={handleOpenBatchGenerateModal}
         onDownloadAll={handleDownloadAllVideos}

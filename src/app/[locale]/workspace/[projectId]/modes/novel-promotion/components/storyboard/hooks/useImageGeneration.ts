@@ -118,6 +118,7 @@ export function useStoryboardImageGeneration({
   }, [localStoryboards, modifyingPanels.size])
 
   const { regeneratePanelImage, regenerateAllPanelsIndividually } = usePanelImageRegeneration({
+    projectId,
     localStoryboards,
     setLocalStoryboards,
     submittingPanelImageIds,

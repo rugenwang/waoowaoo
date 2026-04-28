@@ -319,6 +319,8 @@ export const PATCH = apiHandler(async (
     'localStoryboardPromptRefineEnabled', 'localStoryboardPromptRefineLevel',
     // prompt source (local storyboard image)
     'localStoryboardUsePanelDescriptionEnabled',
+    // queue mode (frontend)
+    'progressPopupEnabled',
   ] as const
 
   const updateData: Record<string, unknown> = {}
@@ -402,6 +404,14 @@ export const PATCH = apiHandler(async (
         throw new ApiError('INVALID_PARAMS', { code: 'INVALID_BOOLEAN', field })
       }
       updateData.localStoryboardUsePanelDescriptionEnabled = raw
+      continue
+    }
+    if (field === 'progressPopupEnabled') {
+      const raw = body[field]
+      if (typeof raw !== 'boolean') {
+        throw new ApiError('INVALID_PARAMS', { code: 'INVALID_BOOLEAN', field })
+      }
+      updateData.progressPopupEnabled = raw
       continue
     }
 

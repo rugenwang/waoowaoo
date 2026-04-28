@@ -61,7 +61,8 @@ export const PATCH = apiHandler(async (request: NextRequest) => {
     'lipSyncModel',
     'videoRatio',
     'artStyle',
-    'ttsRate'
+    'ttsRate',
+    'progressPopupEnabled',
   ]
 
   const updateData: Record<string, unknown> = {}
@@ -69,6 +70,13 @@ export const PATCH = apiHandler(async (request: NextRequest) => {
     if (body[field] !== undefined) {
       if (field === 'artStyle') {
         updateData[field] = validateArtStyleField(body[field])
+        continue
+      }
+      if (field === 'progressPopupEnabled') {
+        if (typeof body[field] !== 'boolean') {
+          throw new ApiError('INVALID_PARAMS', { code: 'INVALID_BOOLEAN', field })
+        }
+        updateData[field] = body[field]
         continue
       }
       updateData[field] = body[field]

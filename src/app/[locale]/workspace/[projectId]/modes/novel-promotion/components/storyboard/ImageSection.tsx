@@ -24,6 +24,7 @@ interface ImageSectionProps {
   isDeleting: boolean
   isModifying: boolean
   isSubmittingPanelImageTask: boolean
+  isQueued?: boolean
   failedError: string | null
   candidateData: PanelCandidateData | null
   previousImageUrl?: string | null
@@ -47,6 +48,7 @@ export default function ImageSection({
   isDeleting,
   isModifying,
   isSubmittingPanelImageTask,
+  isQueued = false,
   failedError,
   candidateData,
   previousImageUrl,
@@ -143,6 +145,15 @@ export default function ImageSection({
         renderLoadingState('modify', imageUrl)
       ) : isSubmittingPanelImageTask ? (
         renderLoadingState('regenerate', imageUrl)
+      ) : isQueued ? (
+        <TaskStatusOverlay
+          state={resolveTaskPresentationState({
+            phase: 'queued',
+            intent: 'generate',
+            resource: 'image',
+            hasOutput: !!imageUrl,
+          })}
+        />
       ) : candidateData ? (
         hasValidCandidates ? (
           <ImageSectionCandidateMode

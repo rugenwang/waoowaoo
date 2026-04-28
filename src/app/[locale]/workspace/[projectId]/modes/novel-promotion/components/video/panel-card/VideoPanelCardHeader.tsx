@@ -4,6 +4,9 @@ import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 
 import type { VideoPanelRuntime } from './hooks/useVideoPanelActions'
 import { AppIcon } from '@/components/ui/icons'
+import { useTaskQueue } from '@/lib/task-queue'
+import { buildVideoSubmissionKey } from '@/lib/novel-promotion/stages/video-stage-runtime/immediate-video-submission'
+import { resolveTaskPresentationState } from '@/lib/task/presentation'
 
 interface VideoPanelCardHeaderProps {
   runtime: VideoPanelRuntime
@@ -25,6 +28,13 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
 
   const [errorDismissed, setErrorDismissed] = useState(false)
   const [showTooltip, setShowTooltip] = useState(false)
+  const taskQueue = useTaskQueue()
+  const queueKey = buildVideoSubmissionKey({ panelId: panel.panelId, storyboardId: panel.storyboardId, panelIndex: panel.panelIndex })
+  const isQueued =
+    taskQueue.enabled &&
+    taskQueue.queue.some((item) =>
+      item.status === 'pending' && item.group === 'video' && item.uiKey === queueKey,
+    )
 
   useEffect(() => {
     setErrorDismissed(false)
@@ -157,6 +167,18 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
       {/* 任务进度遮罩 */}
       {(taskStatus.isVideoTaskRunning || taskStatus.isLipSyncTaskRunning) && (
         <TaskStatusOverlay state={taskStatus.overlayPresentation} className="z-10" />
+      )}
+      {/* 待执行遮罩（队列中，但未轮到执行） */}
+      {isQueued && !(taskStatus.isVideoTaskRunning || taskStatus.isLipSyncTaskRunning) && (
+        <TaskStatusOverlay
+          state={resolveTaskPresentationState({
+            phase: 'queued',
+            intent: 'generate',
+            resource: 'video',
+            hasOutput: hasVisibleBaseVideo,
+          })}
+          className="z-10"
+        />
       )}
 
       {/* 错误提示 */}

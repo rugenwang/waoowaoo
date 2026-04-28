@@ -4,7 +4,7 @@ import ProgressToast from '@/components/ProgressToast'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { AnimatedBackground } from '@/components/ui/SharedComponents'
 import { useTranslations } from 'next-intl'
-import { WorkspaceProvider } from './WorkspaceProvider'
+import { WorkspaceProvider, useWorkspaceProvider } from './WorkspaceProvider'
 import WorkspaceRunStreamConsoles from './components/WorkspaceRunStreamConsoles'
 import WorkspaceStageContent from './components/WorkspaceStageContent'
 import WorkspaceAssetLibraryModal from './components/WorkspaceAssetLibraryModal'
@@ -12,11 +12,14 @@ import WorkspaceHeaderShell from './components/WorkspaceHeaderShell'
 import { WorkspaceStageRuntimeProvider } from './WorkspaceStageRuntimeContext'
 import { useNovelPromotionWorkspaceController } from './hooks/useNovelPromotionWorkspaceController'
 import type { NovelPromotionWorkspaceProps } from './types'
+import { TaskQueueProvider } from '@/lib/task-queue'
+import QueueProgressPopup from '@/components/task/QueueProgressPopup'
 import '@/styles/animations.css'
 
 function NovelPromotionWorkspaceContent(props: NovelPromotionWorkspaceProps) {
   const vm = useNovelPromotionWorkspaceController(props)
   const tProgress = useTranslations('progress')
+  const workspace = useWorkspaceProvider()
 
   const {
     project,
@@ -73,65 +76,73 @@ function NovelPromotionWorkspaceContent(props: NovelPromotionWorkspaceProps) {
   }
 
   return (
-    <div>
-      <AnimatedBackground />
+    <TaskQueueProvider
+      projectId={projectId}
+      enabled={vm.project.progressPopupEnabled === true}
+      subscribeTaskEvents={workspace.subscribeTaskEvents}
+    >
+      <div>
+        <AnimatedBackground />
 
-      <WorkspaceHeaderShell
-        isSettingsModalOpen={vm.ui.isSettingsModalOpen}
-        isWorldContextModalOpen={vm.ui.isWorldContextModalOpen}
-        onCloseSettingsModal={() => vm.ui.setIsSettingsModalOpen(false)}
-        onCloseWorldContextModal={() => vm.ui.setIsWorldContextModalOpen(false)}
-        availableModels={vm.ui.userModelsForSettings || undefined}
-        modelsLoaded={vm.ui.userModelsLoaded}
-        artStyle={vm.project.artStyle}
-        analysisModel={vm.project.analysisModel}
-        characterModel={vm.project.characterModel}
-        locationModel={vm.project.locationModel}
-        storyboardModel={vm.project.storyboardModel}
-        editModel={vm.project.editModel}
-        videoModel={vm.project.videoModel}
-        audioModel={vm.project.audioModel}
-        capabilityOverrides={vm.project.capabilityOverrides}
-        videoRatio={vm.project.videoRatio}
-        ttsRate={vm.project.ttsRate !== undefined && vm.project.ttsRate !== null ? String(vm.project.ttsRate) : undefined}
-        localImageWidth={vm.project.localImageWidth}
-        localImageHeight={vm.project.localImageHeight}
-        localImageSteps={vm.project.localImageSteps}
-        localT2IWidth={vm.project.localT2IWidth}
-        localT2IHeight={vm.project.localT2IHeight}
-        localT2ISteps={vm.project.localT2ISteps}
-        localI2IWidth={vm.project.localI2IWidth}
-        localI2IHeight={vm.project.localI2IHeight}
-        localI2ISteps={vm.project.localI2ISteps}
-        localStoryboardPromptRefineEnabled={vm.project.localStoryboardPromptRefineEnabled}
-        localStoryboardPromptRefineLevel={vm.project.localStoryboardPromptRefineLevel}
-        localStoryboardUsePanelDescriptionEnabled={vm.project.localStoryboardUsePanelDescriptionEnabled}
-        onUpdateConfig={vm.actions.handleUpdateConfig}
-        globalAssetText={vm.project.globalAssetText}
-        projectName={project.name}
-        episodes={episodes}
-        currentEpisodeId={episodeId}
-        onEpisodeSelect={onEpisodeSelect}
-        onEpisodeCreate={onEpisodeCreate}
-        onEpisodeRename={onEpisodeRename}
-        onEpisodeDelete={onEpisodeDelete}
-        capsuleNavItems={vm.stageNav.capsuleNavItems}
-        currentStage={vm.stageNav.currentStage}
-        onStageChange={vm.stageNav.handleStageChange}
-        projectId={projectId}
-        episodeId={episodeId}
-        onOpenAssetLibrary={() => vm.ui.openAssetLibrary()}
-        onOpenSettingsModal={() => vm.ui.setIsSettingsModalOpen(true)}
-        onRefresh={() => vm.ui.onRefresh({ mode: 'full' })}
-        assetLibraryLabel={vm.i18n.t('buttons.assetLibrary')}
-        settingsLabel={vm.i18n.t('buttons.settings')}
-        refreshTitle={vm.i18n.t('buttons.refreshData')}
-      />
+        <WorkspaceHeaderShell
+          isSettingsModalOpen={vm.ui.isSettingsModalOpen}
+          isWorldContextModalOpen={vm.ui.isWorldContextModalOpen}
+          onCloseSettingsModal={() => vm.ui.setIsSettingsModalOpen(false)}
+          onCloseWorldContextModal={() => vm.ui.setIsWorldContextModalOpen(false)}
+          availableModels={vm.ui.userModelsForSettings || undefined}
+          modelsLoaded={vm.ui.userModelsLoaded}
+          artStyle={vm.project.artStyle}
+          analysisModel={vm.project.analysisModel}
+          characterModel={vm.project.characterModel}
+          locationModel={vm.project.locationModel}
+          storyboardModel={vm.project.storyboardModel}
+          editModel={vm.project.editModel}
+          videoModel={vm.project.videoModel}
+          audioModel={vm.project.audioModel}
+          capabilityOverrides={vm.project.capabilityOverrides}
+          videoRatio={vm.project.videoRatio}
+          ttsRate={vm.project.ttsRate !== undefined && vm.project.ttsRate !== null ? String(vm.project.ttsRate) : undefined}
+          localImageWidth={vm.project.localImageWidth}
+          localImageHeight={vm.project.localImageHeight}
+          localImageSteps={vm.project.localImageSteps}
+          localT2IWidth={vm.project.localT2IWidth}
+          localT2IHeight={vm.project.localT2IHeight}
+          localT2ISteps={vm.project.localT2ISteps}
+          localI2IWidth={vm.project.localI2IWidth}
+          localI2IHeight={vm.project.localI2IHeight}
+          localI2ISteps={vm.project.localI2ISteps}
+          localStoryboardPromptRefineEnabled={vm.project.localStoryboardPromptRefineEnabled}
+          localStoryboardPromptRefineLevel={vm.project.localStoryboardPromptRefineLevel}
+          localStoryboardUsePanelDescriptionEnabled={vm.project.localStoryboardUsePanelDescriptionEnabled}
+          progressPopupEnabled={vm.project.progressPopupEnabled}
+          onUpdateConfig={vm.actions.handleUpdateConfig}
+          globalAssetText={vm.project.globalAssetText}
+          projectName={project.name}
+          episodes={episodes}
+          currentEpisodeId={episodeId}
+          onEpisodeSelect={onEpisodeSelect}
+          onEpisodeCreate={onEpisodeCreate}
+          onEpisodeRename={onEpisodeRename}
+          onEpisodeDelete={onEpisodeDelete}
+          capsuleNavItems={vm.stageNav.capsuleNavItems}
+          currentStage={vm.stageNav.currentStage}
+          onStageChange={vm.stageNav.handleStageChange}
+          projectId={projectId}
+          episodeId={episodeId}
+          onOpenAssetLibrary={() => vm.ui.openAssetLibrary()}
+          onOpenSettingsModal={() => vm.ui.setIsSettingsModalOpen(true)}
+          onRefresh={() => vm.ui.onRefresh({ mode: 'full' })}
+          assetLibraryLabel={vm.i18n.t('buttons.assetLibrary')}
+          settingsLabel={vm.i18n.t('buttons.settings')}
+          refreshTitle={vm.i18n.t('buttons.refreshData')}
+        />
 
-      <div className="pt-24">
-        <WorkspaceStageRuntimeProvider value={vm.runtime.stageRuntime}>
-          <WorkspaceStageContent currentStage={vm.stageNav.currentStage} />
-        </WorkspaceStageRuntimeProvider>
+        <QueueProgressPopup />
+
+        <div className="pt-24">
+          <WorkspaceStageRuntimeProvider value={vm.runtime.stageRuntime}>
+            <WorkspaceStageContent currentStage={vm.stageNav.currentStage} />
+          </WorkspaceStageRuntimeProvider>
 
         <WorkspaceAssetLibraryModal
           isOpen={vm.ui.isAssetLibraryOpen}
@@ -177,15 +188,21 @@ function NovelPromotionWorkspaceContent(props: NovelPromotionWorkspaceProps) {
           onScriptToStoryboardMinimizedChange={vm.execution.setScriptToStoryboardConsoleMinimized}
           hideMinimizedBadges={vm.execution.showCreatingToast}
         />
+        </div>
       </div>
-    </div>
+    </TaskQueueProvider>
   )
 }
 
 export default function NovelPromotionWorkspace(props: NovelPromotionWorkspaceProps) {
   const { projectId, episodeId } = props
+
   return (
-    <WorkspaceProvider projectId={projectId} episodeId={episodeId}>
+    <WorkspaceProvider
+      projectId={projectId}
+      episodeId={episodeId}
+      invalidateMode={props.project.novelPromotionData?.progressPopupEnabled ? 'minimal' : 'default'}
+    >
       <NovelPromotionWorkspaceContent {...props} />
     </WorkspaceProvider>
   )

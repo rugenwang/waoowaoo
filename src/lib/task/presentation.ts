@@ -11,6 +11,7 @@ export type TaskPresentationState = {
   hasOutput: boolean
   mode: TaskPresentationMode
   isRunning: boolean
+  isQueued: boolean
   isError: boolean
   labelKey: string | null
 }
@@ -34,6 +35,7 @@ export function resolveTaskPresentationState(input: {
       hasOutput: input.hasOutput,
       mode: input.hasOutput ? 'overlay' : 'placeholder',
       isRunning: true,
+      isQueued: input.phase === 'queued',
       isError: false,
       labelKey: `taskStatus.intent.${input.intent}.running.${input.resource}`,
     }
@@ -47,6 +49,7 @@ export function resolveTaskPresentationState(input: {
       hasOutput: input.hasOutput,
       mode: input.hasOutput ? 'overlay' : 'placeholder',
       isRunning: false,
+      isQueued: false,
       isError: true,
       labelKey: `taskStatus.failed.${input.resource}`,
     }
@@ -59,6 +62,7 @@ export function resolveTaskPresentationState(input: {
     hasOutput: input.hasOutput,
     mode: 'none',
     isRunning: false,
+    isQueued: false,
     isError: false,
     labelKey: null,
   }

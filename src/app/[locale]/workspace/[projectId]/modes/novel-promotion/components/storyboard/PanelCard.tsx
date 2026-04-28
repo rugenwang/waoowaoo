@@ -26,6 +26,7 @@ interface PanelCardProps {
   isDeleting: boolean
   isModifying: boolean
   isSubmittingPanelImageTask: boolean
+  isQueued?: boolean
   failedError: string | null
   candidateData: PanelCandidateData | null
   previousImageUrl?: string | null  // 支持撤回
@@ -63,6 +64,7 @@ export default function PanelCard({
   isDeleting,
   isModifying,
   isSubmittingPanelImageTask,
+  isQueued = false,
   failedError,
   candidateData,
   previousImageUrl,
@@ -116,6 +118,7 @@ export default function PanelCard({
           isDeleting={isDeleting}
           isModifying={isModifying}
           isSubmittingPanelImageTask={isSubmittingPanelImageTask}
+          isQueued={isQueued}
           failedError={failedError}
           candidateData={candidateData}
           previousImageUrl={previousImageUrl}

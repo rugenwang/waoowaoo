@@ -24,16 +24,23 @@ const OPENAI_IMAGE_OPTION_KEYS = new Set([
   'provider',
   'modelId',
   'modelKey',
+  'n',
   'size',
   'resolution',
   'quality',
   'responseFormat',
   'outputFormat',
+  // GPT-IMAGE-2 (img.dengche.cc) 扩展字段（OpenAI 兼容客户端可透传）
+  'aspectRatio',
+  'style',
+  'background',
 ])
 
 function assertAllowedOptions(options: Record<string, unknown>) {
   for (const [key, value] of Object.entries(options)) {
     if (value === undefined) continue
+    // 内部调试字段（不会透传到外部 API）
+    if (key.startsWith('__')) continue
     if (!OPENAI_IMAGE_OPTION_KEYS.has(key)) {
       throw new Error(`OPENAI_COMPAT_IMAGE_OPTION_UNSUPPORTED: ${key}`)
     }
@@ -54,6 +61,17 @@ function normalizeOutputFormat(value: unknown): OpenAIImageOutputFormat | undefi
   throw new Error(`OPENAI_COMPAT_IMAGE_OPTION_UNSUPPORTED: outputFormat=${normalized}`)
 }
 
+function readBooleanOption(value: unknown, optionName: string): boolean | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const trimmed = value.trim().toLowerCase()
+    if (trimmed === 'true') return true
+    if (trimmed === 'false') return false
+  }
+  throw new Error(`OPENAI_COMPAT_OPTION_INVALID: ${optionName}`)
+}
+
 function normalizeGenerateQuality(value: unknown): OpenAIImageGenerateQuality | undefined {
   const normalized = readStringOption(value, 'quality')
   if (!normalized) return undefined
@@ -68,6 +86,19 @@ function normalizeGenerateQuality(value: unknown): OpenAIImageGenerateQuality | 
     return normalized
   }
   throw new Error(`OPENAI_COMPAT_IMAGE_OPTION_UNSUPPORTED: quality=${normalized}`)
+}
+
+function normalizeN(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined
+  const n = typeof value === 'number' ? value : Number.parseInt(String(value), 10)
+  if (!Number.isFinite(n)) {
+    throw new Error('OPENAI_COMPAT_IMAGE_OPTION_INVALID: n')
+  }
+  const normalized = Math.floor(n)
+  if (normalized < 1 || normalized > 10) {
+    throw new Error('OPENAI_COMPAT_IMAGE_OPTION_INVALID: n must be between 1 and 10')
+  }
+  return normalized
 }
 
 function normalizeOpenAIImageSize(value: string | undefined): OpenAIImageGenerateSize | undefined {
@@ -85,6 +116,17 @@ function normalizeOpenAIImageSize(value: string | undefined): OpenAIImageGenerat
     return value
   }
   throw new Error(`OPENAI_COMPAT_IMAGE_OPTION_UNSUPPORTED: size=${value}`)
+}
+
+function buildExtraBody(options: Record<string, unknown>): Record<string, unknown> | undefined {
+  const aspectRatio = readStringOption(options.aspectRatio, 'aspectRatio')
+  const style = readStringOption(options.style, 'style')
+  const background = readBooleanOption(options.background, 'background')
+  const extra: Record<string, unknown> = {}
+  if (aspectRatio) extra.aspect_ratio = aspectRatio
+  if (style) extra.style = style
+  if (background !== undefined) extra.background = background
+  return Object.keys(extra).length > 0 ? extra : undefined
 }
 
 function resolveRawSize(options: Record<string, unknown>): string | undefined {
@@ -169,6 +211,8 @@ export async function generateImageViaOpenAICompat(request: OpenAICompatImageReq
   const quality = normalizeGenerateQuality(options.quality)
   const rawSize = resolveRawSize(options)
   const size = normalizeOpenAIImageSize(rawSize)
+  const n = normalizeN(options.n)
+  const extraBody = buildExtraBody(options)
 
   if (referenceImages.length > 0) {
     const response = await client.images.edit({
@@ -176,9 +220,11 @@ export async function generateImageViaOpenAICompat(request: OpenAICompatImageReq
       prompt,
       image: await Promise.all(referenceImages.map((image, index) => toUploadFile(image, index))),
       response_format: responseFormat,
+      ...(typeof n === 'number' ? { n } : {}),
       ...(outputFormat ? { output_format: outputFormat } : {}),
       ...(quality ? { quality } : {}),
       ...(size ? { size } : {}),
+      ...(extraBody ? { extra_body: extraBody } : {}),
     } as unknown as Parameters<typeof client.images.edit>[0])
 
     const imagePayload = readAllImagePayloads(response)
@@ -206,9 +252,11 @@ export async function generateImageViaOpenAICompat(request: OpenAICompatImageReq
     model: normalizedModelId,
     prompt,
     response_format: responseFormat,
+    ...(typeof n === 'number' ? { n } : {}),
     ...(outputFormat ? { output_format: outputFormat } : {}),
     ...(quality ? { quality } : {}),
     ...(size ? { size } : {}),
+    ...(extraBody ? { extra_body: extraBody } : {}),
   } as unknown as Parameters<typeof client.images.generate>[0])
 
   const imagePayload = readAllImagePayloads(response)

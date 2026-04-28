@@ -75,6 +75,7 @@ export function useWorkspaceProjectSnapshot({
           ? projectData.localStoryboardPromptRefineLevel
           : 'medium',
       localStoryboardUsePanelDescriptionEnabled: projectData?.localStoryboardUsePanelDescriptionEnabled === true,
+      progressPopupEnabled: projectData?.progressPopupEnabled === true,
     }
   }, [episode?.novelText, episode?.storyboards, project.novelPromotionData, urlStage])
 }

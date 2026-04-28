@@ -204,7 +204,9 @@ export const PRESET_PROVIDERS: Omit<Provider, 'apiKey' | 'hasApiKey'>[] = [
     { id: 'ark', name: 'Volcengine Ark' },
     { id: 'google', name: 'Google AI Studio' },
     { id: 'bailian', name: 'Alibaba Bailian' },
-    { id: 'eeeapi', name: 'EEE API', baseUrl: 'https://eeeapi.com' },
+    // GPT Image 2（OpenAI 兼容 images API）
+    // 注意：SDK 必须使用 api.img.dengche.cc（绕过 CDN）
+    { id: 'eeeapi', name: 'GPT-IMAGE-2', baseUrl: 'https://api.img.dengche.cc/v1' },
     { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1' },
     { id: 'minimax', name: 'MiniMax Hailuo', baseUrl: 'https://api.minimaxi.com/v1' },
     { id: 'vidu', name: 'Vidu' },
@@ -217,7 +219,7 @@ const ZH_PROVIDER_NAME_MAP: Record<string, string> = {
     vidu: '生数科技 Vidu',
     bailian: '阿里云百炼',
     siliconflow: '硅基流动',
-    eeeapi: 'EEE API',
+    eeeapi: 'GPT-IMAGE-2',
 }
 
 function isZhLocale(locale?: string): boolean {

@@ -292,7 +292,7 @@ export async function resolveImageSourceFromGeneration(
             : ''
           const endpoint = baseUrlRaw
             ? (baseUrlRaw.endsWith('/v1') ? `${baseUrlRaw}/images/generations` : `${baseUrlRaw}/v1/images/generations`)
-            : 'https://eeeapi.com/v1/images/generations'
+            : 'https://api.img.dengche.cc/v1/images/generations'
           const optAny = (params.options || {}) as Record<string, unknown>
           const size = (typeof optAny.size === 'string' && optAny.size.trim())
             ? optAny.size.trim()

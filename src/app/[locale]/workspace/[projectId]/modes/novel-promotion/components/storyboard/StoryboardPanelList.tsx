@@ -7,6 +7,7 @@ import { PanelEditData } from '../PanelEditForm'
 import { ASPECT_RATIO_CONFIGS } from '@/lib/constants'
 import PanelCard from './PanelCard'
 import type { PanelSaveState } from './hooks/usePanelCrudActions'
+import { useTaskQueue } from '@/lib/task-queue'
 
 interface StoryboardPanelListProps {
   storyboardId: string
@@ -77,6 +78,19 @@ export default function StoryboardPanelList({
   onVariant,
   isInsertDisabled,
 }: StoryboardPanelListProps) {
+  const taskQueue = useTaskQueue()
+  const queuedPanelIds = useMemo(() => {
+    if (!taskQueue.enabled) return new Set<string>()
+    const next = new Set<string>()
+    for (const item of taskQueue.queue) {
+      if (item.status !== 'pending') continue
+      if (item.group !== 'storyboard') continue
+      if (item.target.targetType !== 'NovelPromotionPanel') continue
+      next.add(item.target.targetId)
+    }
+    return next
+  }, [taskQueue.enabled, taskQueue.queue])
+
   const displayImages = useMemo(() => textPanels.map((panel) => panel.imageUrl || null), [textPanels])
   const isVertical = ASPECT_RATIO_CONFIGS[videoRatio]?.isVertical ?? false
 
@@ -121,6 +135,7 @@ export default function StoryboardPanelList({
               isDeleting={isPanelDeleting}
               isModifying={isPanelModifying}
               isSubmittingPanelImageTask={panelTaskRunning}
+              isQueued={queuedPanelIds.has(panel.id)}
               failedError={panelFailedError}
               candidateData={panelCandidateData}
               onUpdate={(updates) => onPanelUpdate(panel.id, panel, updates)}

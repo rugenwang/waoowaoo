@@ -129,9 +129,11 @@ export async function generateImage(
             })
         }
 
-        // OpenAI 兼容模式：将 aspectRatio 转换为 size
+        // OpenAI 兼容模式：
+        // - 常规 OpenAI: 不支持 aspectRatio 字段，因此将 aspectRatio 映射为 size
+        // - GPT-IMAGE-2（eeeapi）: 支持扩展字段 aspect_ratio，保留 aspectRatio 让下游透传
         let openaiCompatOptions = { ...generatorOptions }
-        if (openaiCompatOptions.aspectRatio) {
+        if (providerKey !== 'eeeapi' && openaiCompatOptions.aspectRatio) {
             const mappedSize = aspectRatioToOpenAISize(openaiCompatOptions.aspectRatio)
             if (mappedSize && !openaiCompatOptions.size) {
                 openaiCompatOptions = { ...openaiCompatOptions, size: mappedSize }

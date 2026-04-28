@@ -14,6 +14,7 @@ import { useTranslations } from 'next-intl'
 import { CharacterAppearance } from '@/types/project'
 import { useImageGenerationCount } from '@/lib/image-generation/use-image-generation-count'
 import { useProjectAssets, useRefreshProjectAssets, useGenerateProjectCharacterImage, useGenerateProjectLocationImage, type Character } from '@/lib/query/hooks'
+import { useTaskQueue } from '@/lib/task-queue'
 import {
     createManualKeyBaseline,
     isAppearanceTaskRunning,
@@ -32,6 +33,8 @@ export function useBatchGeneration({
     handleGenerateImage: externalHandleGenerateImage
 }: UseBatchGenerationProps) {
     const t = useTranslations('assets')
+    const taskQueue = useTaskQueue()
+    const queueMode = taskQueue.enabled
     // 🔥 直接订阅缓存 - 消除 props drilling
     const { data: assets } = useProjectAssets(projectId)
     const characters = useMemo(() => assets?.characters ?? [], [assets?.characters])
@@ -99,12 +102,18 @@ export function useBatchGeneration({
             }
         }
 
-        for (const key of pendingRegenerationKeys) {
-            generated.add(key)
+        const queueUiKey = taskQueue.activeItem?.projectId === projectId ? (taskQueue.activeItem.uiKey || '') : ''
+        if (queueUiKey) {
+            generated.add(queueUiKey)
+        }
+        if (!queueMode) {
+            for (const key of pendingRegenerationKeys) {
+                generated.add(key)
+            }
         }
 
         return generated
-    }, [characters, locations, pendingRegenerationKeys])
+    }, [characters, locations, pendingRegenerationKeys, projectId, queueMode, taskQueue.activeItem])
 
     useEffect(() => {
         if (pendingRegenerationKeys.size === 0) return
@@ -147,6 +156,7 @@ export function useBatchGeneration({
             id: string
             appearanceId?: string
             appearanceIndex?: number
+            name?: string
             key: string
         }> = []
 
@@ -160,6 +170,7 @@ export function useBatchGeneration({
                         id: char.id,
                         appearanceId: app.id,
                         appearanceIndex: app.appearanceIndex,
+                        name: char.name,
                         key: `character-${char.id}-${app.appearanceIndex}-group`
                     })
                 }
@@ -173,6 +184,7 @@ export function useBatchGeneration({
                 tasks.push({
                     type: 'location',
                     id: loc.id,
+                    name: loc.name,
                     key: `location-${loc.id}-group`
                 })
             }
@@ -180,6 +192,47 @@ export function useBatchGeneration({
 
         if (tasks.length === 0) {
             alert(t('toolbar.generateAllNoop'))
+            return
+        }
+
+        // 顺序队列模式：不提前把所有 key 标记为 running（避免未轮到的也在刷新/闪烁）
+        if (queueMode) {
+            const now = Date.now()
+            const items = tasks.map((task, index) => ({
+                id: `assets-generate-all:${now}:${index}:${task.key}`,
+                group: 'assets' as const,
+                projectId,
+                target: {
+                    targetType: task.type === 'character' ? 'CharacterAppearance' : 'LocationImage',
+                    targetId: task.type === 'character' ? (task.appearanceId || '') : task.id,
+                },
+                uiKey: task.key,
+                label: task.type === 'character'
+                    ? `角色：${task.name || task.id}（形象 ${task.appearanceIndex ?? ''}）`
+                    : `场景：${task.name || task.id}`,
+                submit: async () => {
+                    if (task.type === 'character' && task.appearanceId) {
+                        const res = await generateCharacterImage.mutateAsync({
+                            characterId: task.id,
+                            appearanceId: task.appearanceId,
+                            count: characterGenerationCount,
+                        }) as any
+                        return { taskId: String(res?.taskId || '') }
+                    }
+                    const res = await generateLocationImage.mutateAsync({
+                        locationId: task.id,
+                        count: locationGenerationCount,
+                    }) as any
+                    return { taskId: String(res?.taskId || '') }
+                },
+                onDone: async () => {
+                    refreshAssets()
+                },
+                onFail: async () => {
+                    refreshAssets()
+                },
+            }))
+            taskQueue.enqueueMany(items)
             return
         }
 
@@ -247,6 +300,7 @@ export function useBatchGeneration({
             id: string
             appearanceId?: string
             appearanceIndex?: number
+            name?: string
             key: string
         }> = []
 
@@ -258,6 +312,7 @@ export function useBatchGeneration({
                     id: char.id,
                     appearanceId: app.id,
                     appearanceIndex: app.appearanceIndex,
+                    name: char.name,
                     key: `character-${char.id}-${app.appearanceIndex}-group`
                 })
             })
@@ -267,12 +322,52 @@ export function useBatchGeneration({
             tasks.push({
                 type: 'location',
                 id: loc.id,
+                name: loc.name,
                 key: `location-${loc.id}-group`
             })
         })
 
         if (tasks.length === 0) {
             alert(t('toolbar.noAssetsToGenerate'))
+            return
+        }
+
+        if (queueMode) {
+            const now = Date.now()
+            const items = tasks.map((task, index) => ({
+                id: `assets-regenerate-all:${now}:${index}:${task.key}`,
+                projectId,
+                target: {
+                    targetType: task.type === 'character' ? 'CharacterAppearance' : 'LocationImage',
+                    targetId: task.type === 'character' ? (task.appearanceId || '') : task.id,
+                },
+                uiKey: task.key,
+                label: task.type === 'character'
+                    ? `角色：${task.name || task.id}（形象 ${task.appearanceIndex ?? ''}）`
+                    : `场景：${task.name || task.id}`,
+                submit: async () => {
+                    if (task.type === 'character' && task.appearanceId) {
+                        const res = await generateCharacterImage.mutateAsync({
+                            characterId: task.id,
+                            appearanceId: task.appearanceId,
+                            count: characterGenerationCount,
+                        }) as any
+                        return { taskId: String(res?.taskId || '') }
+                    }
+                    const res = await generateLocationImage.mutateAsync({
+                        locationId: task.id,
+                        count: locationGenerationCount,
+                    }) as any
+                    return { taskId: String(res?.taskId || '') }
+                },
+                onDone: async () => {
+                    refreshAssets()
+                },
+                onFail: async () => {
+                    refreshAssets()
+                },
+            }))
+            taskQueue.enqueueMany(items)
             return
         }
 

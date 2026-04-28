@@ -67,6 +67,7 @@ interface SettingsModalProps {
     localStoryboardPromptRefineEnabled?: boolean
     localStoryboardPromptRefineLevel?: 'conservative' | 'medium' | 'simple'
     localStoryboardUsePanelDescriptionEnabled?: boolean
+    progressPopupEnabled?: boolean
     onArtStyleChange?: (value: string) => void
     onAnalysisModelChange?: (value: string) => void
     onCharacterModelChange?: (value: string) => void
@@ -91,6 +92,7 @@ interface SettingsModalProps {
     onLocalStoryboardPromptRefineEnabledChange?: (value: boolean) => void
     onLocalStoryboardPromptRefineLevelChange?: (value: 'conservative' | 'medium' | 'simple') => void
     onLocalStoryboardUsePanelDescriptionEnabledChange?: (value: boolean) => void
+    onProgressPopupEnabledChange?: (value: boolean) => void
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -175,6 +177,7 @@ export function SettingsModal({
     localStoryboardPromptRefineEnabled,
     localStoryboardPromptRefineLevel,
     localStoryboardUsePanelDescriptionEnabled,
+    progressPopupEnabled,
     onArtStyleChange,
     onAnalysisModelChange,
     onCharacterModelChange,
@@ -198,6 +201,7 @@ export function SettingsModal({
     onLocalStoryboardPromptRefineEnabledChange,
     onLocalStoryboardPromptRefineLevelChange,
     onLocalStoryboardUsePanelDescriptionEnabledChange,
+    onProgressPopupEnabledChange,
 }: SettingsModalProps) {
     const t = useTranslations('configModal')
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle')
@@ -278,6 +282,7 @@ export function SettingsModal({
     const i2iSteps = typeof localI2ISteps === 'number' ? localI2ISteps : fallbackSteps
     const promptRefineEnabled = localStoryboardPromptRefineEnabled === true
     const promptUseDescriptionEnabled = localStoryboardUsePanelDescriptionEnabled === true
+    const progressPopupEnabledValue = progressPopupEnabled === true
     const promptRefineLevel: 'conservative' | 'medium' | 'simple' =
         localStoryboardPromptRefineLevel === 'conservative'
         || localStoryboardPromptRefineLevel === 'simple'
@@ -298,10 +303,11 @@ export function SettingsModal({
     const [promptRefineEnabledDraft, setPromptRefineEnabledDraft] = useState<boolean>(promptRefineEnabled)
     const [promptRefineLevelDraft, setPromptRefineLevelDraft] = useState<'conservative' | 'medium' | 'simple'>(promptRefineLevel)
     const [promptUseDescriptionEnabledDraft, setPromptUseDescriptionEnabledDraft] = useState<boolean>(promptUseDescriptionEnabled)
+    const [progressPopupEnabledDraft, setProgressPopupEnabledDraft] = useState<boolean>(progressPopupEnabledValue)
 
     useEffect(() => {
         if (!isOpen) return
-        // 打开弹窗时同步一次；切换到 local 模型时也同步一次
+        // 打开弹窗时同步一次
         setT2IWidthDraft(String(t2iWidth))
         setT2IHeightDraft(String(t2iHeight))
         setT2IStepsDraft(String(t2iSteps))
@@ -311,8 +317,9 @@ export function SettingsModal({
         setPromptRefineEnabledDraft(promptRefineEnabled)
         setPromptRefineLevelDraft(promptRefineLevel)
         setPromptUseDescriptionEnabledDraft(promptUseDescriptionEnabled)
+        setProgressPopupEnabledDraft(progressPopupEnabledValue)
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isOpen, isLocalImageModel])
+    }, [isOpen])
 
     const clampInt = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
     const snap64 = (value: number) => Math.max(64, Math.floor(value / 64) * 64)
@@ -592,6 +599,80 @@ export function SettingsModal({
                                 />
                             </div>
 
+                            {/* 分镜提示词精炼：应对所有生图模型生效（不局限本地模型） */}
+                            <div className="rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-4">
+                                <div className="text-xs font-medium text-[var(--glass-text-tertiary)]">{t('localPromptRefineTitle')}</div>
+                                <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                                    <label className="flex items-center gap-2 text-sm text-[var(--glass-text-secondary)]">
+                                        <input
+                                            type="checkbox"
+                                            checked={promptRefineEnabledDraft}
+                                            onChange={(e) => {
+                                                setPromptRefineEnabledDraft(e.target.checked)
+                                                onLocalStoryboardPromptRefineEnabledChange?.(e.target.checked)
+                                            }}
+                                        />
+                                        {t('localPromptRefineEnabled')}
+                                    </label>
+                                    <label className="flex items-center gap-2 text-sm text-[var(--glass-text-secondary)]">
+                                        <input
+                                            type="checkbox"
+                                            checked={promptUseDescriptionEnabledDraft}
+                                            onChange={(e) => {
+                                                setPromptUseDescriptionEnabledDraft(e.target.checked)
+                                                onLocalStoryboardUsePanelDescriptionEnabledChange?.(e.target.checked)
+                                            }}
+                                        />
+                                        {t('localPromptUseDescriptionEnabled')}
+                                    </label>
+                                    <div className="md:col-span-2">
+                                        <label className="text-xs text-[var(--glass-text-tertiary)]">{t('localPromptRefineLevel')}</label>
+                                        <select
+                                            className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm"
+                                            value={promptRefineLevelDraft}
+                                            onChange={(e) => {
+                                                const v = e.target.value as 'conservative' | 'medium' | 'simple'
+                                                setPromptRefineLevelDraft(v)
+                                                onLocalStoryboardPromptRefineLevelChange?.(v)
+                                            }}
+                                        >
+                                            <option value="conservative">{t('localPromptRefineLevelConservative')}</option>
+                                            <option value="medium">{t('localPromptRefineLevelMedium')}</option>
+                                            <option value="simple">{t('localPromptRefineLevelSimple')}</option>
+                                        </select>
+                                        <div className="mt-1 text-xs text-[var(--glass-text-tertiary)]">
+                                            {t('localPromptRefineHint')}
+                                        </div>
+                                        <div className="mt-1 text-xs text-[var(--glass-text-tertiary)]">
+                                            {t('localPromptUseDescriptionHint')}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 任务进度弹窗：这是全局 UI 行为，不应绑定到本地生图参数 */}
+                            <div className="rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-4">
+                                <div className="text-xs font-medium text-[var(--glass-text-tertiary)]">{t('progressPopupTitle')}</div>
+                                <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                                    <label className="flex items-center gap-2 text-sm text-[var(--glass-text-secondary)]">
+                                        <input
+                                            type="checkbox"
+                                            checked={progressPopupEnabledDraft}
+                                            onChange={(e) => {
+                                                setProgressPopupEnabledDraft(e.target.checked)
+                                                onProgressPopupEnabledChange?.(e.target.checked)
+                                            }}
+                                        />
+                                        {t('progressPopupEnabled')}
+                                    </label>
+                                    <div className="md:col-span-2">
+                                        <div className="text-xs text-[var(--glass-text-tertiary)]">
+                                            {t('progressPopupHint')}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             {isLocalImageModel ? (
                                 <div className="space-y-2 md:col-span-2">
                                     <div className="rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-4">
@@ -723,57 +804,6 @@ export function SettingsModal({
                                                 </div>
                                             </div>
 
-                                            <div className="pt-2 border-t border-[var(--glass-stroke-base)]">
-                                                <div className="text-xs font-medium text-[var(--glass-text-tertiary)]">{t('localPromptRefineTitle')}</div>
-                                                <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                                                    <label className="flex items-center gap-2 text-sm text-[var(--glass-text-secondary)]">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={promptRefineEnabledDraft}
-                                                            onChange={(e) => {
-                                                                setPromptRefineEnabledDraft(e.target.checked)
-                                                                // 立即提交，避免用户忘记点失焦
-                                                                onLocalStoryboardPromptRefineEnabledChange?.(e.target.checked)
-                                                            }}
-                                                        />
-                                                        {t('localPromptRefineEnabled')}
-                                                    </label>
-                                                    <label className="flex items-center gap-2 text-sm text-[var(--glass-text-secondary)]">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={promptUseDescriptionEnabledDraft}
-                                                            onChange={(e) => {
-                                                                setPromptUseDescriptionEnabledDraft(e.target.checked)
-                                                                // 立即提交，避免用户忘记点失焦
-                                                                onLocalStoryboardUsePanelDescriptionEnabledChange?.(e.target.checked)
-                                                            }}
-                                                        />
-                                                        {t('localPromptUseDescriptionEnabled')}
-                                                    </label>
-                                                    <div className="md:col-span-2">
-                                                        <label className="text-xs text-[var(--glass-text-tertiary)]">{t('localPromptRefineLevel')}</label>
-                                                        <select
-                                                            className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm"
-                                                            value={promptRefineLevelDraft}
-                                                            onChange={(e) => {
-                                                                const v = e.target.value as 'conservative' | 'medium' | 'simple'
-                                                                setPromptRefineLevelDraft(v)
-                                                                onLocalStoryboardPromptRefineLevelChange?.(v)
-                                                            }}
-                                                        >
-                                                            <option value="conservative">{t('localPromptRefineLevelConservative')}</option>
-                                                            <option value="medium">{t('localPromptRefineLevelMedium')}</option>
-                                                            <option value="simple">{t('localPromptRefineLevelSimple')}</option>
-                                                        </select>
-                                                        <div className="mt-1 text-xs text-[var(--glass-text-tertiary)]">
-                                                            {t('localPromptRefineHint')}
-                                                        </div>
-                                                        <div className="mt-1 text-xs text-[var(--glass-text-tertiary)]">
-                                                            {t('localPromptUseDescriptionHint')}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
                                         </div>
                                         <div className="mt-2 text-xs text-[var(--glass-text-tertiary)]">
                                             {t('localImageHint')}
