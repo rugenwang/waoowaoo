@@ -10,6 +10,7 @@ import type { PanelSaveState } from './hooks/usePanelCrudActions'
 import { useTaskQueue } from '@/lib/task-queue'
 
 interface StoryboardPanelListProps {
+  projectId: string
   storyboardId: string
   textPanels: StoryboardPanel[]
   storyboardStartIndex: number
@@ -45,6 +46,7 @@ interface StoryboardPanelListProps {
 }
 
 export default function StoryboardPanelList({
+  projectId,
   storyboardId,
   textPanels,
   storyboardStartIndex,
@@ -123,6 +125,7 @@ export default function StoryboardPanelList({
             style={{ zIndex: textPanels.length - index }}
           >
             <PanelCard
+              projectId={projectId}
               panel={panel}
               panelData={panelData}
               imageUrl={imageUrl}

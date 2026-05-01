@@ -53,6 +53,11 @@ export const DELETE = apiHandler(async (
     throw new ApiError('NOT_FOUND')
   }
 
+  // queued：先尽力从 BullMQ 移除 job，减少“取消后被 worker 领走”的竞态
+  if (task.status === 'queued') {
+    await removeTaskJob(taskId).catch(() => false)
+  }
+
   const { task: updatedTask, cancelled } = await cancelTask(taskId)
   if (!updatedTask) {
     throw new ApiError('NOT_FOUND')
@@ -60,7 +65,10 @@ export const DELETE = apiHandler(async (
 
   if (cancelled) {
     // Best effort: remove queued job to avoid worker picking it up after cancellation.
-    await removeTaskJob(taskId).catch(() => false)
+    // (processing job 通常无法 remove，但保留 best-effort 无害)
+    if (task.status !== 'queued') {
+      await removeTaskJob(taskId).catch(() => false)
+    }
     await publishTaskEvent({
       taskId: updatedTask.id,
       projectId: updatedTask.projectId,

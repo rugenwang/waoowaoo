@@ -15,7 +15,9 @@ import {
   useDownloadRemoteBlob,
   useListProjectEpisodeVideoUrls,
   useMatchedVoiceLines,
+  useUpdateProjectPanelDuration,
   useUpdateProjectPanelLink,
+  useUpdateProjectConfig,
 } from '@/lib/query/hooks'
 import { useLipSync } from '@/lib/query/hooks/useStoryboards'
 import ImagePreviewModal from '@/components/ui/ImagePreviewModal'
@@ -105,8 +107,66 @@ export function useVideoStageRuntime({
   const lipSyncMutation = useLipSync(projectId, episodeId)
   const listEpisodeVideoUrlsMutation = useListProjectEpisodeVideoUrls(projectId)
   const updatePanelLinkMutation = useUpdateProjectPanelLink(projectId)
+  const updatePanelDurationMutation = useUpdateProjectPanelDuration(projectId)
+  const updateProjectConfigMutation = useUpdateProjectConfig(projectId)
   const downloadRemoteBlobMutation = useDownloadRemoteBlob()
   const matchedVoiceLinesQuery = useMatchedVoiceLines(projectId, episodeId)
+
+  const handleUpdateVideoCapabilityOverride = useCallback(async (
+    modelKey: string,
+    field: string,
+    rawValue: string,
+    sample: VideoGenerationOptionValue,
+  ) => {
+    // duration 改为分镜级（NovelPromotionPanel.duration），不允许写入 capabilityOverrides，避免影响其它分镜
+    if (field === 'duration') return
+    const normalizedModelKey = typeof modelKey === 'string' ? modelKey.trim() : ''
+    if (!normalizedModelKey) return
+    const nextOverrides: Record<string, Record<string, VideoGenerationOptionValue>> = {
+      ...(capabilityOverrides as unknown as Record<string, Record<string, VideoGenerationOptionValue>>),
+    }
+
+    const prevModelSelection = nextOverrides[normalizedModelKey] && typeof nextOverrides[normalizedModelKey] === 'object'
+      ? { ...nextOverrides[normalizedModelKey] }
+      : {}
+
+    if (rawValue === '') {
+      delete prevModelSelection[field]
+    } else {
+      const parsed: VideoGenerationOptionValue = (() => {
+        if (typeof sample === 'number') return Number(rawValue)
+        if (typeof sample === 'boolean') return rawValue === 'true'
+        return rawValue
+      })()
+      prevModelSelection[field] = parsed
+    }
+
+    nextOverrides[normalizedModelKey] = prevModelSelection
+    try {
+      await updateProjectConfigMutation.mutateAsync({
+        key: 'capabilityOverrides',
+        value: nextOverrides,
+      })
+    } catch (err) {
+      _ulogError('update capabilityOverrides failed:', err)
+    }
+  }, [capabilityOverrides, updateProjectConfigMutation])
+
+  const handleUpdatePanelDuration = useCallback(async (
+    storyboardId: string,
+    panelIndex: number,
+    duration: number | null,
+  ) => {
+    try {
+      await updatePanelDurationMutation.mutateAsync({
+        storyboardId,
+        panelIndex,
+        duration,
+      })
+    } catch (err) {
+      _ulogError('update panel duration failed:', err)
+    }
+  }, [updatePanelDurationMutation])
 
   const { panelVideoStates, panelLipStates } = useVideoTaskStates({
     projectId,
@@ -343,8 +403,17 @@ export function useVideoStageRuntime({
     generationOptions?: VideoGenerationOptions,
     panelId?: string,
   ) => {
+    const panelKey = buildVideoSubmissionKey({ panelId, storyboardId, panelIndex })
+    const currentPanelForOptions = panelBySubmissionKey.get(panelKey)
+    const panelDuration = currentPanelForOptions?.textPanel?.duration
+    const mergedGenerationOptions: VideoGenerationOptions | undefined = generationOptions
+      ? {
+        ...generationOptions,
+        ...(typeof panelDuration === 'number' && Number.isFinite(panelDuration) ? { duration: panelDuration } : {}),
+      }
+      : (typeof panelDuration === 'number' && Number.isFinite(panelDuration) ? { duration: panelDuration } : undefined)
+
     if (queueMode) {
-      const panelKey = buildVideoSubmissionKey({ panelId, storyboardId, panelIndex })
       taskQueue.enqueue({
         id: `video-single:${Date.now()}:${panelKey}`,
         group: 'video',
@@ -362,7 +431,7 @@ export function useVideoStageRuntime({
               panelId,
               videoModel,
               firstLastFrame,
-              generationOptions,
+              generationOptions: mergedGenerationOptions,
             }),
           })
           const data = await response.json().catch(() => ({}))
@@ -374,7 +443,6 @@ export function useVideoStageRuntime({
 
     if (isSubmittingVideoBatch) return
 
-    const panelKey = buildVideoSubmissionKey({ panelId, storyboardId, panelIndex })
     const currentPanel = panelBySubmissionKey.get(panelKey)
     if (currentPanel?.videoTaskRunning || submittingVideoPanelKeys.has(panelKey)) return
 
@@ -393,7 +461,7 @@ export function useVideoStageRuntime({
     }
 
     try {
-      await onGenerateVideo(storyboardId, panelIndex, videoModel, firstLastFrame, generationOptions, panelId)
+      await onGenerateVideo(storyboardId, panelIndex, videoModel, firstLastFrame, mergedGenerationOptions, panelId)
     } catch (error) {
       setSubmittingVideoPanelKeys((previous) => {
         if (!previous.has(panelKey)) return previous
@@ -546,7 +614,12 @@ export function useVideoStageRuntime({
                 panelIndex: panel.panelIndex,
                 panelId: panel.panelId,
                 videoModel: batchSelectedModel,
-                generationOptions: batchGenerationOptions,
+                generationOptions: {
+                  ...batchGenerationOptions,
+                  ...(typeof panel.textPanel?.duration === 'number' && Number.isFinite(panel.textPanel.duration)
+                    ? { duration: panel.textPanel.duration }
+                    : {}),
+                },
               }),
             })
             const data = await response.json().catch(() => ({}))
@@ -627,6 +700,8 @@ export function useVideoStageRuntime({
         flCustomPrompts={flCustomPrompts}
         onGenerateVideo={handleGenerateVideoWithImmediateLock}
         onUpdatePanelVideoModel={onUpdatePanelVideoModel}
+        onUpdatePanelDuration={handleUpdatePanelDuration}
+        onUpdateVideoCapabilityOverride={handleUpdateVideoCapabilityOverride}
         onLipSync={handleLipSync}
         onToggleLink={handleToggleLink}
         onFlModelChange={setFlModel}

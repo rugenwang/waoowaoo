@@ -40,6 +40,21 @@ export async function resolveOpenAICompatClientConfig(userId: string, providerId
   const rawBaseUrl = String(config.baseUrl || '').trim()
   const normalizedBaseUrl = (() => {
     const trimmed = rawBaseUrl.replace(/\/+$/, '')
+    // GPT Image 2（dengche）说明：SDK 必须直连 api.img.dengche.cc/v1。
+    // 有些用户会把浏览器入口 img.dengche.cc 填到任意 provider（不一定是 eeeapi），从而触发 CDN 403。
+    // 这里做一个全局兜底归一化：只要命中 img.dengche.cc / api.img.dengche.cc，都强制补齐到 api.img.dengche.cc/v1。
+    if (/^https?:\/\/img\.dengche\.cc(\/.*)?$/i.test(trimmed)) {
+      return 'https://api.img.dengche.cc/v1'
+    }
+    if (/^https?:\/\/api\.img\.dengche\.cc$/i.test(trimmed)) {
+      return 'https://api.img.dengche.cc/v1'
+    }
+    if (/^https?:\/\/api\.img\.dengche\.cc\/v1\/?$/i.test(trimmed)) {
+      return 'https://api.img.dengche.cc/v1'
+    }
+    if (/^https?:\/\/api\.img\.dengche\.cc(\/.*)?$/i.test(trimmed) && !/\/v1(\/|$)/i.test(trimmed)) {
+      return `${trimmed}/v1`
+    }
     // GPT Image 2（eeeapi）要求 SDK 直连 api.img.dengche.cc/v1，避免 CDN/前端页面导致的 HTML 响应。
     if (providerId === 'eeeapi' || config.id === 'eeeapi') {
       // 用户可能填了浏览器入口 img.dengche.cc，或漏掉 /v1

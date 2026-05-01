@@ -1,9 +1,12 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import { useTaskQueue } from '@/lib/task-queue'
 import { useTaskTargetStateMap } from '@/lib/query/hooks/useTaskTargetStateMap'
+import { useActiveTasks } from '@/lib/query/hooks/useTaskStatus'
+import { useCancelTask } from '@/lib/query/mutations'
 import type { QueueItemState } from '@/lib/task-queue/types'
 
 function resolveGroupLabel(group: QueueItemState['group']) {
@@ -26,6 +29,16 @@ export default function QueueProgressPopup() {
     cancelCurrent,
     notice,
   } = useTaskQueue()
+  const [dismissRecovered, setDismissRecovered] = useState(false)
+
+  const cancelTask = useCancelTask(projectId)
+  // 刷新页面后，前端内存队列会清空，但后端任务仍会继续执行。
+  // 这里补一个“恢复显示”：当 queue 为空时，从服务端拉取 active tasks 用于展示/取消。
+  const recovered = useActiveTasks({
+    projectId,
+    enabled: enabled && queue.length === 0,
+  })
+  const recoveredTasks = recovered.data || []
 
   // 注意：Hooks 不能在条件分支里调用。
   // 这里先无条件调用 useTaskTargetStateMap，再根据 enabled/queue.length 决定是否渲染。
@@ -45,8 +58,14 @@ export default function QueueProgressPopup() {
   const progress = typeof state?.progress === 'number' ? state.progress : null
   const stageLabel = typeof state?.stageLabel === 'string' ? state.stageLabel : null
 
+  // 当恢复态任务消失/或本地队列重新出现时，自动解除 dismiss，避免状态卡死
+  useEffect(() => {
+    if (queue.length > 0) setDismissRecovered(false)
+    if (recoveredTasks.length === 0) setDismissRecovered(false)
+  }, [queue.length, recoveredTasks.length])
+
   if (!enabled) return null
-  if (queue.length === 0) return null
+  if (queue.length === 0 && recoveredTasks.length === 0) return null
 
   const grouped = {
     assets: queue.filter((i) => i.group === 'assets'),
@@ -56,6 +75,7 @@ export default function QueueProgressPopup() {
   }
 
   const hasRunningOrPending = queue.some((i) => i.status === 'running' || i.status === 'pending')
+  const hasRecoveredActive = queue.length === 0 && recoveredTasks.length > 0 && !dismissRecovered
 
   const runningState = resolveTaskPresentationState({
     phase: 'processing',
@@ -80,17 +100,21 @@ export default function QueueProgressPopup() {
         <div className="flex-1">
           <div className="flex items-start justify-between gap-2">
             <div className="font-semibold text-(--glass-text-primary)">
-              任务队列进度（{runningIndex}/{total}）
+              {hasRecoveredActive ? '后台任务进行中（刷新后恢复）' : `任务队列进度（${runningIndex}/${total}）`}
             </div>
             <button
               type="button"
               className="glass-btn-base glass-btn-secondary rounded-md px-2 py-1 text-xs"
-              onClick={() => setShowPopup(false)}
+              onClick={() => {
+                // 恢复态默认强制展示（避免“后台还在跑但用户看不见”），但用户点击关闭后应能隐藏
+                if (queue.length === 0 && recoveredTasks.length > 0) setDismissRecovered(true)
+                setShowPopup(false)
+              }}
             >
               关闭
             </button>
           </div>
-          {currentLabel && (
+          {!hasRecoveredActive && currentLabel && (
             <div className="mt-1 text-sm text-(--glass-text-secondary)">
               正在处理（{resolveGroupLabel(activeItem?.group)}）：{currentLabel}
             </div>
@@ -101,61 +125,95 @@ export default function QueueProgressPopup() {
             </div>
           )}
 
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="glass-btn-base glass-btn-secondary rounded-md px-3 py-1 text-xs"
-              onClick={() => void cancelCurrent()}
-              disabled={!activeItem?.taskId}
-            >
-              取消当前
-            </button>
-            <button
-              type="button"
-              className="glass-btn-base glass-btn-secondary rounded-md px-3 py-1 text-xs"
-              onClick={() => clearPending()}
-            >
-              清空未开始
-            </button>
-          </div>
+          {!hasRecoveredActive && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="glass-btn-base glass-btn-secondary rounded-md px-3 py-1 text-xs"
+                onClick={() => void cancelCurrent()}
+                disabled={!activeItem?.taskId}
+              >
+                取消当前
+              </button>
+              <button
+                type="button"
+                className="glass-btn-base glass-btn-secondary rounded-md px-3 py-1 text-xs"
+                onClick={() => clearPending()}
+              >
+                清空未开始
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-(--glass-bg-muted)">
-        <div
-          className="h-1.5 rounded-full bg-(--glass-accent-from)"
-          style={{
-            width: `${Math.min(100, Math.max(0, Math.round(((doneCount + (progress ? progress / 100 : 0)) / total) * 100)))}%`,
-          }}
-        />
-      </div>
+      {!hasRecoveredActive && (
+        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-(--glass-bg-muted)">
+          <div
+            className="h-1.5 rounded-full bg-(--glass-accent-from)"
+            style={{
+              width: `${Math.min(100, Math.max(0, Math.round(((doneCount + (progress ? progress / 100 : 0)) / total) * 100)))}%`,
+            }}
+          />
+        </div>
+      )}
 
-      <div className="mt-3 grid grid-cols-1 gap-1 text-xs text-(--glass-text-tertiary)">
-        {(['assets', 'storyboard', 'video', 'other'] as const).map((groupKey) => {
-          const items = grouped[groupKey]
-          if (!items || items.length === 0) return null
-          return (
-            <div key={groupKey} className="mt-1">
-              <div className="mb-1 font-medium text-(--glass-text-secondary)">
-                {resolveGroupLabel(groupKey === 'other' ? undefined : groupKey)}
-              </div>
-              <div className="grid grid-cols-1 gap-1">
-                {items.slice(-4).map((item) => (
-                  <div key={item.id} className="flex items-center justify-between gap-2">
-                    <div className="truncate">{item.label}</div>
-                    <div className="shrink-0">
-                      {item.status === 'pending' && '待处理'}
-                      {item.status === 'running' && '进行中'}
-                      {item.status === 'succeeded' && '完成'}
-                      {item.status === 'failed' && '失败'}
-                    </div>
+      {hasRecoveredActive ? (
+        <div className="mt-3 grid grid-cols-1 gap-1 text-xs text-(--glass-text-tertiary)">
+          <div className="mb-1 font-medium text-(--glass-text-secondary)">
+            执行中任务（{recoveredTasks.length}）
+          </div>
+          <div className="grid grid-cols-1 gap-1">
+            {recoveredTasks.slice(0, 8).map((task) => (
+              <div key={task.id} className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate text-(--glass-text-secondary)">
+                    {task.targetType}:{task.targetId}
                   </div>
-                ))}
+                  <div className="truncate">
+                    {task.type} · {task.status}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="glass-btn-base glass-btn-tone-danger rounded-md px-2 py-1 text-[10px]"
+                  onClick={() => cancelTask.mutate(task.id)}
+                  disabled={cancelTask.isPending}
+                >
+                  取消
+                </button>
               </div>
-            </div>
-          )
-        })}
-      </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 grid grid-cols-1 gap-1 text-xs text-(--glass-text-tertiary)">
+          {(['assets', 'storyboard', 'video', 'other'] as const).map((groupKey) => {
+            const items = grouped[groupKey]
+            if (!items || items.length === 0) return null
+            return (
+              <div key={groupKey} className="mt-1">
+                <div className="mb-1 font-medium text-(--glass-text-secondary)">
+                  {resolveGroupLabel(groupKey === 'other' ? undefined : groupKey)}
+                </div>
+                <div className="grid grid-cols-1 gap-1">
+                  {items.slice(-4).map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-2">
+                      <div className="truncate">{item.label}</div>
+                      <div className="shrink-0">
+                        {item.status === 'pending' && '待处理'}
+                        {item.status === 'running' && '进行中'}
+                        {item.status === 'succeeded' && '完成'}
+                        {item.status === 'failed' && '失败'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 
@@ -165,7 +223,7 @@ export default function QueueProgressPopup() {
     </div>
   ) : null
 
-  if (showPopup) {
+  if (showPopup || hasRecoveredActive) {
     return (
       <div className="fixed bottom-8 right-8 z-[9999] animate-slide-up">
         {toast}
@@ -174,7 +232,23 @@ export default function QueueProgressPopup() {
     )
   }
 
-  if (!hasRunningOrPending) {
+  // 被用户关闭的恢复态：显示一个最小化入口
+  if (dismissRecovered && queue.length === 0 && recoveredTasks.length > 0) {
+    return (
+      <div className="fixed bottom-8 right-8 z-[9999] animate-slide-up">
+        {toast}
+        <button
+          type="button"
+          className="glass-surface-modal px-3 py-2 text-sm text-(--glass-text-primary)"
+          onClick={() => setDismissRecovered(false)}
+        >
+          后台任务 {recoveredTasks.length}
+        </button>
+      </div>
+    )
+  }
+
+  if (!hasRunningOrPending && !hasRecoveredActive) {
     // 没有正在执行/待执行：展示一个“完成”角标（醒目）
     return (
       <div className="fixed bottom-8 right-8 z-[9999] animate-slide-up">

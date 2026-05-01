@@ -23,6 +23,7 @@ import type { NormalizedError } from '@/lib/errors/types'
 import { mapTaskSSEEventToRunEvents } from '@/lib/run-runtime/task-bridge'
 import { publishRunEvent } from '@/lib/run-runtime/publisher'
 import { RUN_EVENT_TYPE } from '@/lib/run-runtime/types'
+import { assertTaskActive } from './utils'
 
 function toObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
@@ -412,6 +413,11 @@ export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Jo
     })
 
     const { result, textUsage } = await withTextUsageCollection(async () => await handler(job))
+
+    // ✅ 取消竞态兜底：handler 执行结束后，finalize（结算/落库完成态）前再次确认任务仍为 active。
+    // 避免用户在 handler 尾声点击取消，但仍被 settle/markCompleted 的情况。
+    await assertTaskActive(job, 'finalize_before_billing')
+
     if (billingInfo?.billable) {
       billingInfo = (await settleTaskBilling({
         id: taskId,
@@ -424,6 +430,9 @@ export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Jo
       })) as TaskBillingInfo
       await updateTaskBillingInfo(taskId, billingInfo)
     }
+
+    await assertTaskActive(job, 'finalize_before_mark_completed')
+
     const markedCompleted = await tryMarkTaskCompleted(taskId, result || null)
     if (!markedCompleted) {
       logger.info({

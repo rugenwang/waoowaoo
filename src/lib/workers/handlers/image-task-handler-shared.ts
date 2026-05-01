@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { type TaskJobData } from '@/lib/task/types'
 import { decodeImageUrlsFromDb } from '@/lib/contracts/image-urls-contract'
 import {
+  assertTaskActive,
   resolveImageSourceFromGeneration,
   toSignedUrlIfCos,
   uploadImageSourceToCos,
@@ -121,7 +122,8 @@ async function generateImageToStorage(params: {
   const uploadSource = params.label
     ? await withLabelBar(source, params.label)
     : source
-  const cosKey = await uploadImageSourceToCos(uploadSource, params.keyPrefix, params.targetId)
+  await assertTaskActive(params.job, 'upload_generated_image')
+  const cosKey = await uploadImageSourceToCos(uploadSource, params.keyPrefix, params.targetId, params.job)
   return cosKey
 }
 

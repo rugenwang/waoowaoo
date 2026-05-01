@@ -27,6 +27,66 @@
     }
   },
   {
+    "modelType": "image",
+    "provider": "eeeapi",
+    "modelId": "gpt-image-1",
+    "capabilities": {
+      "image": {
+        "resolutionOptions": [
+          "auto",
+          "1024x1024",
+          "1024x1536",
+          "1536x1024"
+        ]
+      }
+    }
+  },
+  {
+    "modelType": "image",
+    "provider": "eeeapi",
+    "modelId": "gpt-image-2",
+    "capabilities": {
+      "image": {
+        "resolutionOptions": [
+          "auto",
+          "1024x1024",
+          "1024x1536",
+          "1536x1024"
+        ]
+      }
+    }
+  },
+  {
+    "modelType": "image",
+    "provider": "eeeapi",
+    "modelId": "dall-e-3",
+    "capabilities": {
+      "image": {
+        "resolutionOptions": [
+          "auto",
+          "1024x1024",
+          "1024x1536",
+          "1536x1024"
+        ]
+      }
+    }
+  },
+  {
+    "modelType": "image",
+    "provider": "eeeapi",
+    "modelId": "dall-e-2",
+    "capabilities": {
+      "image": {
+        "resolutionOptions": [
+          "auto",
+          "1024x1024",
+          "1024x1536",
+          "1536x1024"
+        ]
+      }
+    }
+  },
+  {
     "modelType": "video",
     "provider": "local",
     "modelId": "local/video",
@@ -36,7 +96,26 @@
           "normal"
         ],
         "durationOptions": [
-          4
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
         ],
         "resolutionOptions": [
           "480p",

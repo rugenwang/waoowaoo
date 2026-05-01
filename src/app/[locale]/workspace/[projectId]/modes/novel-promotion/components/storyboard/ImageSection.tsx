@@ -9,6 +9,8 @@ import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import ImageSectionCandidateMode from './ImageSectionCandidateMode'
 import ImageSectionActionButtons from './ImageSectionActionButtons'
 import { AppIcon } from '@/components/ui/icons'
+import { useTaskTargetStateMap } from '@/lib/query/hooks/useTaskTargetStateMap'
+import { useCancelTask } from '@/lib/query/mutations'
 
 interface PanelCandidateData {
   candidates: string[]
@@ -16,6 +18,7 @@ interface PanelCandidateData {
 }
 
 interface ImageSectionProps {
+  projectId: string
   panelId: string
   imageUrl: string | null
   globalPanelNumber: number
@@ -40,6 +43,7 @@ interface ImageSectionProps {
 }
 
 export default function ImageSection({
+  projectId,
   panelId,
   imageUrl,
   globalPanelNumber,
@@ -66,6 +70,13 @@ export default function ImageSection({
   const [isTaskPulseAnimating, setIsTaskPulseAnimating] = useState(false)
   const cssAspectRatio = videoRatio.replace(':', '/')
   const hasValidCandidates = !!candidateData && candidateData.candidates.some((url) => !url.startsWith('PENDING:'))
+
+  const cancelTask = useCancelTask(projectId)
+  const taskStateMap = useTaskTargetStateMap(projectId, [
+    { targetType: 'NovelPromotionPanel', targetId: panelId, types: ['image_panel'] },
+  ])
+  const taskState = taskStateMap.getState('NovelPromotionPanel', panelId)
+  const canCancel = !!taskState?.runningTaskId && (taskState.phase === 'queued' || taskState.phase === 'processing')
 
   const triggerPulse = () => {
     setIsTaskPulseAnimating(true)
@@ -189,7 +200,20 @@ export default function ImageSection({
       </div>
 
       <div className="absolute top-2 right-2">
-        <span className="glass-chip glass-chip-info px-2 py-0.5 text-xs">{shotType}</span>
+        <div className="flex items-center gap-1">
+          <span className="glass-chip glass-chip-info px-2 py-0.5 text-xs">{shotType}</span>
+          {canCancel && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); cancelTask.mutate(taskState!.runningTaskId!) }}
+              disabled={cancelTask.isPending}
+              className="glass-btn-base glass-btn-tone-danger h-6 w-6 rounded-md"
+              title="取消任务"
+            >
+              <AppIcon name="close" className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {!candidateData && (

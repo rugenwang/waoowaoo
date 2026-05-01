@@ -8,7 +8,8 @@ import {
   useSelectLocationImage,
   useUndoLocationImage,
   useUploadLocationImage,
-  useDeleteLocation
+  useDeleteLocation,
+  useCancelTask,
 } from '@/lib/query/mutations'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
@@ -26,6 +27,8 @@ import {
 import { AppIcon } from '@/components/ui/icons'
 import { AI_EDIT_BUTTON_CLASS, AI_EDIT_ICON_CLASS } from '@/components/ui/ai-edit-style'
 import AISparklesIcon from '@/components/ui/icons/AISparklesIcon'
+import { useTaskTargetStateMap } from '@/lib/query/hooks/useTaskTargetStateMap'
+import { useTaskQueue } from '@/lib/task-queue'
 
 interface LocationImage {
   id: string
@@ -63,6 +66,11 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
   const undoImage = useUndoLocationImage()
   const uploadImage = useUploadLocationImage()
   const deleteLocation = useDeleteLocation()
+  const cancelTask = useCancelTask('global-asset-hub')
+  const taskQueue = useTaskQueue()
+  const taskStateMap = useTaskTargetStateMap('global-asset-hub', [
+    { targetType: 'GlobalLocation', targetId: location.id },
+  ])
 
   const t = useTranslations('assetHub')
   const tAssets = useTranslations('assets')
@@ -93,24 +101,38 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
   const displayImageUrl = isValidUrl(currentImageUrl) ? currentImageUrl : null
   const serverTaskRunning = (location.images || []).some((image) => image.imageTaskRunning)
   const transientSubmitting = generateImage.isPending
-  const isTaskRunning = serverTaskRunning || transientSubmitting
+  const runtimeTaskState = taskStateMap.getState('GlobalLocation', location.id)
+  const runtimePhase = runtimeTaskState?.phase
+  const runningTaskId = runtimeTaskState?.runningTaskId
+  const localPending = taskQueue.enabled
+    && taskQueue.queue.some((item) =>
+      item.status === 'pending'
+      && item.group === 'assets'
+      && item.projectId === 'global-asset-hub'
+      && item.target.targetType === 'GlobalLocation'
+      && item.target.targetId === location.id,
+    )
+  const isQueued = localPending || runtimePhase === 'queued'
+  const isExecuting = serverTaskRunning || transientSubmitting || runtimePhase === 'processing'
+  const isBusy = isQueued || isExecuting
+  const canCancel = !!runningTaskId && (runtimePhase === 'queued' || runtimePhase === 'processing')
   const displaySelectionImages = resolveDisplayImageSlots(orderedImages, {
-    hasRunningTask: isTaskRunning,
+    hasRunningTask: isBusy,
     requestedCount: generatedImageCount > 1 ? generatedImageCount : generationCount,
   })
   const displaySlotCount = displaySelectionImages.length
   const hasMultipleImages = generatedImageCount > 1
   const singleImageAspectClassName = assetType === 'prop' ? 'aspect-[3/2]' : 'aspect-square'
-  const displayTaskPresentation = isTaskRunning
+  const displayTaskPresentation = isBusy
     ? resolveTaskPresentationState({
-      phase: 'processing',
+      phase: isQueued ? 'queued' : 'processing',
       intent: displayImageUrl ? 'process' : 'generate',
       resource: 'image',
       hasOutput: !!displayImageUrl,
     })
     : null
   // 取第一个有错误的 image 的 lastError
-  const firstImageError = !isTaskRunning
+  const firstImageError = !isBusy
     ? (location.images || []).find(img => img.lastError)?.lastError || null
     : null
   const taskErrorDisplay = firstImageError ? resolveErrorDisplay(firstImageError) : null
@@ -125,6 +147,25 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
 
   // 生成图片
   const handleGenerate = (count = generationCount) => {
+    if (taskQueue.enabled) {
+      taskQueue.enqueue({
+        id: `asset-hub:location:${location.id}:${Date.now()}`,
+        group: 'assets',
+        projectId: 'global-asset-hub',
+        target: { targetType: 'GlobalLocation', targetId: location.id },
+        uiKey: `asset-hub:location:${location.id}`,
+        label: `场景：${location.name}`,
+        submit: async () => {
+          const data = await generateImage.mutateAsync({
+            locationId: location.id,
+            artStyle: location.artStyle || undefined,
+            count,
+          } as any)
+          return { taskId: String((data as any)?.taskId || '') }
+        },
+      })
+      return
+    }
     generateImage.mutate({
       locationId: location.id,
       artStyle: location.artStyle || undefined,
@@ -203,7 +244,7 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
 
   // 多图选择模式
   if (displaySlotCount > 1) {
-    const selectionStatusText = isTaskRunning || generatedImageCount < displaySlotCount
+    const selectionStatusText = isBusy || generatedImageCount < displaySlotCount
       ? tAssets('image.generatedProgress', { generated: generatedImageCount, total: displaySlotCount })
       : effectiveSelectedIndex !== null
         ? tAssets('image.optionSelected', { number: effectiveSelectedIndex + 1 })
@@ -227,8 +268,19 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
           <div className="text-xs text-[var(--glass-text-tertiary)]">{selectionStatusText}</div>
         </div>
           <div className="flex items-center gap-1 ml-2">
+            {canCancel && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); cancelTask.mutate(runningTaskId!) }}
+                disabled={cancelTask.isPending}
+                className="glass-btn-base glass-btn-tone-danger h-6 w-6 rounded-md"
+                title="取消任务"
+              >
+                <AppIcon name="close" className="w-4 h-4" />
+              </button>
+            )}
             <ImageGenerationInlineCountButton
-              prefix={isTaskRunning ? (
+              prefix={isBusy ? (
                 <>
                   <TaskStatusInline state={displayTaskPresentation} className="[&_span]:sr-only [&_svg]:text-[var(--glass-tone-info-fg)]" />
                   <span className="text-[10px] font-medium text-[var(--glass-tone-info-fg)]">{tAssets('image.regenCountPrefix')}</span>
@@ -243,7 +295,7 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
               options={getImageGenerationCountOptions('location')}
               onValueChange={setGenerationCount}
               onClick={() => handleGenerate(generatedImageCount)}
-              disabled={isTaskRunning}
+              disabled={isBusy}
               showCountControl={false}
               ariaLabel={tAssets('image.regenCountPrefix')}
               className="inline-flex h-6 items-center justify-center gap-1 rounded-md px-1.5 hover:bg-[var(--glass-tone-info-bg)] transition-colors disabled:opacity-50"
@@ -260,7 +312,7 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
         </div>
 
         {/* 任务失败错误提示 */}
-        {taskErrorDisplay && !isTaskRunning && (
+        {taskErrorDisplay && !isBusy && (
           <div className="flex items-center gap-2 mb-3 p-2 rounded-lg bg-[var(--glass-danger-ring)] text-[var(--glass-tone-danger-fg)]">
             <AppIcon name="alert" className="w-4 h-4 shrink-0" />
             <span className="text-xs line-clamp-2">{taskErrorDisplay.message}</span>
@@ -271,14 +323,14 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
         <div className="grid grid-cols-3 gap-3">
           {displaySelectionImages.map((img) => {
             const isThisSelected = img.isSelected
-            const hasPendingEmptySlots = isTaskRunning && generatedImageCount < displaySlotCount
+            const hasPendingEmptySlots = isBusy && generatedImageCount < displaySlotCount
             const slotTaskRunning = hasPendingEmptySlots
-              ? !img.imageUrl && isTaskRunning
+              ? !img.imageUrl && isBusy
               : !!img.imageTaskRunning
             const phase = resolveGroupedImageSlotPhase(
               { imageUrl: img.imageUrl },
               {
-                isGroupRunning: isTaskRunning,
+                isGroupRunning: isBusy,
                 isSlotRunning: slotTaskRunning,
                 hasPendingEmptySlots,
               },
@@ -306,7 +358,7 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
                     />
                   ) : (
                     <div className="flex min-h-[88px] items-center justify-center bg-[var(--glass-bg-muted)]">
-                      {imageError && !isTaskRunning ? (
+                      {imageError && !isBusy ? (
                         <div className="flex flex-col items-center justify-center px-3 py-6 text-center">
                           <AppIcon name="alert" className="mb-2 h-6 w-6 text-[var(--glass-tone-danger-fg)]" />
                           <span className="text-xs font-medium text-[var(--glass-tone-danger-fg)]">{tAssets('common.generateFailed')}</span>
@@ -395,7 +447,7 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
               onClick={() => onImageClick?.(displayImageUrl)}
             />
             {/* 操作按钮 - 非生成时显示 */}
-            {!isTaskRunning && (
+            {!isBusy && (
               <div className="absolute top-2 left-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button onClick={() => fileInputRef.current?.click()} disabled={uploadImage.isPending} className="glass-btn-base glass-btn-secondary h-7 w-7 rounded-full">
                   <AppIcon name="upload" className="w-4 h-4 text-[var(--glass-tone-success-fg)]" />
@@ -433,10 +485,27 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
             />
           </div>
         )}
-        {isTaskRunning && (
+        {/* 执行中：显示进度遮罩；待生成：显示“待生成”角标（不盖全屏遮罩） */}
+        {isExecuting && (
           <TaskStatusOverlay state={displayTaskPresentation} />
         )}
-        {taskErrorDisplay && !isTaskRunning && (
+        {isQueued && !isExecuting && (
+          <div className="absolute top-2 left-2 z-20">
+            <span className="glass-chip glass-chip-neutral px-2 py-0.5 text-xs">待生成</span>
+          </div>
+        )}
+        {canCancel && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); cancelTask.mutate(runningTaskId!) }}
+            disabled={cancelTask.isPending}
+            className="absolute top-2 right-2 glass-btn-base glass-btn-tone-danger h-7 w-7 rounded-full z-20"
+            title="取消任务"
+          >
+            <AppIcon name="close" className="w-4 h-4" />
+          </button>
+        )}
+        {taskErrorDisplay && !isBusy && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--glass-danger-ring)] text-[var(--glass-tone-danger-fg)] p-3 gap-1">
             <AppIcon name="alert" className="w-6 h-6" />
             <span className="text-xs text-center font-medium line-clamp-3">{taskErrorDisplay.message}</span>

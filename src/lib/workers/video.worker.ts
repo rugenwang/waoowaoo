@@ -170,7 +170,8 @@ async function generateVideoForPanel(
     }
   }
 
-  const cosKey = await uploadVideoSourceToCos(videoSource, 'panel-video', panel.id, downloadHeaders)
+  await assertTaskActive(job, 'upload_panel_video')
+  const cosKey = await uploadVideoSourceToCos(videoSource, 'panel-video', panel.id, downloadHeaders, job)
   return {
     cosKey,
     generationMode,
@@ -190,6 +191,10 @@ async function handleVideoPanelTask(job: Job<TaskJobData>) {
   const panel = await getPanelForVideoTask(job)
 
   const generationOptions = extractGenerationOptions(payload)
+  // 分镜级时长兜底：如果请求未携带 duration，则使用面板本身的 duration（秒）
+  if (generationOptions.duration === undefined && typeof panel.duration === 'number' && Number.isFinite(panel.duration)) {
+    generationOptions.duration = panel.duration
+  }
 
   await reportTaskProgress(job, 10, {
     stage: 'generate_panel_video',
@@ -272,7 +277,8 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
 
   await reportTaskProgress(job, 93, { stage: 'persist_lip_sync' })
 
-  const cosKey = await uploadVideoSourceToCos(source, 'lip-sync', panel.id)
+  await assertTaskActive(job, 'upload_lip_sync_video')
+  const cosKey = await uploadVideoSourceToCos(source, 'lip-sync', panel.id, undefined, job)
 
   await assertTaskActive(job, 'persist_lip_sync_video')
   await prisma.novelPromotionPanel.update({

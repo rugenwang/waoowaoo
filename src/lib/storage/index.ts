@@ -91,11 +91,12 @@ export async function downloadAndUploadImage(
   imageUrl: string,
   key: string,
   maxRetries: number = UPLOAD_MAX_RETRIES,
+  signal?: AbortSignal,
 ): Promise<string> {
   const sharp = (await import('sharp')).default
 
   return await withRetry(async () => {
-    const response = await fetch(toFetchableUrl(imageUrl))
+    const response = await fetch(toFetchableUrl(imageUrl), { signal })
     if (!response.ok) {
       throw new Error(`Failed to download image: ${response.status} ${response.statusText}`)
     }
@@ -120,6 +121,7 @@ export async function downloadAndUploadVideo(
   key: string,
   maxRetries: number = UPLOAD_MAX_RETRIES,
   requestHeaders?: Record<string, string>,
+  signal?: AbortSignal,
 ): Promise<string> {
   return await withRetry(async () => {
     const response = await fetch(toFetchableUrl(videoUrl), {
@@ -127,6 +129,7 @@ export async function downloadAndUploadVideo(
         'User-Agent': 'Mozilla/5.0 (compatible; VideoDownloader/1.0)',
         ...(requestHeaders || {}),
       },
+      signal,
     })
 
     if (!response.ok) {

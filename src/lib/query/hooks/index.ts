@@ -158,6 +158,11 @@ export {
     useUpdateSpeakerVoice,
 } from '../mutations/useProjectMutations'
 
+// 视频相关（分镜成片）
+export {
+    useUpdateProjectPanelDuration,
+} from '../mutations/useVideoMutations'
+
 export type {
     Character,
     CharacterAppearance,

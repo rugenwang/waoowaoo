@@ -197,11 +197,6 @@ export const POST = apiHandler(async (
   const isBatch = body?.all === true
 
   validateFirstLastFrameModel(body?.firstLastFrame)
-  await validateVideoCapabilityCombination({
-    payload: body,
-    projectId,
-    userId: session.user.id,
-  })
 
   if (isBatch) {
     const episodeId = body?.episodeId
@@ -218,11 +213,35 @@ export const POST = apiHandler(async (
           { videoUrl: '' },
         ],
       },
-      select: { id: true },
+      select: { id: true, duration: true },
     })
 
     if (panels.length === 0) {
       return NextResponse.json({ tasks: [], total: 0 })
+    }
+
+    // 分镜级时长：按每个 panel 的 duration 覆盖 generationOptions.duration
+    const baseGenerationOptions = isRecord(body?.generationOptions) ? body.generationOptions : {}
+    const buildPayloadForDuration = (duration: number | null | undefined) => ({
+      ...body,
+      generationOptions: {
+        ...(baseGenerationOptions as Record<string, unknown>),
+        ...(typeof duration === 'number' && Number.isFinite(duration) ? { duration } : {}),
+      },
+    })
+
+    // 校验：按不同 duration 分组做 capability/pricing 组合校验，避免一次校验导致其他 duration 误判
+    const uniqueDurations = new Set<string>()
+    for (const panel of panels) {
+      uniqueDurations.add(String(panel.duration ?? ''))
+    }
+    for (const durationKey of uniqueDurations) {
+      const duration = durationKey === '' ? undefined : Number(durationKey)
+      await validateVideoCapabilityCombination({
+        payload: buildPayloadForDuration(Number.isFinite(duration) ? duration : undefined),
+        projectId,
+        userId: session.user.id,
+      })
     }
 
     const results = await Promise.all(
@@ -236,11 +255,11 @@ export const POST = apiHandler(async (
           type: TASK_TYPE.VIDEO_PANEL,
           targetType: 'NovelPromotionPanel',
           targetId: panel.id,
-          payload: withTaskUiPayload(body, {
+          payload: withTaskUiPayload(buildPayloadForDuration(panel.duration), {
             hasOutputAtStart: await hasPanelVideoOutput(panel.id),
           }),
           dedupeKey: `video_panel:${panel.id}`,
-          billingInfo: buildVideoPanelBillingInfoOrThrow(body),
+          billingInfo: buildVideoPanelBillingInfoOrThrow(buildPayloadForDuration(panel.duration)),
         }),
       ),
     )
@@ -256,12 +275,33 @@ export const POST = apiHandler(async (
 
   const panel = await prisma.novelPromotionPanel.findFirst({
     where: { storyboardId, panelIndex: Number(panelIndex) },
-    select: { id: true },
+    select: { id: true, duration: true },
   })
 
   if (!panel) {
     throw new ApiError('NOT_FOUND')
   }
+
+  // 分镜级时长：如果请求未显式传 duration，则使用 panel.duration
+  const enrichedBody = (() => {
+    const baseGenerationOptions = isRecord(body?.generationOptions) ? body.generationOptions : {}
+    const hasDurationInRequest = isRecord(body?.generationOptions) && Object.prototype.hasOwnProperty.call(body.generationOptions, 'duration')
+    if (hasDurationInRequest) return body
+    if (typeof panel.duration !== 'number' || !Number.isFinite(panel.duration)) return body
+    return {
+      ...body,
+      generationOptions: {
+        ...(baseGenerationOptions as Record<string, unknown>),
+        duration: panel.duration,
+      },
+    }
+  })()
+
+  await validateVideoCapabilityCombination({
+    payload: enrichedBody,
+    projectId,
+    userId: session.user.id,
+  })
 
   const result = await submitTask({
     userId: session.user.id,
@@ -271,11 +311,11 @@ export const POST = apiHandler(async (
     type: TASK_TYPE.VIDEO_PANEL,
     targetType: 'NovelPromotionPanel',
     targetId: panel.id,
-    payload: withTaskUiPayload(body, {
+    payload: withTaskUiPayload(enrichedBody, {
       hasOutputAtStart: await hasPanelVideoOutput(panel.id),
     }),
     dedupeKey: `video_panel:${panel.id}`,
-    billingInfo: buildVideoPanelBillingInfoOrThrow(body),
+    billingInfo: buildVideoPanelBillingInfoOrThrow(enrichedBody),
   })
 
   return NextResponse.json(result)

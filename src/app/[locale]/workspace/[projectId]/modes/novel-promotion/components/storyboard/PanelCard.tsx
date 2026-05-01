@@ -14,6 +14,7 @@ interface PanelCandidateData {
 }
 
 interface PanelCardProps {
+  projectId: string
   panel: StoryboardPanel
   panelData: PanelEditData
   imageUrl: string | null
@@ -52,6 +53,7 @@ interface PanelCardProps {
 }
 
 export default function PanelCard({
+  projectId,
   panel,
   panelData,
   imageUrl,
@@ -110,6 +112,7 @@ export default function PanelCard({
       {/* 镜头图片区域 - 包含插入按钮 */}
       <div className="relative">
         <ImageSection
+          projectId={projectId}
           panelId={panel.id}
           imageUrl={imageUrl}
           globalPanelNumber={globalPanelNumber}

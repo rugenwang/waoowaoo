@@ -544,7 +544,8 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       pollProgress: { start: 30, end: 90 },
     })
 
-    const cosKey = await uploadImageSourceToCos(source, 'panel-candidate', `${panel.id}-${i}`)
+    await assertTaskActive(job, 'upload_panel_candidate')
+    const cosKey = await uploadImageSourceToCos(source, 'panel-candidate', `${panel.id}-${i}`, job)
     candidates.push(cosKey)
   }
 

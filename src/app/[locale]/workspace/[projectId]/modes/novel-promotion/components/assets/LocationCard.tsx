@@ -9,7 +9,8 @@ import { useTranslations } from 'next-intl'
 import { useState, useRef } from 'react'
 import { Location } from '@/types/project'
 import { shouldShowError } from '@/lib/error-utils'
-import { useUploadProjectLocationImage } from '@/lib/query/mutations'
+import { useCancelTask, useUploadProjectLocationImage } from '@/lib/query/mutations'
+import { useTaskTargetStateMap } from '@/lib/query/hooks/useTaskTargetStateMap'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import ImageGenerationInlineCountButton from '@/components/image-generation/ImageGenerationInlineCountButton'
@@ -60,6 +61,12 @@ export default function LocationCard({
 }: LocationCardProps) {
   // 🔥 使用 mutation
   const uploadImage = useUploadProjectLocationImage(projectId)
+  const cancelTask = useCancelTask(projectId)
+  const taskStateMap = useTaskTargetStateMap(projectId, [
+    { targetType: 'LocationImage', targetId: location.id },
+  ])
+  const taskState = taskStateMap.getState('LocationImage', location.id)
+  const canCancel = !!taskState?.runningTaskId && (taskState.phase === 'queued' || taskState.phase === 'processing')
   const t = useTranslations('assets')
   const assetKey = assetType === 'prop' ? 'prop' : 'location'
   const { count: generationCount, setCount: setGenerationCount } = useImageGenerationCount('location')
@@ -130,10 +137,11 @@ export default function LocationCard({
     key.startsWith(`location-${location.id}`)
   )
 
-  const locationTaskRunning = (location.images || []).some((image) => !!image.imageTaskRunning)
+  const runtimePhase = taskState?.phase
+  const locationTaskRunning = (location.images || []).some((image) => !!image.imageTaskRunning) || runtimePhase === 'queued' || runtimePhase === 'processing'
   const locationTaskPresentation = locationTaskRunning
     ? resolveTaskPresentationState({
-      phase: 'processing',
+      phase: runtimePhase === 'queued' ? 'queued' : 'processing',
       intent: currentImageUrl ? 'regenerate' : 'generate',
       resource: 'image',
       hasOutput: !!currentImageUrl,
@@ -170,6 +178,18 @@ export default function LocationCard({
     locationTaskRunning ||
     isAnyTaskRunning
 
+  const cancelAction = canCancel ? (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); cancelTask.mutate(taskState!.runningTaskId!) }}
+      disabled={cancelTask.isPending}
+      className="glass-btn-base glass-btn-tone-danger h-6 w-6 rounded-md"
+      title="取消任务"
+    >
+      <AppIcon name="close" className="w-4 h-4" />
+    </button>
+  ) : null
+
   const displaySelectionImages = resolveDisplayImageSlots(orderedImages, {
     hasRunningTask: isTaskRunning,
     requestedCount: generatedImageCount > 1 ? generatedImageCount : generationCount,
@@ -193,6 +213,7 @@ export default function LocationCard({
 
     const selectionHeaderActions = (
       <>
+        {cancelAction}
         <ImageGenerationInlineCountButton
           prefix={isGroupTaskRunning ? (
             <>
@@ -338,6 +359,7 @@ export default function LocationCard({
 
   const compactHeaderActions = (
     <>
+      {cancelAction}
       {onCopyFromGlobal && (
           <button
             onClick={onCopyFromGlobal}

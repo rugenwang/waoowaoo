@@ -245,6 +245,7 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                       value={videoModel.selectedModel || undefined}
                       onModelChange={(modelKey) => {
                         videoModel.setSelectedModel(modelKey)
+                        actions.onUpdatePanelVideoModel(panel.storyboardId, panel.panelIndex, modelKey)
                       }}
                       capabilityFields={videoModel.capabilityFields.map((field) => ({
                         field: field.field,
@@ -253,7 +254,15 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                         disabledOptions: field.disabledOptions,
                       }))}
                       capabilityOverrides={videoModel.generationOptions}
-                      onCapabilityChange={(field, rawValue) => videoModel.setCapabilityValue(field, rawValue)}
+                      onCapabilityChange={(field, rawValue, sample) => {
+                        videoModel.setCapabilityValue(field, rawValue)
+                        if (field === 'duration') {
+                          const duration = rawValue === '' ? null : Number(rawValue)
+                          actions.onUpdatePanelDuration(panel.storyboardId, panel.panelIndex, Number.isFinite(duration as number) ? (duration as number) : null)
+                          return
+                        }
+                        actions.onUpdateVideoCapabilityOverride(videoModel.selectedModel, field, rawValue, sample)
+                      }}
                       placeholder={t('panelCard.selectModel')}
                     />
                   </div>

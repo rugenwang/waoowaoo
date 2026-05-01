@@ -46,6 +46,21 @@ export interface VideoPanelCardShellProps {
     panelId?: string,
   ) => void
   onUpdatePanelVideoModel: (storyboardId: string, panelIndex: number, model: string) => void
+  /**
+   * 仅更新当前分镜的“成片时长（秒）”，对应 NovelPromotionPanel.duration。
+   * 该字段用于当前分镜的视频生成时长，不应写入 capabilityOverrides（避免联动其它分镜）。
+   */
+  onUpdatePanelDuration: (storyboardId: string, panelIndex: number, duration: number | null) => void
+  /**
+   * 持久化保存视频生成能力参数（如 duration/fps/resolution 等）到项目 capabilityOverrides。
+   * 注意：这里保存的是「模型能力参数」，不是分镜的 panel.duration。
+   */
+  onUpdateVideoCapabilityOverride: (
+    modelKey: string,
+    field: string,
+    rawValue: string,
+    sample: CapabilityValue,
+  ) => void
   onToggleLink: (panelKey: string, storyboardId: string, panelIndex: number) => void
   onFlModelChange: (model: string) => void
   onFlCapabilityChange: (field: string, rawValue: string) => void

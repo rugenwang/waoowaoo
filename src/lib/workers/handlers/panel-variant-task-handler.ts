@@ -283,7 +283,7 @@ export async function handlePanelVariantTask(job: Job<TaskJobData>) {
     },
   })
 
-  const cosKey = await uploadImageSourceToCos(source, 'panel-variant', newPanel.id)
+  const cosKey = await uploadImageSourceToCos(source, 'panel-variant', newPanel.id, job)
 
   await assertTaskActive(job, 'persist_panel_variant')
   await prisma.novelPromotionPanel.update({

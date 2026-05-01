@@ -6,6 +6,7 @@ export interface ProcessMediaOptions {
   keyPrefix: string
   targetId: string
   downloadHeaders?: Record<string, string>
+  signal?: AbortSignal
 }
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -30,7 +31,7 @@ function resolveContentType(ext: string): string {
  * 处理媒体结果：下载 -> 上传 COS，返回 COS key。
  */
 export async function processMediaResult(options: ProcessMediaOptions): Promise<string> {
-  const { source, type, keyPrefix, targetId, downloadHeaders } = options
+  const { source, type, keyPrefix, targetId, downloadHeaders, signal } = options
   const ext = type === 'video' ? 'mp4' : type === 'audio' ? 'mp3' : 'jpg'
   const key = generateUniqueKey(`${keyPrefix}-${targetId}`, ext)
   const contentType = resolveContentType(ext)
@@ -45,10 +46,10 @@ export async function processMediaResult(options: ProcessMediaOptions): Promise<
     }
 
     if (type === 'video') {
-      return await downloadAndUploadVideo(source, key, 3, downloadHeaders)
+      return await downloadAndUploadVideo(source, key, 3, downloadHeaders, signal)
     }
 
-    const response = await fetch(toFetchableUrl(source))
+    const response = await fetch(toFetchableUrl(source), { signal })
     const buffer = Buffer.from(await response.arrayBuffer()) as Buffer
     return await uploadObject(buffer, key, undefined, contentType)
   }

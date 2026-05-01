@@ -42,6 +42,8 @@ export function useVideoPanelActions({
   onSavePrompt,
   onGenerateVideo,
   onUpdatePanelVideoModel,
+  onUpdatePanelDuration,
+  onUpdateVideoCapabilityOverride,
   onToggleLink,
   onFlModelChange,
   onFlCapabilityChange,
@@ -71,6 +73,7 @@ export function useVideoPanelActions({
     defaultVideoModel,
     capabilityOverrides,
     userVideoModels,
+    panelDuration: panel.textPanel?.duration ?? null,
   })
 
   const player = usePanelPlayer({
@@ -148,6 +151,8 @@ export function useVideoPanelActions({
     actions: {
       onGenerateVideo,
       onUpdatePanelVideoModel,
+      onUpdatePanelDuration,
+      onUpdateVideoCapabilityOverride,
       onToggleLink,
       onFlModelChange,
       onFlCapabilityChange,

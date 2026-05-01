@@ -40,6 +40,13 @@ interface VideoRenderPanelProps {
     panelId?: string,
   ) => Promise<void>
   onUpdatePanelVideoModel: (storyboardId: string, panelIndex: number, model: string) => Promise<void>
+  onUpdatePanelDuration: (storyboardId: string, panelIndex: number, duration: number | null) => Promise<void> | void
+  onUpdateVideoCapabilityOverride: (
+    modelKey: string,
+    field: string,
+    rawValue: string,
+    sample: CapabilityValue,
+  ) => Promise<void> | void
   onLipSync: (storyboardId: string, panelIndex: number, voiceLineId: string, panelId?: string) => Promise<void>
   onToggleLink: (panelKey: string, storyboardId: string, panelIndex: number) => Promise<void>
   onFlModelChange: (model: string) => void
@@ -94,6 +101,8 @@ export default function VideoRenderPanel({
   flCustomPrompts,
   onGenerateVideo,
   onUpdatePanelVideoModel,
+  onUpdatePanelDuration,
+  onUpdateVideoCapabilityOverride,
   onLipSync,
   onToggleLink,
   onFlModelChange,
@@ -181,6 +190,8 @@ export default function VideoRenderPanel({
                 onSavePrompt={(value) => savePrompt(panel.storyboardId, panel.panelIndex, panelKey, value, promptField)}
                 onGenerateVideo={onGenerateVideo}
                 onUpdatePanelVideoModel={onUpdatePanelVideoModel}
+                onUpdatePanelDuration={onUpdatePanelDuration}
+                onUpdateVideoCapabilityOverride={onUpdateVideoCapabilityOverride}
                 onToggleLink={onToggleLink}
                 onFlModelChange={onFlModelChange}
                 onFlCapabilityChange={onFlCapabilityChange}

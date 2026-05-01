@@ -201,6 +201,7 @@ export default function StoryboardGroup({
       )}
 
       <StoryboardPanelList
+        projectId={projectId}
         storyboardId={storyboard.id}
         textPanels={textPanels}
         storyboardStartIndex={storyboardStartIndex}

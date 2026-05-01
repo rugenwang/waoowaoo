@@ -12,6 +12,11 @@ interface UsePanelVideoModelParams {
   defaultVideoModel: string
   capabilityOverrides?: CapabilitySelections
   userVideoModels?: VideoModelOption[]
+  /**
+   * 当前分镜的“成片时长（秒）”，来源于 NovelPromotionPanel.duration。
+   * 该值应覆盖模型级 capabilityOverrides，避免“改一个全都变”。
+   */
+  panelDuration?: number | null
 }
 
 interface CapabilityField {
@@ -57,6 +62,8 @@ function readSelectionForModel(
   const selection: VideoGenerationOptions = {}
   for (const [field, value] of Object.entries(rawSelection)) {
     if (field === 'aspectRatio') continue
+    // duration 改为分镜级（panel.duration），不再从 capabilityOverrides 读取
+    if (field === 'duration') continue
     if (!isGenerationOptionValue(value)) continue
     selection[field] = value
   }
@@ -67,6 +74,7 @@ export function usePanelVideoModel({
   defaultVideoModel,
   capabilityOverrides,
   userVideoModels,
+  panelDuration,
 }: UsePanelVideoModelParams) {
   const [selectedModel, setSelectedModel] = useState(defaultVideoModel || '')
   const [generationOptions, setGenerationOptions] = useState<VideoGenerationOptions>(() =>
@@ -123,6 +131,20 @@ export function usePanelVideoModel({
       selection: selectedModelOverrides,
     }))
   }, [selectedModel, selectedModelOverridesSignature, capabilityDefinitions, pricingTiers, selectedModelOverrides])
+
+  // 分镜级时长覆盖：把 panelDuration 固定到当前卡片的 generationOptions.duration
+  useEffect(() => {
+    if (typeof panelDuration !== 'number' || !Number.isFinite(panelDuration)) return
+    setGenerationOptions((previous) => normalizeVideoGenerationSelections({
+      definitions: capabilityDefinitions,
+      pricingTiers,
+      selection: {
+        ...previous,
+        duration: panelDuration,
+      },
+      pinnedFields: ['duration'],
+    }))
+  }, [panelDuration, capabilityDefinitions, pricingTiers])
 
   useEffect(() => {
     setGenerationOptions((previous) => normalizeVideoGenerationSelections({

@@ -7,6 +7,8 @@ import { AppIcon } from '@/components/ui/icons'
 import { useTaskQueue } from '@/lib/task-queue'
 import { buildVideoSubmissionKey } from '@/lib/novel-promotion/stages/video-stage-runtime/immediate-video-submission'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
+import { useTaskTargetStateMap } from '@/lib/query/hooks/useTaskTargetStateMap'
+import { useCancelTask } from '@/lib/query/mutations'
 
 interface VideoPanelCardHeaderProps {
   runtime: VideoPanelRuntime
@@ -42,6 +44,15 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
 
   const hasVisibleBaseVideo = !!media.baseVideoUrl
   const showFirstLastFrameSwitch = layout.hasNext
+
+  const projectId = layout.projectId || 'unknown-project'
+  const targetId = panel.panelId || ''
+  const cancelTask = useCancelTask(projectId)
+  const taskStateMap = useTaskTargetStateMap(layout.projectId, [
+    { targetType: 'NovelPromotionPanel', targetId },
+  ], { enabled: !!layout.projectId && !!targetId })
+  const taskState = taskStateMap.getState('NovelPromotionPanel', targetId)
+  const canCancel = !!taskState?.runningTaskId && (taskState.phase === 'queued' || taskState.phase === 'processing')
 
   return (
     <div className="bg-[var(--glass-bg-muted)] flex items-center justify-center relative" style={{ aspectRatio: player.cssAspectRatio }}>
@@ -161,6 +172,18 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
           className="absolute bottom-2 right-2 bg-[var(--glass-overlay)] hover:bg-[var(--glass-overlay-strong)] text-white p-2 rounded-full transition-all z-20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <AppIcon name="refresh" className="w-4 h-4" />
+        </button>
+      )}
+
+      {/* 取消任务按钮（尽力硬取消：queued 移除 job；processing 标记取消并尽快中断） */}
+      {canCancel && (
+        <button
+          onClick={(e) => { e.stopPropagation(); cancelTask.mutate(taskState!.runningTaskId!) }}
+          disabled={cancelTask.isPending}
+          className="absolute bottom-2 right-12 bg-[var(--glass-overlay)] hover:bg-[var(--glass-overlay-strong)] text-white p-2 rounded-full transition-all z-20 disabled:cursor-not-allowed disabled:opacity-50"
+          title="取消任务"
+        >
+          <AppIcon name="close" className="w-4 h-4" />
         </button>
       )}
 

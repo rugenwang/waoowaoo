@@ -11,7 +11,8 @@ import { useState, useRef } from 'react'
 import { Character, CharacterAppearance } from '@/types/project'
 import { shouldShowError } from '@/lib/error-utils'
 import VoiceSettings from './VoiceSettings'
-import { useUploadProjectCharacterImage } from '@/lib/query/mutations'
+import { useCancelTask, useUploadProjectCharacterImage } from '@/lib/query/mutations'
+import { useTaskTargetStateMap } from '@/lib/query/hooks/useTaskTargetStateMap'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import ImageGenerationInlineCountButton from '@/components/image-generation/ImageGenerationInlineCountButton'
@@ -75,6 +76,12 @@ export default function CharacterCard({
 }: CharacterCardProps) {
   // 🔥 使用 mutation
   const uploadImage = useUploadProjectCharacterImage(projectId)
+  const cancelTask = useCancelTask(projectId)
+  const taskStateMap = useTaskTargetStateMap(projectId, [
+    { targetType: 'CharacterAppearance', targetId: appearance.id },
+  ])
+  const taskState = taskStateMap.getState('CharacterAppearance', appearance.id)
+  const canCancel = !!taskState?.runningTaskId && (taskState.phase === 'queued' || taskState.phase === 'processing')
   const t = useTranslations('assets')
   const { count: generationCount, setCount: setGenerationCount } = useImageGenerationCount('character')
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -173,10 +180,11 @@ export default function CharacterCard({
   const isAnyTaskRunning = isGroupTaskRunning || Array.from(activeTaskKeys).some(key =>
     key.startsWith(`character-${character.id}-${appearance.appearanceIndex}`)
   )
-  const appearanceTaskRunning = !!appearance.imageTaskRunning
+  const runtimePhase = taskState?.phase
+  const appearanceTaskRunning = !!appearance.imageTaskRunning || runtimePhase === 'queued' || runtimePhase === 'processing'
   const appearanceTaskPresentation = appearanceTaskRunning
     ? resolveTaskPresentationState({
-      phase: 'processing',
+      phase: runtimePhase === 'queued' ? 'queued' : 'processing',
       intent: currentImageUrl ? 'regenerate' : 'generate',
       resource: 'image',
       hasOutput: !!currentImageUrl,
@@ -211,12 +219,25 @@ export default function CharacterCard({
     appearanceTaskRunning ||
     isAnyTaskRunning
 
+  const cancelAction = canCancel ? (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); cancelTask.mutate(taskState!.runningTaskId!) }}
+      disabled={cancelTask.isPending}
+      className="glass-btn-base glass-btn-tone-danger h-6 w-6 rounded-md"
+      title="取消任务"
+    >
+      <AppIcon name="close" className="w-4 h-4" />
+    </button>
+  ) : null
+
   // 注意：不再使用 editingItems，生成/编辑状态统一由任务态 + 实体态提供
 
   // 选择模式：显示名字+描述在上，三张图片在下
   if (showSelectionMode) {
     const selectionActions = (
       <>
+        {cancelAction}
         <ImageGenerationInlineCountButton
           prefix={isGroupTaskRunning ? (
             <>
@@ -377,6 +398,7 @@ export default function CharacterCard({
 
   const compactHeaderActions = (
     <>
+      {cancelAction}
       <button
         onClick={onEdit}
         className="flex-shrink-0 w-5 h-5 rounded hover:bg-[var(--glass-bg-muted)] flex items-center justify-center transition-colors"

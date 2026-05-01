@@ -116,7 +116,7 @@ export async function handleModifyAssetImageTask(job: Job<TaskJobData>) {
 
     const label = `${appearance.character?.name || '角色'} - ${appearance.changeReason || '形象'}`
     const labeled = await withLabelBar(source, label)
-    const cosKey = await uploadImageSourceToCos(labeled, 'character-modify', appearance.id)
+    const cosKey = await uploadImageSourceToCos(labeled, 'character-modify', appearance.id, job)
 
     while (imageUrls.length <= imageIndex) imageUrls.push('')
     imageUrls[imageIndex] = cosKey
@@ -223,7 +223,7 @@ export async function handleModifyAssetImageTask(job: Job<TaskJobData>) {
 
     const label = locationImage.location?.name || (isProp ? '道具' : '场景')
     const labeled = await withLabelBar(source, label)
-    const cosKey = await uploadImageSourceToCos(labeled, isProp ? 'prop-modify' : 'location-modify', locationImage.id)
+    const cosKey = await uploadImageSourceToCos(labeled, isProp ? 'prop-modify' : 'location-modify', locationImage.id, job)
 
     let extractedDescription: {
       prompt: string
@@ -347,7 +347,7 @@ export async function handleModifyAssetImageTask(job: Job<TaskJobData>) {
       },
     })
 
-    const cosKey = await uploadImageSourceToCos(source, 'panel-modify', panel.id)
+    const cosKey = await uploadImageSourceToCos(source, 'panel-modify', panel.id, job)
 
     await assertTaskActive(job, 'persist_storyboard_modify')
     await prisma.novelPromotionPanel.update({

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AppIcon } from '@/components/ui/icons'
 import { usePathname } from 'next/navigation'
 
@@ -187,11 +187,173 @@ export default function ConsoleOverlayButton() {
 
 function ConsoleOverlay(props: { defaultProjectId: string | null; onClose: () => void }) {
   const [tab, setTab] = useState<'waoowaoo' | 'ltx'>('waoowaoo')
+
+  // 可拖拽浮层位置（记忆）
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const panelPosRef = useRef<{ left: number; top: number } | null>(null)
+  const dragStateRef = useRef<{
+    active: boolean
+    pointerId: number | null
+    startX: number
+    startY: number
+    originLeft: number
+    originTop: number
+  }>({
+    active: false,
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    originLeft: 0,
+    originTop: 0,
+  })
+  const storageKey = 'waoowaoo.console.overlay.position.v1'
+  const [panelPos, setPanelPos] = useState<{ left: number; top: number } | null>(null)
+
+  // 只在“初始化/窗口尺寸变化/重置”时做轻度夹取，避免面板完全跑出视口找不回来。
+  // 拖拽时不做限制，允许用户把面板移到任意位置（包括跨屏幕/跨浏览器可视区域）。
+  function clampPositionForSafety(left: number, top: number): { left: number; top: number } {
+    const el = panelRef.current
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+    // 保证至少露出一部分标题栏方便拖回来
+    const minVisible = 96
+    const w = el ? el.getBoundingClientRect().width : Math.min(1200, vw - 24)
+    const h = el ? el.getBoundingClientRect().height : Math.min(720, vh - 80)
+    const minLeft = -w + minVisible
+    const maxLeft = vw - minVisible
+    const minTop = 0
+    const maxTop = vh - minVisible
+    return {
+      left: Math.max(minLeft, Math.min(left, maxLeft)),
+      top: Math.max(minTop, Math.min(top, maxTop)),
+    }
+  }
+
+  useEffect(() => {
+    panelPosRef.current = panelPos
+  }, [panelPos])
+
+  useLayoutEffect(() => {
+    // 初次打开：读取本地位置；否则居中
+    if (panelPos) return
+    if (typeof window === 'undefined') return
+    try {
+      const raw = window.localStorage.getItem(storageKey)
+      if (raw) {
+        const parsed = JSON.parse(raw) as { left?: unknown; top?: unknown }
+        const left = typeof parsed.left === 'number' ? parsed.left : NaN
+        const top = typeof parsed.top === 'number' ? parsed.top : NaN
+        if (Number.isFinite(left) && Number.isFinite(top)) {
+          setPanelPos(clampPositionForSafety(left, top))
+          return
+        }
+      }
+    } catch {
+      // ignore
+    }
+    // 默认位置：水平居中，顶部 64px（约等于原 top-16）
+    const vw = window.innerWidth
+    const width = Math.min(1200, vw - 24)
+    setPanelPos(clampPositionForSafety(Math.round((vw - width) / 2), 64))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    // 窗口变化时做“轻度夹取”，避免面板完全消失
+    if (!panelPos) return
+    const onResize = () => setPanelPos((prev) => (prev ? clampPositionForSafety(prev.left, prev.top) : prev))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelPos?.left, panelPos?.top])
+
+  useEffect(() => {
+    // 全局监听 pointerup，避免拖拽状态“卡住”导致一直跟着鼠标走
+    const onMove = (e: PointerEvent) => {
+      const st = dragStateRef.current
+      if (!st.active || st.pointerId !== e.pointerId) return
+      const nextLeft = st.originLeft + (e.clientX - st.startX)
+      const nextTop = st.originTop + (e.clientY - st.startY)
+      setPanelPos({ left: nextLeft, top: nextTop })
+    }
+    const onUp = (e: PointerEvent) => {
+      const st = dragStateRef.current
+      if (!st.active || st.pointerId !== e.pointerId) return
+      dragStateRef.current.active = false
+      dragStateRef.current.pointerId = null
+      try {
+        const pos = panelPosRef.current
+        if (pos) window.localStorage.setItem(storageKey, JSON.stringify(pos))
+      } catch {
+        // ignore
+      }
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    const onBlur = () => {
+      dragStateRef.current.active = false
+      dragStateRef.current.pointerId = null
+    }
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      window.removeEventListener('blur', onBlur)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const onHeaderPointerDown = (e: React.PointerEvent) => {
+    if (!panelRef.current) return
+    // 点击标题栏里的按钮/输入框时，不触发拖拽（否则会导致点击事件不触发，看起来像“关闭按钮没反应”）
+    const targetEl = e.target as HTMLElement | null
+    if (targetEl?.closest?.('button,a,input,textarea,select,[role="button"]')) return
+    // 只响应主键拖拽
+    if (typeof (e as any).button === 'number' && (e as any).button !== 0) return
+
+    e.preventDefault()
+    const el = panelRef.current
+    // 捕获要绑在“标题栏元素”本身，避免 pointerup/move 丢失导致拖拽状态卡住
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const rect = el.getBoundingClientRect()
+    dragStateRef.current = {
+      active: true,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      originLeft: rect.left,
+      originTop: rect.top,
+    }
+  }
+
+  const resetPosition = () => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.removeItem(storageKey)
+    } catch {
+      // ignore
+    }
+    const vw = window.innerWidth
+    const width = Math.min(1200, vw - 24)
+    setPanelPos(clampPositionForSafety(Math.round((vw - width) / 2), 64))
+  }
+
   return (
     <div className="fixed inset-0 z-[100]">
       <div className="absolute inset-0 bg-black/40" onClick={props.onClose} />
-      <div className="absolute left-1/2 top-16 w-[min(1200px,calc(100vw-24px))] -translate-x-1/2 rounded-2xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] shadow-2xl">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--glass-stroke-base)]">
+      <div
+        ref={panelRef}
+        className="absolute w-[min(1200px,calc(100vw-24px))] rounded-2xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] shadow-2xl"
+        style={panelPos ? { left: `${panelPos.left}px`, top: `${panelPos.top}px` } : { left: '50%', top: '64px', transform: 'translateX(-50%)' }}
+      >
+        <div
+          className="flex items-center justify-between px-4 py-3 border-b border-[var(--glass-stroke-base)] cursor-move select-none touch-none"
+          onPointerDown={onHeaderPointerDown}
+          // move/up 在 window 监听，避免丢失导致卡住
+        >
           <div className="flex items-center gap-2">
             <AppIcon name="fileText" className="w-5 h-5" />
             <div className="font-semibold">执行控制台</div>
@@ -210,14 +372,26 @@ function ConsoleOverlay(props: { defaultProjectId: string | null; onClose: () =>
               </button>
             </div>
           </div>
-          <button
-            type="button"
-            className="rounded-full p-2 text-[var(--glass-text-tertiary)] hover:bg-[var(--glass-bg-muted)] hover:text-[var(--glass-text-primary)]"
-            onClick={props.onClose}
-            aria-label="关闭控制台"
-          >
-            <AppIcon name="close" className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              className="rounded-full p-2 text-[var(--glass-text-tertiary)] hover:bg-[var(--glass-bg-muted)] hover:text-[var(--glass-text-primary)]"
+              onClick={(e) => { e.stopPropagation(); resetPosition() }}
+              aria-label="重置位置"
+              title="重置位置"
+            >
+              <AppIcon name="refresh" className="w-5 h-5" />
+            </button>
+            <button
+              type="button"
+              className="rounded-full p-2 text-[var(--glass-text-tertiary)] hover:bg-[var(--glass-bg-muted)] hover:text-[var(--glass-text-primary)]"
+              onClick={(e) => { e.stopPropagation(); props.onClose() }}
+              aria-label="关闭控制台"
+              title="关闭"
+            >
+              <AppIcon name="close" className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <div className="h-[min(72vh,720px)] overflow-hidden">

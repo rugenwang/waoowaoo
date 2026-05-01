@@ -74,6 +74,7 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
   const [queue, setQueue] = useState<QueueItemState[]>([])
   const [showPopup, setShowPopup] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [externalBusy, setExternalBusy] = useState(false)
   const noticeTimerRef = useRef<number | null>(null)
   const runningRef = useRef(false)
 
@@ -91,8 +92,55 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
   const activeItem = useMemo(() => queue.find(item => item.status === 'running') || null, [queue])
   const activeTarget = activeItem?.target || null
 
+  // 刷新页面后，前端队列会丢失，但后端可能仍有 queued/processing 的任务在执行。
+  // 这种情况下不应该允许用户“刷新绕过队列”继续直接提交新任务。
+  // 因此当本地队列为空时，轮询后端 active tasks，作为一个 externalBusy 闸门：
+  // - externalBusy=true：enqueue 仍可加入 pending，但不会 startNext
+  // - externalBusy=false：恢复 startNext
+  useEffect(() => {
+    if (!enabled) {
+      setExternalBusy(false)
+      return
+    }
+    if (queue.length > 0) {
+      setExternalBusy(false)
+      return
+    }
+
+    let cancelled = false
+    let timer: number | null = null
+
+    const check = async () => {
+      try {
+        const search = new URLSearchParams()
+        search.set('projectId', projectId)
+        search.append('status', 'queued')
+        search.append('status', 'processing')
+        search.set('limit', '1')
+        const res = await apiFetch(`/api/tasks?${search.toString()}`)
+        if (!res.ok) return
+        const data = await res.json().catch(() => ({}))
+        const tasks = Array.isArray((data as any)?.tasks) ? (data as any).tasks : []
+        const busy = tasks.length > 0
+        if (!cancelled) setExternalBusy(busy)
+        if (!cancelled && busy) {
+          timer = window.setTimeout(check, 2000)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    void check()
+    return () => {
+      cancelled = true
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [enabled, projectId, queue.length])
+
   const startNextIfIdle = useCallback(() => {
     if (!enabled) return
+    if (externalBusy) return
     if (runningRef.current) return
     runningRef.current = true
 
@@ -106,7 +154,7 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
       next[idx] = { ...next[idx], status: 'running', error: null }
       return next
     })
-  }, [enabled])
+  }, [enabled, externalBusy])
 
   // 当队列中出现 running，但没有 taskId 时，立即 submit
   useEffect(() => {

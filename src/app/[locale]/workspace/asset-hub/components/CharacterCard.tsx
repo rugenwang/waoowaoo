@@ -11,7 +11,8 @@ import {
     useUploadCharacterImage,
     useDeleteCharacter,
     useDeleteCharacterAppearance,
-    useUploadCharacterVoice
+    useUploadCharacterVoice,
+    useCancelTask,
 } from '@/lib/query/mutations'
 import VoiceSettings from './VoiceSettings'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
@@ -23,6 +24,8 @@ import { PRIMARY_APPEARANCE_INDEX } from '@/lib/constants'
 import { getImageGenerationCountOptions } from '@/lib/image-generation/count'
 import { useImageGenerationCount } from '@/lib/image-generation/use-image-generation-count'
 import { AppIcon } from '@/components/ui/icons'
+import { useTaskTargetStateMap } from '@/lib/query/hooks/useTaskTargetStateMap'
+import { useTaskQueue } from '@/lib/task-queue'
 
 interface Appearance {
     id: string
@@ -65,6 +68,11 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
     const deleteCharacter = useDeleteCharacter()
     const deleteAppearance = useDeleteCharacterAppearance()
     const uploadVoice = useUploadCharacterVoice()
+    const cancelTask = useCancelTask('global-asset-hub')
+    const taskQueue = useTaskQueue()
+    const taskStateMap = useTaskTargetStateMap('global-asset-hub', [
+        { targetType: 'GlobalCharacter', targetId: character.id },
+    ])
 
     const t = useTranslations('assetHub')
     const tAssets = useTranslations('assets')
@@ -100,13 +108,28 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
     const displayImageUrl = isValidUrl(currentImageUrl) ? currentImageUrl : null
     const serverTaskRunning = !!appearance?.imageTaskRunning
     const transientSubmitting = generateImage.isPending
-    const isAppearanceTaskRunning = serverTaskRunning || transientSubmitting
-    const taskErrorDisplay = !isAppearanceTaskRunning && appearance?.lastError
+    const runtimeTaskState = taskStateMap.getState('GlobalCharacter', character.id)
+    const runtimePhase = runtimeTaskState?.phase
+    const runningTaskId = runtimeTaskState?.runningTaskId
+    const localPending = taskQueue.enabled
+        && taskQueue.queue.some((item) =>
+            item.status === 'pending'
+            && item.group === 'assets'
+            && item.projectId === 'global-asset-hub'
+            && item.target.targetType === 'GlobalCharacter'
+            && item.target.targetId === character.id,
+        )
+    // 资产库：区分“执行中”和“待生成（排队）”
+    const isQueued = localPending || runtimePhase === 'queued'
+    const isExecuting = serverTaskRunning || transientSubmitting || runtimePhase === 'processing'
+    const isBusy = isQueued || isExecuting
+    const canCancel = !!runningTaskId && (runtimePhase === 'queued' || runtimePhase === 'processing')
+    const taskErrorDisplay = !isBusy && appearance?.lastError
         ? resolveErrorDisplay(appearance.lastError)
         : null
-    const displayTaskPresentation = isAppearanceTaskRunning
+    const displayTaskPresentation = isBusy
         ? resolveTaskPresentationState({
-            phase: 'processing',
+            phase: isQueued ? 'queued' : 'processing',
             intent: displayImageUrl ? 'process' : 'generate',
             resource: 'image',
             hasOutput: !!displayImageUrl,
@@ -123,6 +146,28 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
 
     // 生成图片
     const handleGenerate = (count = generationCount) => {
+        // ✅ 队列模式：当前有任务执行时，不直接发起；进入“待生成（pending）”
+        if (taskQueue.enabled) {
+            taskQueue.enqueue({
+                id: `asset-hub:character:${character.id}:${Date.now()}`,
+                group: 'assets',
+                projectId: 'global-asset-hub',
+                target: { targetType: 'GlobalCharacter', targetId: character.id },
+                uiKey: `asset-hub:character:${character.id}`,
+                label: `角色：${character.name}`,
+                submit: async () => {
+                    const data = await generateImage.mutateAsync({
+                        characterId: character.id,
+                        appearanceIndex: appearance.appearanceIndex,
+                        artStyle: appearance.artStyle || undefined,
+                        count,
+                    } as any)
+                    return { taskId: String((data as any)?.taskId || '') }
+                },
+            })
+            return
+        }
+
         generateImage.mutate(
             {
                 characterId: character.id,
@@ -130,7 +175,7 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
                 artStyle: appearance.artStyle || undefined,
                 count,
             },
-            { onError: (error) => alert(error.message || t('generateFailed')) }
+            { onError: (error) => alert(error.message || t('generateFailed')) },
         )
     }
 
@@ -242,6 +287,9 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
                     <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold text-[var(--glass-text-primary)]">{character.name}</span>
                         <span className="glass-chip glass-chip-neutral px-2 py-0.5 text-xs">{appearance.changeReason}</span>
+                        {isQueued && !isExecuting && (
+                            <span className="glass-chip glass-chip-neutral px-2 py-0.5 text-xs">待生成</span>
+                        )}
                         {isPrimaryAppearance ? (
                             <span className="glass-chip glass-chip-success px-2 py-0.5 text-xs">{tAssets('character.primary')}</span>
                         ) : (
@@ -249,8 +297,19 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
                         )}
                     </div>
                     <div className="flex items-center gap-1">
+                        {canCancel && (
+                            <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); cancelTask.mutate(runningTaskId) }}
+                                disabled={cancelTask.isPending}
+                                className="glass-btn-base glass-btn-tone-danger px-2 py-1 text-[10px] rounded-md"
+                                title="取消任务"
+                            >
+                                <AppIcon name="close" className="w-3 h-3" />
+                            </button>
+                        )}
                         <ImageGenerationInlineCountButton
-                            prefix={isAppearanceTaskRunning ? (
+                            prefix={isBusy ? (
                                 <>
                                     <TaskStatusInline state={displayTaskPresentation} className="[&_span]:sr-only [&_svg]:text-[var(--glass-tone-info-fg)]" />
                                     <span className="text-[10px] font-medium text-[var(--glass-tone-info-fg)]">{tAssets('image.regenCountPrefix')}</span>
@@ -268,7 +327,7 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
                                 _ulogInfo('[CharacterCard] 多图模式 - 重新生成按钮点击, characterId:', character.id, 'appearanceCount:', appearanceCount)
                                 handleGenerate(generatedImageCount)
                             }}
-                            disabled={isAppearanceTaskRunning}
+                            disabled={isBusy}
                             showCountControl={false}
                             ariaLabel={tAssets('image.regenCountPrefix')}
                             className="inline-flex h-6 items-center justify-center gap-1 rounded-md px-1.5 hover:bg-[var(--glass-tone-info-bg)] transition-colors disabled:opacity-50"
@@ -293,7 +352,7 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
                 </div>
 
                 {/* 任务失败错误提示 */}
-                {taskErrorDisplay && !isAppearanceTaskRunning && (
+                {taskErrorDisplay && !isBusy && (
                     <div className="flex items-center gap-2 mb-3 p-2 rounded-lg bg-[var(--glass-danger-ring)] text-[var(--glass-tone-danger-fg)]">
                         <AppIcon name="alert" className="w-4 h-4 shrink-0" />
                         <span className="text-xs line-clamp-2">{taskErrorDisplay.message}</span>
@@ -402,7 +461,7 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
                             onClick={() => onImageClick?.(displayImageUrl)}
                         />
                         {/* 操作按钮 - 非生成时显示 */}
-                        {!isAppearanceTaskRunning && (
+                        {!isBusy && (
                             <div className="absolute top-2 left-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button onClick={() => fileInputRef.current?.click()} disabled={uploadImage.isPending} className="glass-btn-base glass-btn-secondary h-7 w-7 rounded-full">
                                     <AppIcon name="upload" className="w-4 h-4 text-[var(--glass-tone-success-fg)]" />
@@ -437,10 +496,26 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
                         />
                     </div>
                 )}
-                {isAppearanceTaskRunning && (
+                {isExecuting && (
                     <TaskStatusOverlay state={displayTaskPresentation} />
                 )}
-                {taskErrorDisplay && !isAppearanceTaskRunning && (
+                {isQueued && !isExecuting && (
+                    <div className="absolute top-2 left-2 z-20">
+                        <span className="glass-chip glass-chip-neutral px-2 py-0.5 text-xs">待生成</span>
+                    </div>
+                )}
+                {canCancel && (
+                    <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); cancelTask.mutate(runningTaskId!) }}
+                        disabled={cancelTask.isPending}
+                        className="absolute top-2 right-2 glass-btn-base glass-btn-tone-danger h-7 w-7 rounded-full z-20"
+                        title="取消任务"
+                    >
+                        <AppIcon name="close" className="w-4 h-4" />
+                    </button>
+                )}
+                {taskErrorDisplay && !isBusy && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--glass-danger-ring)] text-[var(--glass-tone-danger-fg)] p-3 gap-1">
                         <AppIcon name="alert" className="w-6 h-6" />
                         <span className="text-xs text-center font-medium line-clamp-3">{taskErrorDisplay.message}</span>

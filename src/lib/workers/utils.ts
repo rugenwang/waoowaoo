@@ -95,6 +95,27 @@ export async function assertTaskActive(job: Job<TaskJobData>, stage: string) {
   throw new TaskTerminatedError(job.data.taskId, `Task terminated during ${stage}`)
 }
 
+async function withTaskAbortSignal<T>(
+  job: Job<TaskJobData>,
+  run: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController()
+  const timer = setInterval(async () => {
+    try {
+      const active = await isTaskActive(job.data.taskId)
+      if (!active) controller.abort()
+    } catch {
+      // ignore
+    }
+  }, 750)
+
+  try {
+    return await run(controller.signal)
+  } finally {
+    clearInterval(timer)
+  }
+}
+
 function normalizeExternalId(result: {
   async?: boolean
   externalId?: string
@@ -971,13 +992,22 @@ export async function withLabelBar(imageSource: string, labelText: string): Prom
     .toBuffer()
 }
 
-export async function uploadImageSourceToCos(source: string | Buffer, keyPrefix: string, targetId: string) {
-  return await processMediaResult({
-    source,
-    type: 'image',
-    keyPrefix,
-    targetId,
-  })
+export async function uploadImageSourceToCos(
+  source: string | Buffer,
+  keyPrefix: string,
+  targetId: string,
+  job?: Job<TaskJobData>,
+) {
+  if (job) {
+    return await withTaskAbortSignal(job, async (signal) => await processMediaResult({
+      source,
+      type: 'image',
+      keyPrefix,
+      targetId,
+      signal,
+    }))
+  }
+  return await processMediaResult({ source, type: 'image', keyPrefix, targetId })
 }
 
 export async function uploadVideoSourceToCos(
@@ -985,23 +1015,37 @@ export async function uploadVideoSourceToCos(
   keyPrefix: string,
   targetId: string,
   downloadHeaders?: Record<string, string>,
+  job?: Job<TaskJobData>,
 ) {
-  return await processMediaResult({
-    source,
-    type: 'video',
-    keyPrefix,
-    targetId,
-    downloadHeaders,
-  })
+  if (job) {
+    return await withTaskAbortSignal(job, async (signal) => await processMediaResult({
+      source,
+      type: 'video',
+      keyPrefix,
+      targetId,
+      downloadHeaders,
+      signal,
+    }))
+  }
+  return await processMediaResult({ source, type: 'video', keyPrefix, targetId, downloadHeaders })
 }
 
-export async function uploadAudioSourceToCos(source: string | Buffer, keyPrefix: string, targetId: string) {
-  return await processMediaResult({
-    source,
-    type: 'audio',
-    keyPrefix,
-    targetId,
-  })
+export async function uploadAudioSourceToCos(
+  source: string | Buffer,
+  keyPrefix: string,
+  targetId: string,
+  job?: Job<TaskJobData>,
+) {
+  if (job) {
+    return await withTaskAbortSignal(job, async (signal) => await processMediaResult({
+      source,
+      type: 'audio',
+      keyPrefix,
+      targetId,
+      signal,
+    }))
+  }
+  return await processMediaResult({ source, type: 'audio', keyPrefix, targetId })
 }
 
 export function toSignedUrlIfCos(keyOrUrl: string | null | undefined, ttlSeconds = 3600) {
