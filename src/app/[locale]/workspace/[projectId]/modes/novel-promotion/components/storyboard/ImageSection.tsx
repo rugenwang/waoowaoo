@@ -34,6 +34,7 @@ interface ImageSectionProps {
   onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean) => void
   onOpenEditModal: () => void
   onOpenAIDataModal: () => void
+  onUploadImage?: (panelId: string, file: File) => void | Promise<void>
   onSelectCandidateIndex: (panelId: string, index: number) => void
   onConfirmCandidate: (panelId: string, imageUrl: string) => Promise<void>
   onCancelCandidate: (panelId: string) => void
@@ -59,6 +60,7 @@ export default function ImageSection({
   onRegeneratePanelImage,
   onOpenEditModal,
   onOpenAIDataModal,
+  onUploadImage,
   onSelectCandidateIndex,
   onConfirmCandidate,
   onCancelCandidate,
@@ -226,6 +228,7 @@ export default function ImageSection({
           onRegeneratePanelImage={onRegeneratePanelImage}
           onOpenEditModal={onOpenEditModal}
           onOpenAIDataModal={onOpenAIDataModal}
+          onUploadImage={onUploadImage}
           onUndo={onUndo}
           triggerPulse={triggerPulse}
         />

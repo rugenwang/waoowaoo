@@ -10,6 +10,7 @@ import {
   useRefreshEpisodeData,
   useRefreshStoryboards,
   useRegenerateProjectPanelImage,
+  useUploadProjectPanelImage,
   useModifyProjectStoryboardImage,
   useDownloadProjectImages,
 } from '@/lib/query/hooks'
@@ -48,6 +49,7 @@ export function useStoryboardImageGeneration({
   const refreshEpisode = useRefreshEpisodeData(projectId, episodeId ?? null)
   const refreshStoryboards = useRefreshStoryboards(episodeId ?? null)
   const regeneratePanelMutation = useRegenerateProjectPanelImage(projectId)
+  const uploadPanelImageMutation = useUploadProjectPanelImage(projectId)
   const modifyPanelMutation = useModifyProjectStoryboardImage(projectId)
   const downloadImagesMutation = useDownloadProjectImages(projectId)
   const clearStoryboardErrorMutation = useClearProjectStoryboardError(projectId)
@@ -178,6 +180,40 @@ export function useStoryboardImageGeneration({
     setLocalStoryboards,
   ])
 
+  const uploadPanelImage = useCallback(async (panelId: string, file: File) => {
+    const result = await uploadPanelImageMutation.mutateAsync({ panelId, file }) as { imageUrl?: string | null }
+    if (result?.imageUrl) {
+      setLocalStoryboards((previousStoryboards) =>
+        previousStoryboards.map((storyboard) => {
+          const panels = getStoryboardPanels(storyboard)
+          let changed = false
+          const updatedPanels = panels.map((panel) => {
+            if (panel.id !== panelId) return panel
+            changed = true
+            return {
+              ...panel,
+              previousImageUrl: panel.imageUrl ?? null,
+              imageUrl: result.imageUrl ?? panel.imageUrl,
+              candidateImages: null,
+              imageTaskRunning: false,
+            }
+          })
+          return changed ? { ...storyboard, panels: updatedPanels } : storyboard
+        }),
+      )
+    }
+    if (onSilentRefresh) {
+      await onSilentRefresh()
+    }
+    refreshEpisode()
+    refreshStoryboards()
+  }, [
+    onSilentRefresh,
+    refreshEpisode,
+    refreshStoryboards,
+    uploadPanelImageMutation,
+  ])
+
   return {
     submittingStoryboardIds,
     submittingPanelImageIds,
@@ -197,6 +233,7 @@ export function useStoryboardImageGeneration({
     cancelPanelCandidate,
     getPanelCandidates,
     modifyPanelImage,
+    uploadPanelImage,
     downloadAllImages,
     clearStoryboardError,
   }

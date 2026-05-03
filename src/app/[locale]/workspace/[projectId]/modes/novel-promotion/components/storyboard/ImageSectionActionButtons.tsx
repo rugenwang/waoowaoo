@@ -1,6 +1,7 @@
 'use client'
 import { logInfo as _ulogInfo } from '@/lib/logging/core'
 import { useTranslations } from 'next-intl'
+import { useRef } from 'react'
 import { AppIcon } from '@/components/ui/icons'
 import ImageGenerationInlineCountButton from '@/components/image-generation/ImageGenerationInlineCountButton'
 import { getImageGenerationCountOptions } from '@/lib/image-generation/count'
@@ -17,6 +18,7 @@ interface ImageSectionActionButtonsProps {
   onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean) => void
   onOpenEditModal: () => void
   onOpenAIDataModal: () => void
+  onUploadImage?: (panelId: string, file: File) => void | Promise<void>
   onUndo?: (panelId: string) => void
   triggerPulse: () => void
 }
@@ -30,11 +32,13 @@ export default function ImageSectionActionButtons({
   onRegeneratePanelImage,
   onOpenEditModal,
   onOpenAIDataModal,
+  onUploadImage,
   onUndo,
   triggerPulse,
 }: ImageSectionActionButtonsProps) {
   const t = useTranslations('storyboard')
   const { count, setCount } = useImageGenerationCount('storyboard-candidates')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   return (
     <>
@@ -76,6 +80,18 @@ export default function ImageSectionActionButtons({
               <AppIcon name="chart" className="w-2.5 h-2.5" />
               <span>{t('aiData.viewData')}</span>
             </button>
+            {onUploadImage && (
+              <>
+                <div className="w-px h-3 bg-[var(--glass-stroke-base)]" />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`glass-btn-base glass-btn-secondary h-6 w-6 rounded-full flex items-center justify-center transition-all active:scale-95 ${isSubmittingPanelImageTask || isModifying ? 'opacity-75' : ''}`}
+                  title="上传图片"
+                >
+                  <AppIcon name="upload" className="w-2.5 h-2.5" />
+                </button>
+              </>
+            )}
             {imageUrl && (
               <button
                 onClick={onOpenEditModal}
@@ -102,6 +118,20 @@ export default function ImageSectionActionButtons({
           </div>
         </div>
       </div>
+      {onUploadImage && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={async (event) => {
+            const file = event.target.files?.[0]
+            if (!file) return
+            await onUploadImage(panelId, file)
+            event.target.value = ''
+          }}
+        />
+      )}
     </>
   )
 }

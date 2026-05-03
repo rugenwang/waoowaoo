@@ -116,6 +116,7 @@ export {
     useGetProjectStoryboardStats,
     useUpdateProjectPanelVideoPrompt,
     useRegenerateProjectPanelImage,
+    useUploadProjectPanelImage,
     useModifyProjectStoryboardImage,
     useDownloadProjectImages,
     useUpdateProjectPanel,

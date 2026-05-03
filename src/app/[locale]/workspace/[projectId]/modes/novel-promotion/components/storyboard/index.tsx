@@ -90,6 +90,7 @@ export default function StoryboardStage({
     selectPanelCandidateIndex,
     cancelPanelCandidate,
     getPanelCandidates,
+    uploadPanelImage,
     downloadAllImages,
     clearStoryboardError,
 
@@ -204,6 +205,7 @@ export default function StoryboardStage({
           onRemoveLocation={handleRemoveLocation}
           onRetryPanelSave={retrySave}
           onRegeneratePanelImage={regeneratePanelImage}
+          onUploadImage={uploadPanelImage}
           onOpenEditModal={(storyboardId, panelIndex) => setEditingPanel({ storyboardId, panelIndex })}
           onOpenAIDataModal={(storyboardId, panelIndex) => setAIDataPanel({ storyboardId, panelIndex })}
           getPanelCandidates={getPanelCandidates}

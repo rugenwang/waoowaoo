@@ -57,6 +57,31 @@ export function useRegenerateProjectPanelImage(projectId: string) {
     })
 }
 
+export function useUploadProjectPanelImage(projectId: string) {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: async ({
+            file,
+            panelId,
+        }: {
+            file: File
+            panelId: string
+        }) => {
+            const formData = new FormData()
+            formData.append('file', file)
+            formData.append('panelId', panelId)
+
+            return await requestJsonWithError(`/api/novel-promotion/${projectId}/upload-panel-image`, {
+                method: 'POST',
+                body: formData,
+            }, '上传分镜图失败')
+        },
+        onSettled: () => {
+            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+        },
+    })
+}
+
 /**
  * 修改镜头图片（storyboard）
  */
