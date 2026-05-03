@@ -313,7 +313,9 @@ export async function generateImageViaOpenAICompat(request: OpenAICompatImageReq
   if (isEeeApiProvider(providerId)) {
     const rawAspectRatio = readStringOption(effectiveOptions.aspectRatio, 'aspectRatio')
     const rawSize = resolveRawSize(effectiveOptions)
-    if (rawAspectRatio) {
+    // 用户如果已经显式选择了 resolution/size，则优先尊重用户输入；
+    // 只有在未指定尺寸时，才根据 aspectRatio 推导默认 size。
+    if (!rawSize && rawAspectRatio) {
       const mapped = aspectRatioToEeeApiSize(rawAspectRatio)
       if (mapped) {
         effectiveOptions.size = mapped

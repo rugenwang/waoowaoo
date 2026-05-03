@@ -132,6 +132,10 @@ export default function VideoRenderPanel({
           const nextPanel = getNextPanel(idx)
           const prevPanel = idx > 0 ? allPanels[idx - 1] : null
           const hasNext = idx < allPanels.length - 1
+          const panelDurationSeconds =
+            typeof panel.textPanel?.duration === 'number' && Number.isFinite(panel.textPanel.duration)
+              ? panel.textPanel.duration
+              : 4
           const promptField: PromptField = isLinked ? 'firstLastFramePrompt' : 'videoPrompt'
           const defaultFlPrompt = getDefaultFlPrompt(panel.textPanel?.video_prompt, nextPanel?.textPanel?.video_prompt)
           const externalPrompt = isLinked
@@ -176,7 +180,9 @@ export default function VideoRenderPanel({
                 hasNext={hasNext}
                 flModel={flModel}
                 flModelOptions={flModelOptions}
-                flGenerationOptions={flGenerationOptions}
+                // 首尾帧生成：默认使用当前 panel.duration（秒）；如果为空则回退 4 秒。
+                // 避免因为模型 capability durationOptions 的默认值（例如 1）导致链接后时长被意外改成 1 秒。
+                flGenerationOptions={{ ...flGenerationOptions, duration: panelDurationSeconds }}
                 flCapabilityFields={flCapabilityFields}
                 flMissingCapabilityFields={flMissingCapabilityFields}
                 flCustomPrompt={flCustomPrompts.get(panelKey) || panel.firstLastFramePrompt || ''}

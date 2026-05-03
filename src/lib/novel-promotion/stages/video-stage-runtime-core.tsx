@@ -157,6 +157,12 @@ export function useVideoStageRuntime({
     panelIndex: number,
     duration: number | null,
   ) => {
+    const panelKey = `${storyboardId}-${panelIndex}`
+    setPanelDurationOverrides((previous) => {
+      const next = new Map(previous)
+      next.set(panelKey, duration)
+      return next
+    })
     try {
       await updatePanelDurationMutation.mutateAsync({
         storyboardId,
@@ -164,6 +170,11 @@ export function useVideoStageRuntime({
         duration,
       })
     } catch (err) {
+      setPanelDurationOverrides((previous) => {
+        const next = new Map(previous)
+        next.delete(panelKey)
+        return next
+      })
       _ulogError('update panel duration failed:', err)
     }
   }, [updatePanelDurationMutation])
@@ -172,12 +183,52 @@ export function useVideoStageRuntime({
     projectId,
     storyboards,
   })
-  const { allPanels } = useVideoPanelsProjection({
+  const [panelDurationOverrides, setPanelDurationOverrides] = useState<Map<string, number | null>>(new Map())
+
+  const { allPanels: rawAllPanels } = useVideoPanelsProjection({
     storyboards,
     clips,
     panelVideoStates,
     panelLipStates,
   })
+
+  const allPanels = useMemo(() => {
+    if (panelDurationOverrides.size === 0) return rawAllPanels
+    return rawAllPanels.map((panel) => {
+      const panelKey = `${panel.storyboardId}-${panel.panelIndex}`
+      if (!panelDurationOverrides.has(panelKey)) return panel
+      const overrideDuration = panelDurationOverrides.get(panelKey)
+      return {
+        ...panel,
+        textPanel: panel.textPanel
+          ? {
+            ...panel.textPanel,
+            duration: overrideDuration ?? undefined,
+          }
+          : panel.textPanel,
+      }
+    })
+  }, [panelDurationOverrides, rawAllPanels])
+
+  useEffect(() => {
+    if (panelDurationOverrides.size === 0) return
+    setPanelDurationOverrides((previous) => {
+      let changed = false
+      const next = new Map(previous)
+      for (const [panelKey, overrideDuration] of previous.entries()) {
+        const matchedPanel = rawAllPanels.find((panel) => `${panel.storyboardId}-${panel.panelIndex}` === panelKey)
+        const persistedDuration =
+          typeof matchedPanel?.textPanel?.duration === 'number' && Number.isFinite(matchedPanel.textPanel.duration)
+            ? matchedPanel.textPanel.duration
+            : null
+        if (persistedDuration === overrideDuration) {
+          next.delete(panelKey)
+          changed = true
+        }
+      }
+      return changed ? next : previous
+    })
+  }, [panelDurationOverrides, rawAllPanels])
 
   const {
     savingPrompts,

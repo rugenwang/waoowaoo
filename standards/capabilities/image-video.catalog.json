@@ -51,7 +51,9 @@
           "auto",
           "1024x1024",
           "1024x1536",
-          "1536x1024"
+          "1536x1024",
+          "2720x1536",
+          "3840x2160"
         ]
       }
     }
@@ -93,7 +95,8 @@
     "capabilities": {
       "video": {
         "generationModeOptions": [
-          "normal"
+          "normal",
+          "firstlastframe"
         ],
         "durationOptions": [
           1,
@@ -119,10 +122,12 @@
         ],
         "resolutionOptions": [
           "480p",
+          "1280x704",
+          "1024x576",
           "720p",
           "1080p"
         ],
-        "firstlastframe": false,
+        "firstlastframe": true,
         "supportGenerateAudio": false
       }
     }

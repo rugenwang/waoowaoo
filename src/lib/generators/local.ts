@@ -19,10 +19,12 @@ type LocalVideoOptions = {
   modelKey?: string
   duration?: number
   fps?: number
-  resolution?: string // '480p' | '720p' | '1080p'
+  resolution?: string // '480p' | '1024x576' | '1280x704' | '720p' | '1080p'
   aspectRatio?: string // '16:9' | '9:16'
   seed?: number
   random_seed?: boolean
+  generationMode?: 'normal' | 'firstlastframe'
+  lastFrameImageUrl?: string
 }
 
 function requireBaseUrl(baseUrl: string | undefined, providerId: string): string {
@@ -58,12 +60,24 @@ function resolveVideoDims(options: LocalVideoOptions): { width?: number; height?
   const isVertical = ratio === '9:16'
   const mapping: Record<string, { w: number; h: number }> = {
     '480p': { w: 704, h: 480 },
+    '1024x576': { w: 1024, h: 576 },
+    '1280x704': { w: 1280, h: 704 },
     '720p': { w: 1280, h: 720 },
     '1080p': { w: 1920, h: 1080 },
   }
   const preset = mapping[resolution]
   if (!preset) return { width: 704, height: 480 }
   return isVertical ? { width: preset.h, height: preset.w } : { width: preset.w, height: preset.h }
+}
+
+function calcFrames(seconds: number, fps: number): number {
+  // 与 ltx-2-mlx/ai-gen_backend/utils.py::calc_frames 保持一致：
+  // frames = round(seconds * fps) + 1，最小 9，且满足 8k+1。
+  let raw = Math.round(seconds * fps) + 1
+  if (raw < 9) raw = 9
+  if ((raw - 1) % 8 === 0) return raw
+  const k = Math.floor((raw - 1 + 7) / 8)
+  return 8 * k + 1
 }
 
 export class LocalImageGenerator extends BaseImageGenerator {
@@ -147,6 +161,29 @@ export class LocalVideoGenerator extends BaseVideoGenerator {
     const opt = options as LocalVideoOptions
     const dims = resolveVideoDims(opt)
 
+    const duration = typeof opt.duration === 'number' ? opt.duration : undefined
+    const fps = typeof opt.fps === 'number' ? opt.fps : undefined
+
+    // 注意：worker/utils.ts 在调用 generateVideo 前会过滤掉 generationMode 字段（仅用于 capability 校验），
+    // 因此这里不能依赖 opt.generationMode 来判断 first/last-frame。
+    // 只要存在 lastFrameImageUrl，就视为首尾帧模式。
+    const isFirstLastFrame = typeof opt.lastFrameImageUrl === 'string' && opt.lastFrameImageUrl.trim().length > 0
+    const keyframes = await (async () => {
+      if (!isFirstLastFrame) {
+        return [{ image: cover, frame_index: 0 }]
+      }
+
+      const lastFrame = await normalizeToBase64ForGeneration(opt.lastFrameImageUrl as string)
+      const seconds = typeof duration === 'number' ? duration : 4
+      const f = typeof fps === 'number' ? fps : 24
+      const frames = calcFrames(seconds, f)
+      const lastIdx = Math.max(0, frames - 1)
+      return [
+        { image: cover, frame_index: 0 },
+        { image: lastFrame, frame_index: lastIdx },
+      ]
+    })()
+
     const response = await fetch(`${baseUrl}/api/integrations/waoowaoo/v1/video`, {
       method: 'POST',
       headers: {
@@ -155,9 +192,9 @@ export class LocalVideoGenerator extends BaseVideoGenerator {
       },
       body: JSON.stringify({
         prompt: prompt || '',
-        keyframes: [{ image: cover, frame_index: 0 }],
-        ...(typeof opt.duration === 'number' ? { seconds: opt.duration } : null),
-        ...(typeof opt.fps === 'number' ? { fps: opt.fps } : null),
+        keyframes,
+        ...(typeof duration === 'number' ? { seconds: duration } : null),
+        ...(typeof fps === 'number' ? { fps } : null),
         ...(typeof dims.width === 'number' ? { width: dims.width } : null),
         ...(typeof dims.height === 'number' ? { height: dims.height } : null),
         ...(typeof opt.seed === 'number' ? { seed: opt.seed } : null),

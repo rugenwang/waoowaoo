@@ -209,7 +209,18 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                         disabledOptions: field.disabledOptions,
                       }))}
                       capabilityOverrides={layout.flGenerationOptions}
-                      onCapabilityChange={(field, rawValue) => actions.onFlCapabilityChange(field, rawValue)}
+                      onCapabilityChange={(field, rawValue) => {
+                        if (field === 'duration') {
+                          const duration = rawValue === '' ? null : Number(rawValue)
+                          actions.onUpdatePanelDuration(
+                            panel.storyboardId,
+                            panel.panelIndex,
+                            Number.isFinite(duration as number) ? (duration as number) : null,
+                          )
+                          return
+                        }
+                        actions.onFlCapabilityChange(field, rawValue)
+                      }}
                       placeholder={t('panelCard.selectModel')}
                     />
                   </div>
