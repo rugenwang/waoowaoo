@@ -2,6 +2,39 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../keys'
 import { invalidateQueryTemplates, requestJsonWithError } from './mutation-shared'
 
+type EpisodeDataWithStoryboards = {
+  storyboards?: Array<{
+    id?: string
+    panels?: Array<Record<string, unknown>>
+  }>
+} & Record<string, unknown>
+
+function patchEpisodePanelsCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  projectId: string,
+  payload: {
+    storyboardId: string
+    panelIndex: number
+    patch: Record<string, unknown>
+  },
+) {
+  const queries = queryClient.getQueriesData<EpisodeDataWithStoryboards>({
+    queryKey: ['episode-data', projectId],
+  })
+
+  for (const [queryKey, data] of queries) {
+    if (!data?.storyboards) continue
+    const nextStoryboards = data.storyboards.map((storyboard) => {
+      if (storyboard.id !== payload.storyboardId || !Array.isArray(storyboard.panels)) return storyboard
+      const nextPanels = storyboard.panels.map((panel, index) =>
+        index === payload.panelIndex ? { ...panel, ...payload.patch } : panel,
+      )
+      return { ...storyboard, panels: nextPanels }
+    })
+    queryClient.setQueryData(queryKey, { ...data, storyboards: nextStoryboards })
+  }
+}
+
 /**
  * 获取剧集可下载视频列表（项目）
  */
@@ -78,8 +111,18 @@ export function useUpdateProjectPanelVideoPrompt(projectId: string) {
         },
         'update failed',
       ),
-    onSettled: () => {
-      invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+    onMutate: ({ storyboardId, panelIndex, value, field = 'videoPrompt' }) => {
+      patchEpisodePanelsCache(queryClient, projectId, {
+        storyboardId,
+        panelIndex,
+        patch: field === 'firstLastFramePrompt'
+          ? { firstLastFramePrompt: value }
+          : { videoPrompt: value },
+      })
+    },
+    onSettled: async () => {
+      await invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+      await queryClient.invalidateQueries({ queryKey: ['episode-data', projectId], exact: false })
     },
   })
 }
@@ -113,8 +156,16 @@ export function useUpdateProjectPanelDuration(projectId: string) {
         },
         'update failed',
       ),
-    onSettled: () => {
-      invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+    onMutate: ({ storyboardId, panelIndex, duration }) => {
+      patchEpisodePanelsCache(queryClient, projectId, {
+        storyboardId,
+        panelIndex,
+        patch: { duration },
+      })
+    },
+    onSettled: async () => {
+      await invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+      await queryClient.invalidateQueries({ queryKey: ['episode-data', projectId], exact: false })
     },
   })
 }

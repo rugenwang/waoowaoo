@@ -69,7 +69,7 @@ export function useVideoPanelsProjection({
             characters: charactersArray,
             location: panel.location || '',
             text_segment: panel.srtSegment || '',
-            duration: panel.duration || undefined,
+            duration: panel.duration ?? undefined,
             imagePrompt: panel.imagePrompt || undefined,
             video_prompt: panel.videoPrompt || undefined,
             videoModel: panel.videoModel || undefined,

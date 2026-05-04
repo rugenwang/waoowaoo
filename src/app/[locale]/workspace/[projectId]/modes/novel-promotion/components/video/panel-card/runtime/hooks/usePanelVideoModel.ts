@@ -77,6 +77,9 @@ export function usePanelVideoModel({
   panelDuration,
 }: UsePanelVideoModelParams) {
   const [selectedModel, setSelectedModel] = useState(defaultVideoModel || '')
+  const [localDuration, setLocalDuration] = useState<number | null>(
+    typeof panelDuration === 'number' && Number.isFinite(panelDuration) ? panelDuration : null,
+  )
   const [generationOptions, setGenerationOptions] = useState<VideoGenerationOptions>(() =>
     readSelectionForModel(capabilityOverrides, defaultVideoModel || ''),
   )
@@ -125,34 +128,36 @@ export function usePanelVideoModel({
   )
 
   useEffect(() => {
+    setLocalDuration(typeof panelDuration === 'number' && Number.isFinite(panelDuration) ? panelDuration : null)
+  }, [panelDuration])
+
+  useEffect(() => {
     setGenerationOptions(normalizeVideoGenerationSelections({
       definitions: capabilityDefinitions,
       pricingTiers,
-      selection: selectedModelOverrides,
+      selection: localDuration !== null
+        ? {
+          ...selectedModelOverrides,
+          duration: localDuration,
+        }
+        : selectedModelOverrides,
+      pinnedFields: localDuration !== null ? ['duration'] : [],
     }))
-  }, [selectedModel, selectedModelOverridesSignature, capabilityDefinitions, pricingTiers, selectedModelOverrides])
-
-  // 分镜级时长覆盖：把 panelDuration 固定到当前卡片的 generationOptions.duration
-  useEffect(() => {
-    if (typeof panelDuration !== 'number' || !Number.isFinite(panelDuration)) return
-    setGenerationOptions((previous) => normalizeVideoGenerationSelections({
-      definitions: capabilityDefinitions,
-      pricingTiers,
-      selection: {
-        ...previous,
-        duration: panelDuration,
-      },
-      pinnedFields: ['duration'],
-    }))
-  }, [panelDuration, capabilityDefinitions, pricingTiers])
+  }, [selectedModel, selectedModelOverridesSignature, capabilityDefinitions, pricingTiers, selectedModelOverrides, localDuration])
 
   useEffect(() => {
     setGenerationOptions((previous) => normalizeVideoGenerationSelections({
       definitions: capabilityDefinitions,
       pricingTiers,
-      selection: previous,
+      selection: localDuration !== null
+        ? {
+          ...previous,
+          duration: localDuration,
+        }
+        : previous,
+      pinnedFields: localDuration !== null ? ['duration'] : [],
     }))
-  }, [capabilityDefinitions, pricingTiers])
+  }, [capabilityDefinitions, pricingTiers, localDuration])
 
   const effectiveFields = useMemo(
     () => resolveEffectiveVideoCapabilityFields({
@@ -197,8 +202,15 @@ export function usePanelVideoModel({
   const setCapabilityValue = (field: string, rawValue: string) => {
     const definitionField = definitionFieldMap.get(field)
     if (!definitionField || definitionField.options.length === 0) return
+    if (field === 'duration' && rawValue === '') {
+      setLocalDuration(null)
+      return
+    }
     const parsedValue = parseByOptionType(rawValue, definitionField.options[0])
     if (!definitionField.options.includes(parsedValue)) return
+    if (field === 'duration') {
+      setLocalDuration(typeof parsedValue === 'number' && Number.isFinite(parsedValue) ? parsedValue : null)
+    }
     setGenerationOptions((previous) => ({
       ...normalizeVideoGenerationSelections({
         definitions: capabilityDefinitions,
