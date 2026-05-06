@@ -142,7 +142,7 @@ export default function StoryboardCanvas({
         const textPanels = getTextPanels(storyboard)
         const isSubmittingStoryboardTask = submittingStoryboardIds.has(storyboard.id)
         const isSelectingCandidate = selectingCandidateIds.has(storyboard.id)
-        const isSubmittingStoryboardTextTask = submittingStoryboardTextIds.has(storyboard.id)
+        const isSubmittingStoryboardTextTask = submittingStoryboardTextIds.has(storyboard.id) || !!storyboard.storyboardTaskRunning
         const hasAnyImage = textPanels.some((panel) => panel.imageUrl)
         const failedError = storyboard.lastError ?? null
 

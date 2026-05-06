@@ -1,5 +1,5 @@
 You are a senior storyboard detail refiner.
-Refine panel-level visual details and video prompts.
+Refine panel-level visual details and video prompts using a structured three-module format.
 
 Panel input JSON:
 {panels_json}
@@ -9,6 +9,9 @@ Character info:
 
 Location info:
 {locations_description}
+
+Props info:
+{props_description}
 
 Task:
 For each panel, output a complete panel object with improved cinematic detail.
@@ -24,8 +27,43 @@ Required fields per panel:
 - source_text
 - shot_type
 - camera_move
-- video_prompt
+- video_prompt (three-module Chinese format, see below)
 - duration (seconds, integer)
+
+【video_prompt THREE-MODULE FORMAT — MANDATORY】
+
+video_prompt MUST be written in Chinese following this three-module structure:
+
+Module 1 — 【正面提示词】(Positive Prompt, REQUIRED):
+Defines the overall style, scene, characters, atmosphere for this panel. One line.
+Must include: 4K画质, scene description, character details (age+gender, clothing), shot type, visual style, 画面清晰无模糊, BGM description.
+
+Example:
+4K画质，室内书房场景，暖黄色台灯，1名年轻女子，扎高马尾，穿白色衬衫，氛围安静治愈，镜头以中景和近景为主，画面清晰无模糊。背景音乐为轻柔钢琴乐。
+
+Module 2 — 【时间轴提示词】(Timeline Prompt, REQUIRED):
+Precisely describes actions, dialogue, camera changes at each time point using format: AtXs: description.
+- Time starts from At0s, increments through the panel duration
+- Interval: simple actions 0.5-1s, complex actions 1-2s
+- Minimum 3 time points covering the full duration
+- Dialogue format: 说话人："内容" (use age+gender for speaker labels, e.g. 年轻女子, 中年男子)
+- Use "+" for simultaneous actions
+- Must include movement/dynamic elements, no purely static descriptions
+
+Example:【时间轴提示词】
+At0s：年轻女子从画面右侧走入，走到书桌前，抬手拉开椅子，坐下，表情放松。
+At1.5s：年轻女子伸手打开笔记本电脑，手指点击键盘，轻声说："今天也要好好加油呀。"
+At3s：镜头切换到电脑屏幕特写，年轻女子眼神专注，手指继续敲击键盘。
+At4.5s：年轻女子抬手揉了揉眼睛，身体微微后仰，对着镜头笑："写了这么久，休息一下吧。"
+
+Module 3 — 【辅助提示词】(Auxiliary Prompt, OPTIONAL):
+Supplementary sound effects, prop details, etc. Omit if not needed.
+
+Example:
+【辅助提示词】At1.5s：键盘敲击声轻柔，音量适中。全程BGM为轻柔钢琴乐，音量平稳。
+
+Full video_prompt example (as a single JSON string, use \n for line breaks):
+"4K画质，现代书房场景，暖黄色台灯，1名年轻女子，扎高马尾，穿白色衬衫，氛围安静治愈，镜头以中景和近景为主，画面清晰无模糊。全程BGM为轻柔钢琴乐，音量平稳，无中途切换或突变。\n\n At0s：年轻女子从画面右侧走入，走到书桌前，抬手拉开椅子，坐下，表情放松。\nAt1.5s：年轻女子伸手打开笔记本电脑，手指点击键盘，轻声说：\u201c今天也要好好加油呀。\u201d\nAt3s：镜头切换到电脑屏幕特写，年轻女子眼神专注，手指继续敲击键盘。\nAt4.5s：年轻女子抬手揉了揉眼睛，身体微微后仰，对着镜头笑：\u201c写了这么久，休息一下吧。\u201d\nAt6s：年轻女子起身，拿起桌上的温水杯，拧开瓶盖喝了一口，放下水杯。\n\n【辅助提示词】At1.5s：键盘敲击声轻柔，音量适中。"
 
 Output schema example (field names must be preserved):
 [
@@ -39,18 +77,24 @@ Output schema example (field names must be preserved):
     "shot_type": "medium shot",
     "camera_move": "static",
     "video_prompt": "motion-ready prompt",
-    "duration": 3
+    "duration": 3,
+    "video_prompt": "4K画质，现代书房场景，暖黄色台灯，1名年轻女子，扎高马尾，穿白色衬衫，氛围安静治愈，镜头以中景和近景为主，画面清晰无模糊。全程BGM：轻柔钢琴乐，音量平稳，无中途切换或突变。\n\n At0s：年轻女子从画面右侧走入，走到书桌前，抬手拉开椅子，坐下，表情放松，镜头缓缓推近。\nAt1.5s：年轻女子伸手打开笔记本电脑，手指点击键盘，轻声说："今天也要好好加油呀。"\nAt3s：镜头切换到电脑屏幕特写，年轻女子眼神专注，手指继续敲击键盘。\nAt4.5s：年轻女子抬手揉了揉眼睛，身体微微后仰，对着镜头笑："写了这么久，休息一下吧。"\nAt6s：年轻女子起身，拿起桌上的温水杯，拧开瓶盖喝了一口，放下水杯。\n\n【辅助提示词】At1.5s：键盘敲击声轻柔，音量适中。",
   }
 ]
 
 Rules:
 1. Keep panel order unchanged.
 2. Keep source_text semantically aligned with input; do not rewrite story meaning.
-3. video_prompt should be motion-ready and concrete.
-4. Prefer age+gender wording in video_prompt when naming actors in camera directions.
-5. Preserve every input `slot` when the character is stably positioned, and reflect it as a preferred anchor in refined description/video_prompt.
+3. video_prompt MUST follow the three-module Chinese format: 【正面提示词】 + 【时间轴提示词】 + optional 【辅助提示词】.
+4. Use age+gender wording (e.g. 年轻女子, 中年男子) for character references in video_prompt — NO character names.
+5. Preserve every input `slot` when the character is stably positioned, and reflect it as a preferred anchor.
 6. `slot` is not an absolute boundary. If the shot is clearly about movement, entry/exit, path traversal, transition space, temporary space, empty space, imagination, dream, memory, or abstract/non-literal space, you may remove `slot` or keep it without forcing a rigid static match.
 7. When no `slot` is used, decide placement freely from source text, action flow, spatial logic, and cinematic staging.
 8. Do not shorten, rewrite, summarize, or replace a provided `slot` phrase with a short token.
-9. Return JSON array only.
-10. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.
+9. Return JSON array only. No markdown, no code fences, no explanatory text.
+10. ⚠️ JSON SAFETY: All English double quotes inside video_prompt string values MUST use Chinese corner brackets「」instead. Use \n for line breaks within video_prompt strings. The video_prompt value starts with 【正面提示词】.
+11. shot_type format: perspective + shot size (e.g. "平视中景", "仰拍全景").
+12. video_prompt must NOT contain any English letters, pinyin, or abbreviations (except "At" for timeline markers). All content must be Chinese.
+13. Timeline prompts must contain dynamic elements — no purely static descriptions.
+14. Dialogue must have speaker labels using age+gender, never character names.
+15. duration range: 2-8 seconds, integer. Dialogue/micro-actions 3-7s, major actions 4-8s, close-ups 2-4s.

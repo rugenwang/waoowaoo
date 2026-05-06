@@ -9,7 +9,6 @@ import {
   useMoveProjectStoryboardGroup,
   useRegenerateProjectStoryboardText,
 } from '@/lib/query/hooks'
-import { isAsyncTaskResponse, waitForTaskResult } from '@/lib/task/client'
 import { getErrorMessage, isAbortError } from './panel-operations-shared'
 
 interface UseStoryboardGroupActionsProps {
@@ -55,11 +54,7 @@ export function useStoryboardGroupActions({
     setSubmittingStoryboardTextIds((previous) => new Set(previous).add(storyboardId))
 
     try {
-      const taskData = await regenerateStoryboardTextMutation.mutateAsync({ storyboardId })
-      if (!isAsyncTaskResponse(taskData)) {
-        throw new Error('TASK_ID_MISSING')
-      }
-      await waitForTaskResult(taskData.taskId, { intervalMs: 2000 })
+      await regenerateStoryboardTextMutation.mutateAsync({ storyboardId })
       _ulogInfo('[重新生成分镜] 任务完成')
       await onRefresh()
     } catch (error: unknown) {

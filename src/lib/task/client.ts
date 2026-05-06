@@ -32,9 +32,11 @@ export function isAsyncTaskResponse(data: unknown): data is { async: true; taskI
   return payload.async === true && typeof payload.taskId === 'string' && payload.taskId.length > 0
 }
 
+const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1000
+
 export async function waitForTaskResult(taskId: string, options: WaitTaskOptions = {}) {
   const intervalMs = options.intervalMs ?? 1500
-  const timeoutMs = options.timeoutMs ?? 0
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TASK_TIMEOUT_MS
   const onTaskUpdate = options.onTaskUpdate
   const startedAt = Date.now()
 

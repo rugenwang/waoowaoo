@@ -169,7 +169,7 @@ export async function submitTask(params: {
       }
   }
 
-  const { task, deduped } = await createTask({
+  const { task: initialTask, deduped: initialDeduped } = await createTask({
     userId: params.userId,
     projectId: params.projectId,
     episodeId: params.episodeId || null,
@@ -182,6 +182,32 @@ export async function submitTask(params: {
     maxAttempts: params.maxAttempts,
     billingInfo: resolvedBillingInfo || null,
   })
+
+  const STUCK_TASK_AGE_MS = 5 * 60 * 1000
+  let task = initialTask
+  let deduped = initialDeduped
+
+  if (deduped && isActiveTaskStatus(task.status)) {
+    const taskAge = Date.now() - new Date(task.updatedAt || task.createdAt).getTime()
+    if (taskAge > STUCK_TASK_AGE_MS) {
+      await markTaskFailed(task.id, 'TIMEOUT', 'Task stuck, replaced by new submission')
+      const result = await createTask({
+        userId: params.userId,
+        projectId: params.projectId,
+        episodeId: params.episodeId || null,
+        type: params.type,
+        targetType: params.targetType,
+        targetId: params.targetId,
+        payload: normalizedPayload,
+        dedupeKey: null,
+        priority: params.priority,
+        maxAttempts: params.maxAttempts,
+        billingInfo: resolvedBillingInfo || null,
+      })
+      task = result.task
+      deduped = false
+    }
+  }
   const reusableRunId = reusableRun && shouldAttachNewTaskToReusableRun(reusableRunTask?.status)
     ? (reusableRun?.id || null)
     : null
