@@ -93,7 +93,7 @@ export function useStoryboardTaskAwareStoryboards({
 }: UseStoryboardTaskAwareStoryboardsProps) {
   const taskQueue = useTaskQueue()
   const queueMode = taskQueue.enabled
-  const activeTarget = taskQueue.activeTarget
+  const activeTargets = taskQueue.activeTargets
 
   const storyboardTextTargets = useMemo(
     () => buildStoryboardTextTargets(initialStoryboards),
@@ -107,48 +107,49 @@ export function useStoryboardTaskAwareStoryboards({
         lip: buildPanelTargets(initialStoryboards, 'lip-sync'),
       }
     }
-    if (!activeTarget || activeTarget.targetType !== 'NovelPromotionPanel') {
-      return { image: [] as TaskTarget[], video: [] as TaskTarget[], lip: [] as TaskTarget[] }
-    }
-    const isVideo = (activeTarget.types || []).includes('video_panel')
-    const isLip = (activeTarget.types || []).includes('lip_sync')
-    const panelId = activeTarget.targetId
-    const makeOne = (type: 'image' | 'video' | 'lip-sync'): TaskTarget[] => {
+    const next = { image: [] as TaskTarget[], video: [] as TaskTarget[], lip: [] as TaskTarget[] }
+    const makeOne = (panelId: string, type: 'image' | 'video' | 'lip-sync'): TaskTarget => {
       if (type === 'image') {
-        return [{
+        return {
           key: `panel-image:${panelId}`,
           targetType: 'NovelPromotionPanel',
           targetId: panelId,
           types: ['image_panel', 'panel_variant', 'modify_asset_image'],
           resource: 'image',
           hasOutput: true,
-        }]
+        }
       }
       if (type === 'video') {
-        return [{
+        return {
           key: `panel-video:${panelId}`,
           targetType: 'NovelPromotionPanel',
           targetId: panelId,
           types: ['video_panel'],
           resource: 'video',
           hasOutput: true,
-        }]
+        }
       }
-      return [{
+      return {
         key: `panel-lip:${panelId}`,
         targetType: 'NovelPromotionPanel',
         targetId: panelId,
         types: ['lip_sync'],
         resource: 'video',
         hasOutput: true,
-      }]
+      }
     }
-    return {
-      image: (!isVideo && !isLip) ? makeOne('image') : [],
-      video: isVideo ? makeOne('video') : [],
-      lip: isLip ? makeOne('lip-sync') : [],
+
+    for (const activeTarget of activeTargets) {
+      if (activeTarget.targetType !== 'NovelPromotionPanel') continue
+      const isVideo = (activeTarget.types || []).includes('video_panel')
+      const isLip = (activeTarget.types || []).includes('lip_sync')
+      const panelId = activeTarget.targetId
+      if (isVideo) next.video.push(makeOne(panelId, 'video'))
+      else if (isLip) next.lip.push(makeOne(panelId, 'lip-sync'))
+      else next.image.push(makeOne(panelId, 'image'))
     }
-  }, [activeTarget, initialStoryboards, queueMode])
+    return next
+  }, [activeTargets, initialStoryboards, queueMode])
 
   const storyboardTextStates = useStoryboardTaskPresentation(
     projectId,

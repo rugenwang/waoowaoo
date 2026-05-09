@@ -384,12 +384,22 @@ async function pollLocalTask(
         return { status: 'failed', error: msg }
     }
 
-    if (status !== 'completed') {
+    if (status !== 'completed' && status !== 'succeeded' && status !== 'success' && status !== 'done') {
         return { status: 'pending' }
     }
 
     const result = (payload.result && typeof payload.result === 'object' ? payload.result as Record<string, unknown> : null)
-    const contentUrl = typeof result?.content_url === 'string' ? result.content_url.trim() : ''
+    const contentUrl = [
+        result?.content_url,
+        result?.url,
+        result?.video_url,
+        result?.image_url,
+        payload.content_url,
+        payload.url,
+        payload.video_url,
+        payload.image_url,
+    ].map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .find(Boolean) || ''
     if (!contentUrl) {
         return { status: 'failed', error: 'LOCAL task completed but content_url missing' }
     }

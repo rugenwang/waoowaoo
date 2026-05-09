@@ -1,9 +1,11 @@
 'use client'
 
-import { logError as _ulogError } from '@/lib/logging/core'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { logError as _ulogError, logInfo as _ulogInfo } from '@/lib/logging/core'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api-fetch'
+import { queryKeys } from '@/lib/query/keys'
 import {
   VideoToolbar,
   type VideoGenerationOptionValue,
@@ -19,6 +21,7 @@ import {
   useUpdateProjectPanelLink,
   useUpdateProjectConfig,
 } from '@/lib/query/hooks'
+import { useUploadProjectPanelVideo } from '@/lib/query/mutations/upload-panel-video'
 import { useLipSync } from '@/lib/query/hooks/useStoryboards'
 import ImagePreviewModal from '@/components/ui/ImagePreviewModal'
 import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapabilityDropdown'
@@ -85,6 +88,7 @@ export function useVideoStageRuntime({
   onEnterEditor,
 }: VideoStageShellProps) {
   const t = useTranslations('video')
+  const queryClient = useQueryClient()
   const taskQueue = useTaskQueue()
   const queueMode = taskQueue.enabled
 
@@ -105,6 +109,7 @@ export function useVideoStageRuntime({
   } = useVideoPanelViewport()
 
   const lipSyncMutation = useLipSync(projectId, episodeId)
+  const uploadVideoMutation = useUploadProjectPanelVideo(projectId, episodeId)
   const listEpisodeVideoUrlsMutation = useListProjectEpisodeVideoUrls(projectId)
   const updatePanelLinkMutation = useUpdateProjectPanelLink(projectId)
   const updatePanelDurationMutation = useUpdateProjectPanelDuration(projectId)
@@ -426,12 +431,54 @@ export function useVideoStageRuntime({
         panelIndex,
         voiceLineId,
         panelId,
-      })
-    } catch (error: unknown) {
-      _ulogError('Lip sync error:', error)
+       })
+     } catch (error: unknown) {
+       _ulogError('Lip sync error:', error)
       throw error
-    }
-  }, [lipSyncMutation])
+     }
+   }, [lipSyncMutation])
+
+    // 上传成功动画控制
+  const [showUploadSuccess, setShowUploadSuccess] = useState<{ show: boolean; animatingOut: boolean; fileName: string; fileSize: number }>({
+    show: false,
+    animatingOut: false,
+    fileName: '',
+    fileSize: 0,
+     })
+
+  const uploadSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleUploadSuccessLeave = useCallback(() => {
+     setShowUploadSuccess((prev) => ({ ...prev, animatingOut: true }))
+    setTimeout(() => {
+       setShowUploadSuccess({ show: false, animatingOut: false, fileName: '', fileSize: 0 })
+       }, 300)
+     }, [])
+
+   const handleUploadVideo = useCallback(async (panelId: string, file: File) => {
+    try {
+      await uploadVideoMutation.mutateAsync({ panelId, file })
+       _ulogInfo('[Upload] Video uploaded successfully')
+       const fileName = file.name
+       const fileSize = file.size
+         // 显示上传成功弹窗
+      setShowUploadSuccess({ show: true, animatingOut: false, fileName, fileSize })
+       // 3.5 秒后自动关闭
+      uploadSuccessTimerRef.current = setTimeout(handleUploadSuccessLeave, 3500)
+        } catch (error: unknown) {
+       _ulogError('Upload video error:', error)
+      throw error
+         }
+        }, [uploadVideoMutation, handleUploadSuccessLeave])
+
+   // 清理计时器
+    useEffect(() => {
+     return () => {
+       if (uploadSuccessTimerRef.current) {
+         clearTimeout(uploadSuccessTimerRef.current)
+          }
+         }
+       }, [])
 
   const panelBySubmissionKey = useMemo(() => {
     const next = new Map<string, (typeof allPanels)[number]>()
@@ -488,6 +535,12 @@ export function useVideoStageRuntime({
           const data = await response.json().catch(() => ({}))
           return { taskId: String((data as any)?.taskId || '') }
         },
+        onDone: () => {
+          if (episodeId && projectId) {
+            queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) })
+            queryClient.invalidateQueries({ queryKey: queryKeys.storyboards.all(episodeId) })
+          }
+        },
       })
       return
     }
@@ -531,11 +584,13 @@ export function useVideoStageRuntime({
   }, [
     isSubmittingVideoBatch,
     projectId,
+    episodeId,
     onGenerateVideo,
     queueMode,
     panelBySubmissionKey,
     submittingVideoPanelKeys,
     taskQueue,
+    queryClient,
   ])
 
   const {
@@ -676,6 +731,12 @@ export function useVideoStageRuntime({
             const data = await response.json().catch(() => ({}))
             return { taskId: String((data as any)?.taskId || '') }
           },
+          onDone: () => {
+            if (episodeId && projectId) {
+              queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) })
+              queryClient.invalidateQueries({ queryKey: queryKeys.storyboards.all(episodeId) })
+            }
+          },
         })))
         setIsBatchConfigOpen(false)
       } else {
@@ -696,8 +757,10 @@ export function useVideoStageRuntime({
     handleGenerateAllVideosWithImmediateLock,
     isConfirming,
     projectId,
+    episodeId,
     queueMode,
     taskQueue,
+    queryClient,
   ])
 
   return (
@@ -768,7 +831,9 @@ export function useVideoStageRuntime({
         getLocalPrompt={getLocalPrompt}
         updateLocalPrompt={updateLocalPrompt}
         savePrompt={savePrompt}
-      />
+        onUploadVideo={handleUploadVideo}
+        isUploadingVideo={uploadVideoMutation.isPending}
+       />
 
       {isBatchConfigOpen && (
         <div
@@ -831,7 +896,215 @@ export function useVideoStageRuntime({
         </div>
       )}
 
-      {previewImage && <ImagePreviewModal imageUrl={previewImage} onClose={closePreviewImage} />}
-    </div>
-  )
+          {/* 视频上传成功弹窗 */}
+          {showUploadSuccess.show && (
+            <div
+              className="fixed inset-0 z-[130] glass-overlay flex items-center justify-center p-4"
+              style={{
+                opacity: showUploadSuccess.animatingOut ? 0 : 1,
+                transition: 'opacity 0.3s ease',
+                pointerEvents: showUploadSuccess.animatingOut ? 'none' : 'auto',
+              }}
+              onAnimationEnd={() => {
+                if (showUploadSuccess.animatingOut) {
+                  setShowUploadSuccess((prev) => ({ ...prev, show: false, animatingOut: false }));
+                }
+              }}
+              onClick={() => setShowUploadSuccess((prev) => ({ ...prev, animatingOut: true }))}
+            >
+            {/* 注入弹窗专用动画 */}
+             <style>{`
+               @keyframes modalSlideIn {
+                 0% { opacity: 0; transform: scale(0.92) translateY(12px); }
+                 100% { opacity: 1; transform: scale(1) translateY(0); }
+               }
+               @keyframes iconPop {
+                 0% { transform: scale(0.4); opacity: 0; }
+                 50% { transform: scale(1.15); opacity: 1; }
+                 100% { transform: scale(1); opacity: 1; }
+               }
+               @keyframes checkDraw {
+                 0% { stroke-dashoffset: 24; }
+                 100% { stroke-dashoffset: 0; }
+               }
+               @keyframes pulse-ring {
+                 0% { transform: scale(1); opacity: 0.6; }
+                 100% { transform: scale(1.8); opacity: 0; }
+               }
+               @keyframes floatBadge {
+                 0% { transform: translateY(8px); opacity: 0; }
+                 100% { transform: translateY(0); opacity: 1; }
+               }
+               @keyframes overlayFade {
+                 0% { opacity: 0; }
+                 100% { opacity: 1; }
+               }
+               @keyframes opacityOut {
+                 0% { opacity: 1; }
+                 100% { opacity: 0; }
+               }
+             `}</style>
+            <div
+              className="relative rounded-3xl p-6 max-w-sm w-full space-y-4 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: 'linear-gradient(135deg, var(--glass-bg-surface-modal) 0%, rgba(255,255,255,0.97) 100%)',
+                border: '1px solid rgba(16, 185, 129, 0.25)',
+                boxShadow: '0 20px 60px rgba(16, 185, 129, 0.15), 0 8px 24px rgba(0,0,0,0.08)',
+                animation: 'modalSlideIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+                backdropFilter: 'blur(20px) saturate(120%)',
+                WebkitBackdropFilter: 'blur(20px) saturate(120%)',
+              }}
+            >
+              {/* 背景光晕 */}
+              <div
+                className="absolute -top-8 -right-8 w-32 h-32 rounded-full"
+                style={{
+                  background: 'radial-gradient(circle, rgba(16,185,129,0.2), transparent 70%)',
+                  filter: 'blur(8px)',
+                }}
+              />
+              <div
+                className="absolute -bottom-6 -left-6 w-24 h-24 rounded-full"
+                style={{
+                  background: 'radial-gradient(circle, rgba(47,123,255,0.15), transparent 70%)',
+                  filter: 'blur(8px)',
+                }}
+              />
+
+              {/* 顶部装饰渐变线 */}
+              <div
+                className="absolute top-0 left-6 right-6 h-px"
+                style={{
+                  background: 'linear-gradient(90deg, transparent, var(--glass-tone-success-fg), transparent)',
+                }}
+              />
+
+              {/* 成功图标区域 */}
+              <div className="relative flex flex-col items-center space-y-4">
+                {/* 脉冲光环 */}
+                <div
+                  className="absolute w-20 h-20 rounded-full"
+                  style={{
+                    background: 'rgba(16, 185, 129, 0.12)',
+                    animation: 'pulse-ring 2s ease-out infinite',
+                    marginTop: '4px',
+                    transformOrigin: 'center',
+                  }}
+                />
+
+                {/* 成功图标 */}
+                <div
+                  className="relative w-16 h-16 rounded-full flex items-center justify-center"
+                  style={{
+                    background: 'linear-gradient(135deg, #10b980, #34d399, #4ade80)',
+                    boxShadow: '0 0 32px rgba(16, 185, 129, 0.35), inset 0 1px 0 rgba(255,255,255,0.3)',
+                    animation: 'iconPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+                  }}
+                >
+                  <svg
+                    className="w-8 h-8 text-white"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{
+                      strokeDasharray: 24,
+                      strokeDashoffset: 24,
+                      animation: 'checkDraw 0.4s ease-out 0.3s forwards',
+                    }}
+                  >
+                    <path d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+
+                <div className="text-center space-y-1">
+                  <h3
+                    className="text-xl font-bold tracking-tight"
+                    style={{
+                      background: 'linear-gradient(135deg, #10b980, #059669)',
+                      WebkitBackgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
+                      animation: 'modalSlideIn 0.4s ease-out 0.2s both',
+                    }}
+                  >
+                    视频上传成功
+                  </h3>
+                  <p className="text-sm" style={{
+                    color: 'var(--glass-text-tertiary)',
+                    animation: 'floatBadge 0.4s ease-out 0.4s both',
+                  }}>
+                    已成功添加到当前分镜
+                  </p>
+                </div>
+
+                {/* 视频信息卡片 */}
+                <div
+                  className="flex items-center gap-3 w-full p-3.5 rounded-xl"
+                  style={{
+                    background: 'var(--glass-bg-muted)',
+                    border: '1px solid var(--glass-stroke-soft)',
+                    animation: 'modalSlideIn 0.35s ease-out 0.5s both',
+                    marginTop: '4px',
+                  }}
+                >
+                  <div
+                    className="flex-shrink-0 w-11 h-11 rounded-lg flex items-center justify-center"
+                    style={{
+                      background: 'linear-gradient(135deg, var(--glass-accent-from), var(--glass-accent-to))',
+                      boxShadow: '0 4px 12px rgba(47, 123, 255, 0.25)',
+                    }}
+                  >
+                    <AppIcon name="video" className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-0.5">
+                    <p className="text-sm font-medium text-[var(--glass-text-primary)] truncate">
+                      {showUploadSuccess.fileName}
+                    </p>
+                    <p className="text-xs" style={{ color: 'var(--glass-text-tertiary)' }}>
+                      {(showUploadSuccess.fileSize / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                  </div>
+                  <div className="flex-shrink-0">
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{
+                      background: 'rgba(16, 185, 129, 0.15)',
+                    }}>
+                      <AppIcon name="check" className="w-3.5 h-3.5" style={{ color: '#10b980' }} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 底部按钮 */}
+                <button
+                  type="button"
+                  onClick={() => setShowUploadSuccess((prev) => ({ ...prev, animatingOut: true }))}
+                  className="px-6 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200"
+                  style={{
+                    background: 'linear-gradient(135deg, #10b980, #059669)',
+                    color: 'white',
+                    boxShadow: '0 2px 12px rgba(16, 185, 129, 0.3)',
+                    animation: 'modalSlideIn 0.35s ease-out 0.6s both',
+                    marginTop: '4px',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.boxShadow = '0 4px 20px rgba(16, 185, 129, 0.45)';
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.boxShadow = '0 2px 12px rgba(16, 185, 129, 0.3)';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  完成
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+       {previewImage && <ImagePreviewModal imageUrl={previewImage} onClose={closePreviewImage} />}
+     </div>
+   )
 }

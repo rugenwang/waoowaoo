@@ -42,6 +42,10 @@ interface PanelEditFormProps {
   onOpenLocationPicker: () => void
   onRemoveCharacter: (index: number) => void
   onRemoveLocation: () => void
+  onRefineStoryboardPrompt?: () => void
+  isRefiningStoryboardPrompt?: boolean
+  refinedStoryboardPrompt?: string | null
+  onClearRefinedStoryboardPrompt?: () => void
 }
 
 export default function PanelEditForm({
@@ -54,7 +58,11 @@ export default function PanelEditForm({
   onOpenCharacterPicker,
   onOpenLocationPicker,
   onRemoveCharacter,
-  onRemoveLocation
+  onRemoveLocation,
+  onRefineStoryboardPrompt,
+  isRefiningStoryboardPrompt,
+  refinedStoryboardPrompt,
+  onClearRefinedStoryboardPrompt
 }: PanelEditFormProps) {
   return (
     <PanelEditFormV2
@@ -68,6 +76,10 @@ export default function PanelEditForm({
       onOpenLocationPicker={onOpenLocationPicker}
       onRemoveCharacter={onRemoveCharacter}
       onRemoveLocation={onRemoveLocation}
+      onRefineStoryboardPrompt={onRefineStoryboardPrompt}
+      isRefiningStoryboardPrompt={isRefiningStoryboardPrompt}
+      refinedStoryboardPrompt={refinedStoryboardPrompt}
+      onClearRefinedStoryboardPrompt={onClearRefinedStoryboardPrompt}
       uiMode="flow"
     />
   )

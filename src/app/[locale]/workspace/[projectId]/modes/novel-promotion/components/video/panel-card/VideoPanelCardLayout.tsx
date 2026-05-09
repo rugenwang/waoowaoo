@@ -12,12 +12,12 @@ function VideoPanelCardLayout(props: VideoPanelCardShellProps) {
   const runtime = useVideoPanelActions(props)
 
   return (
-    <div className="glass-surface-elevated overflow-visible">
-      <VideoPanelCardHeader runtime={runtime} />
-      <VideoPanelCardBody runtime={runtime} />
-      <VideoPanelCardFooter runtime={runtime} />
-    </div>
-  )
+     <div className="glass-surface-elevated overflow-visible">
+       <VideoPanelCardHeader runtime={runtime} onUploadVideo={props.onUploadVideo} isUploadingVideo={props.isUploadingVideo} />
+       <VideoPanelCardBody runtime={runtime} />
+       <VideoPanelCardFooter runtime={runtime} />
+     </div>
+   )
 }
 
 export default React.memo(VideoPanelCardLayout)

@@ -13,6 +13,7 @@ import { WorkspaceStageRuntimeProvider } from './WorkspaceStageRuntimeContext'
 import { useNovelPromotionWorkspaceController } from './hooks/useNovelPromotionWorkspaceController'
 import type { NovelPromotionWorkspaceProps } from './types'
 import { TaskQueueProvider } from '@/lib/task-queue'
+import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import QueueProgressPopup from '@/components/task/QueueProgressPopup'
 import '@/styles/animations.css'
 
@@ -75,10 +76,16 @@ function NovelPromotionWorkspaceContent(props: NovelPromotionWorkspaceProps) {
     return <div className="text-center text-(--glass-text-secondary)">{vm.i18n.tc('loading')}</div>
   }
 
+  const storyboardModelProvider = parseModelKeyStrict(vm.project.storyboardModel)?.provider || null
+  const videoModelProvider = parseModelKeyStrict(vm.project.videoModel)?.provider || null
+  const allowParallelStoryboardVideo =
+    !(storyboardModelProvider === 'local' && videoModelProvider === 'local')
+
   return (
     <TaskQueueProvider
       projectId={projectId}
       enabled={vm.project.progressPopupEnabled === true}
+      allowParallelStoryboardVideo={allowParallelStoryboardVideo}
       subscribeTaskEvents={workspace.subscribeTaskEvents}
     >
       <div>

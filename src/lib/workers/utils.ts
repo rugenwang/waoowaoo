@@ -24,6 +24,10 @@ import { prisma } from '@/lib/prisma'
 
 const DEFAULT_POLL_TIMEOUT_MS = Number.parseInt(process.env.WORKER_EXTERNAL_TIMEOUT_MS || String(20 * 60 * 1000), 10)
 const DEFAULT_POLL_INTERVAL_MS = Number.parseInt(process.env.WORKER_EXTERNAL_POLL_MS || '3000', 10)
+const DEFAULT_LOCAL_VIDEO_POLL_TIMEOUT_MS = Number.parseInt(
+  process.env.WORKER_LOCAL_VIDEO_TIMEOUT_MS || String(6 * 60 * 60 * 1000),
+  10,
+)
 
 /**
  * 查询 DB 中任务是否已有 externalId（服务重启后续接轮询用，避免重复提交外部 API）
@@ -210,6 +214,19 @@ export async function waitExternalResult(
   throw new Error(`External task polling timeout (${Math.round(timeoutMs / 1000)}s): ${externalId}`)
 }
 
+function resolveExternalPollOptions(
+  externalId: string,
+  opts?: { start?: number; end?: number },
+) {
+  return {
+    progressStart: opts?.start,
+    progressEnd: opts?.end,
+    ...(externalId.startsWith('LOCAL:VIDEO:')
+      ? { timeoutMs: DEFAULT_LOCAL_VIDEO_POLL_TIMEOUT_MS }
+      : {}),
+  }
+}
+
 async function downloadToDataUrl(sourceUrl: string, downloadHeaders?: Record<string, string>): Promise<string> {
   const response = await fetch(sourceUrl, {
     method: 'GET',
@@ -252,10 +269,15 @@ export async function resolveImageSourceFromGeneration(
         message: 'image source generation resumed from existing external id',
         details: { externalId: resumeExternalId },
       })
-      const polled = await waitExternalResult(job, resumeExternalId, params.userId, {
-        progressStart: params.pollProgress?.start ?? 40,
-        progressEnd: params.pollProgress?.end ?? 92,
-      })
+      const polled = await waitExternalResult(
+        job,
+        resumeExternalId,
+        params.userId,
+        resolveExternalPollOptions(resumeExternalId, {
+          start: params.pollProgress?.start ?? 40,
+          end: params.pollProgress?.end ?? 92,
+        }),
+      )
       return polled.downloadHeaders
         ? await downloadToDataUrl(polled.url, polled.downloadHeaders)
         : polled.url
@@ -481,10 +503,15 @@ export async function resolveImageSourceFromGeneration(
     persist: true,
   })
 
-  const polled = await waitExternalResult(job, externalId, params.userId, {
-    progressStart: params.pollProgress?.start ?? 40,
-    progressEnd: params.pollProgress?.end ?? 92,
-  })
+  const polled = await waitExternalResult(
+    job,
+    externalId,
+    params.userId,
+    resolveExternalPollOptions(externalId, {
+      start: params.pollProgress?.start ?? 40,
+      end: params.pollProgress?.end ?? 92,
+    }),
+  )
   logger.info({
     message: 'image source generation completed (async)',
     provider: params.options?.provider || undefined,
@@ -552,10 +579,15 @@ export async function resolveImageSourcesFromGeneration(
         message: 'image sources generation resumed from existing external id',
         details: { externalId: resumeExternalId },
       })
-      const polled = await waitExternalResult(job, resumeExternalId, params.userId, {
-        progressStart: params.pollProgress?.start ?? 40,
-        progressEnd: params.pollProgress?.end ?? 92,
-      })
+      const polled = await waitExternalResult(
+        job,
+        resumeExternalId,
+        params.userId,
+        resolveExternalPollOptions(resumeExternalId, {
+          start: params.pollProgress?.start ?? 40,
+          end: params.pollProgress?.end ?? 92,
+        }),
+      )
       if (polled.downloadHeaders) {
         return [await downloadToDataUrl(polled.url, polled.downloadHeaders)]
       }
@@ -627,10 +659,15 @@ export async function resolveImageSourcesFromGeneration(
     throw new Error('Image generation returned no image and no external id')
   }
 
-  const polled = await waitExternalResult(job, externalId, params.userId, {
-    progressStart: params.pollProgress?.start ?? 40,
-    progressEnd: params.pollProgress?.end ?? 92,
-  })
+  const polled = await waitExternalResult(
+    job,
+    externalId,
+    params.userId,
+    resolveExternalPollOptions(externalId, {
+      start: params.pollProgress?.start ?? 40,
+      end: params.pollProgress?.end ?? 92,
+    }),
+  )
   logger.info({
     message: 'image sources generation completed (async)',
     provider: params.options?.provider || undefined,
@@ -673,10 +710,15 @@ export async function resolveVideoSourceFromGeneration(
       message: 'video source generation resumed from existing external id',
       details: { externalId: resumeExternalId, model: params.modelId },
     })
-    const polled = await waitExternalResult(job, resumeExternalId, params.userId, {
-      progressStart: params.pollProgress?.start ?? 45,
-      progressEnd: params.pollProgress?.end ?? 94,
-    })
+    const polled = await waitExternalResult(
+      job,
+      resumeExternalId,
+      params.userId,
+      resolveExternalPollOptions(resumeExternalId, {
+        start: params.pollProgress?.start ?? 45,
+        end: params.pollProgress?.end ?? 94,
+      }),
+    )
     logger.info({
       message: 'video source generation completed (resumed)',
       durationMs: Date.now() - startedAt,
@@ -833,10 +875,15 @@ export async function resolveVideoSourceFromGeneration(
     persist: true,
   })
 
-  const polled = await waitExternalResult(job, externalId, params.userId, {
-    progressStart: params.pollProgress?.start ?? 45,
-    progressEnd: params.pollProgress?.end ?? 94,
-  })
+  const polled = await waitExternalResult(
+    job,
+    externalId,
+    params.userId,
+    resolveExternalPollOptions(externalId, {
+      start: params.pollProgress?.start ?? 45,
+      end: params.pollProgress?.end ?? 94,
+    }),
+  )
   logger.info({
     message: 'video source generation completed (async)',
     durationMs: Date.now() - startedAt,
@@ -889,10 +936,15 @@ export async function resolveLipSyncVideoSource(
       message: 'lip sync generation resumed from existing external id',
       details: { externalId: resumeExternalId },
     })
-    const polled = await waitExternalResult(job, resumeExternalId, params.userId, {
-      progressStart: params.pollProgress?.start ?? 45,
-      progressEnd: params.pollProgress?.end ?? 94,
-    })
+    const polled = await waitExternalResult(
+      job,
+      resumeExternalId,
+      params.userId,
+      resolveExternalPollOptions(resumeExternalId, {
+        start: params.pollProgress?.start ?? 45,
+        end: params.pollProgress?.end ?? 94,
+      }),
+    )
     logger.info({
       message: 'lip sync generation completed (resumed)',
       durationMs: Date.now() - startedAt,
@@ -927,10 +979,15 @@ export async function resolveLipSyncVideoSource(
     throw new Error('Lip sync external id missing')
   }
 
-  const polled = await waitExternalResult(job, externalId, params.userId, {
-    progressStart: params.pollProgress?.start ?? 45,
-    progressEnd: params.pollProgress?.end ?? 94,
-  })
+  const polled = await waitExternalResult(
+    job,
+    externalId,
+    params.userId,
+    resolveExternalPollOptions(externalId, {
+      start: params.pollProgress?.start ?? 45,
+      end: params.pollProgress?.end ?? 94,
+    }),
+  )
 
   logger.info({
     message: 'lip sync generation completed',

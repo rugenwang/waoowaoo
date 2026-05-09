@@ -1,12 +1,16 @@
 'use client'
 
-import { useTranslations } from 'next-intl'
+import { useLocale, useTranslations } from 'next-intl'
+import { useState } from 'react'
 import PanelEditForm, { PanelEditData } from '../PanelEditForm'
 import ImageSection from './ImageSection'
 import PanelActionButtons from './PanelActionButtons'
 import { StoryboardPanel } from './hooks/useStoryboardState'
 import { GlassSurface } from '@/components/ui/primitives'
 import { AppIcon } from '@/components/ui/icons'
+import { useRefineProjectStoryboardPrompt } from '@/lib/query/hooks'
+import { shouldShowError } from '@/lib/error-utils'
+import { extractErrorMessage } from '@/lib/errors/extract'
 
 interface PanelCandidateData {
   candidates: string[]
@@ -93,6 +97,39 @@ export default function PanelCard({
   isInsertDisabled
 }: PanelCardProps) {
   const t = useTranslations('storyboard')
+  const locale = useLocale()
+  const refineStoryboardPrompt = useRefineProjectStoryboardPrompt(projectId)
+  const [refinedStoryboardPrompt, setRefinedStoryboardPrompt] = useState<string | null>(null)
+
+  const handleRefineStoryboardPrompt = async () => {
+    try {
+      setRefinedStoryboardPrompt(null)
+      const result = await refineStoryboardPrompt.mutateAsync({
+        panelId: panel.id,
+        locale: locale === 'en' ? 'en' : 'zh',
+        draft: {
+          shotType: panelData.shotType,
+          cameraMove: panelData.cameraMove,
+          description: panelData.description,
+          videoPrompt: panelData.videoPrompt,
+          location: panelData.location,
+          characters: panelData.characters,
+        },
+      })
+      const nextPrompt = (result.prompt || result.refinedPrompt || '').trim()
+      if (!nextPrompt) {
+        throw new Error(t('panel.refineStoryboardPromptEmptyResult'))
+      }
+      setRefinedStoryboardPrompt(nextPrompt)
+    } catch (error: unknown) {
+      if (shouldShowError(error)) {
+        alert(t('messages.refinePromptFailed', {
+          error: extractErrorMessage(error, t('common.unknownError')),
+        }))
+      }
+    }
+  }
+
   return (
     <GlassSurface
       variant="elevated"
@@ -164,6 +201,10 @@ export default function PanelCard({
           onOpenLocationPicker={onOpenLocationPicker}
           onRemoveCharacter={onRemoveCharacter}
           onRemoveLocation={onRemoveLocation}
+          onRefineStoryboardPrompt={handleRefineStoryboardPrompt}
+          isRefiningStoryboardPrompt={refineStoryboardPrompt.isPending}
+          refinedStoryboardPrompt={refinedStoryboardPrompt}
+          onClearRefinedStoryboardPrompt={() => setRefinedStoryboardPrompt(null)}
         />
       </div>
     </GlassSurface>

@@ -27,6 +27,9 @@ import {
 import { executeAiTextStep } from '@/lib/ai-runtime/client'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 
+type PromptRecord = Record<string, unknown>
+type PromptCharacter = { name?: unknown; appearance?: unknown; slot?: unknown }
+
 function parseJsonUnknown(raw: string | null | undefined): unknown | null {
   if (!raw) return null
   try {
@@ -64,7 +67,7 @@ function pickAppearanceDescription(appearance: {
   return '无描述'
 }
 
-function buildPanelPromptContext(params: {
+export function buildPanelPromptContext(params: {
   panel: {
     id: string
     shotType: string | null
@@ -140,7 +143,7 @@ function buildPanelPromptContext(params: {
   }
 }
 
-function buildPanelPrompt(params: {
+export function buildPanelPrompt(params: {
   locale: TaskJobData['locale']
   aspectRatio: string
   styleText: string
@@ -159,7 +162,7 @@ function buildPanelPrompt(params: {
   })
 }
 
-function buildPanelStructuredPrompt(params: {
+export function buildPanelStructuredPrompt(params: {
   locale: TaskJobData['locale']
   aspectRatio: string
   styleText: string
@@ -172,10 +175,12 @@ function buildPanelStructuredPrompt(params: {
   const videoPrompt = String(params.context.panel.video_prompt || '').trim()
 
   const characterLines = (() => {
-    const chars = Array.isArray(params.context.panel.characters) ? params.context.panel.characters : []
+    const chars = Array.isArray(params.context.panel.characters)
+      ? params.context.panel.characters as PromptCharacter[]
+      : []
     if (chars.length === 0) return ''
     if (params.locale === 'en') {
-      return `Characters: ${chars.map((c: any) => {
+      return `Characters: ${chars.map((c) => {
         const name = String(c?.name || '').trim()
         const appearance = String(c?.appearance || '').trim()
         const slot = String(c?.slot || '').trim()
@@ -186,7 +191,7 @@ function buildPanelStructuredPrompt(params: {
         return extras ? `${name} (${extras})` : name
       }).filter(Boolean).join('; ')}`
     }
-    return `角色：${chars.map((c: any) => {
+    return `角色：${chars.map((c) => {
       const name = String(c?.name || '').trim()
       const appearance = String(c?.appearance || '').trim()
       const slot = String(c?.slot || '').trim()
@@ -199,9 +204,11 @@ function buildPanelStructuredPrompt(params: {
   })()
 
   const photographyText = (() => {
-    const rules = params.context.panel.photography_rules as any
+    const rules = params.context.panel.photography_rules as PromptRecord | null
     if (!rules || typeof rules !== 'object') return ''
-    const lighting = rules.lighting || null
+    const lighting = rules.lighting && typeof rules.lighting === 'object'
+      ? rules.lighting as PromptRecord
+      : null
     const direction = String(lighting?.direction || '').trim()
     const quality = String(lighting?.quality || '').trim()
     const parts = [
@@ -215,13 +222,14 @@ function buildPanelStructuredPrompt(params: {
   })()
 
   const actingText = (() => {
-    const notes = params.context.panel.acting_notes as any
+    const notes = params.context.panel.acting_notes
     if (!notes) return ''
     // 常见结构：[{ name, acting }]
     if (Array.isArray(notes)) {
       const lines = notes.map((row) => {
-        const name = String(row?.name || '').trim()
-        const acting = String(row?.acting || '').trim()
+        const item = row && typeof row === 'object' ? row as PromptRecord : null
+        const name = String(item?.name || '').trim()
+        const acting = String(item?.acting || '').trim()
         if (!acting) return ''
         return name ? `${name}：${acting}` : acting
       }).filter(Boolean)
@@ -279,7 +287,7 @@ function buildPanelDescriptionPrompt(params: {
   return params.styleText ? `${clean}，${params.styleText}` : clean
 }
 
-function buildStoryboardHardConstraints(params: {
+export function buildStoryboardHardConstraints(params: {
   locale: TaskJobData['locale']
   aspectRatio: string
   styleText: string
@@ -312,7 +320,7 @@ function buildStoryboardHardConstraints(params: {
   ].filter(Boolean).join('\n')
 }
 
-function cleanupRefinedPrompt(raw: string): string {
+export function cleanupRefinedPrompt(raw: string): string {
   const text = String(raw || '').trim()
   if (!text) return ''
   // 去掉可能的 code fence 或多余引号

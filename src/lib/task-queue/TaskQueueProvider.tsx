@@ -15,6 +15,11 @@ import type { SSEEvent } from '@/lib/task/types'
 import { TASK_EVENT_TYPE, TASK_SSE_EVENT_TYPE } from '@/lib/task/types'
 import type { TaskTargetStateQuery } from '@/lib/query/hooks/useTaskTargetStateMap'
 import type { QueueItem, QueueItemState } from './types'
+import {
+  promoteRunnableQueueItems,
+  resolveQueueLaneFromTaskType,
+  type TaskQueueLane,
+} from './scheduler'
 
 type TaskEventListener = (event: SSEEvent) => void
 
@@ -23,7 +28,9 @@ export type TaskQueueContextValue = {
   projectId: string
   queue: QueueItemState[]
   activeItem: QueueItemState | null
+  activeItems: QueueItemState[]
   activeTarget: TaskTargetStateQuery | null
+  activeTargets: TaskTargetStateQuery[]
   showPopup: boolean
   setShowPopup: (show: boolean) => void
   notice: string | null
@@ -38,6 +45,7 @@ const TaskQueueContext = createContext<TaskQueueContextValue | null>(null)
 export type TaskQueueProviderProps = {
   projectId: string
   enabled: boolean
+  allowParallelStoryboardVideo?: boolean
   subscribeTaskEvents: (listener: TaskEventListener) => () => void
   children: ReactNode
 }
@@ -70,13 +78,16 @@ function buildDedupeKey(item: QueueItem) {
 }
 
 export function TaskQueueProvider(props: TaskQueueProviderProps) {
-  const { projectId, enabled, subscribeTaskEvents, children } = props
+  const { projectId, enabled, allowParallelStoryboardVideo = false, subscribeTaskEvents, children } = props
   const [queue, setQueue] = useState<QueueItemState[]>([])
   const [showPopup, setShowPopup] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
-  const [externalBusy, setExternalBusy] = useState(false)
+  const [externalBusyLanes, setExternalBusyLanes] = useState<TaskQueueLane[]>([])
   const noticeTimerRef = useRef<number | null>(null)
-  const runningRef = useRef(false)
+  const submittingItemIdsRef = useRef<Set<string>>(new Set())
+  // 用 ref 镜像 queue 状态，避免 cancelCurrent 等回调因闭包引用陈旧 queue 导致取不到最新 running 项
+  const queueRef = useRef<QueueItemState[]>(queue)
+  queueRef.current = queue
 
   const flashNotice = useCallback((message: string) => {
     setNotice(message)
@@ -89,21 +100,19 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
     }, 1800)
   }, [])
 
-  const activeItem = useMemo(() => queue.find(item => item.status === 'running') || null, [queue])
+  const activeItems = useMemo(() => queue.filter(item => item.status === 'running'), [queue])
+  const activeItem = activeItems[0] || null
+  const activeTargets = useMemo(() => activeItems.map((item) => item.target), [activeItems])
   const activeTarget = activeItem?.target || null
 
   // 刷新页面后，前端队列会丢失，但后端可能仍有 queued/processing 的任务在执行。
   // 这种情况下不应该允许用户“刷新绕过队列”继续直接提交新任务。
-  // 因此当本地队列为空时，轮询后端 active tasks，作为一个 externalBusy 闸门：
-  // - externalBusy=true：enqueue 仍可加入 pending，但不会 startNext
-  // - externalBusy=false：恢复 startNext
+  // 这里轮询后端 active tasks，作为 external busy 闸门：
+  // - 分镜/视频可并行时，只阻塞同车道任务；全局任务仍阻塞所有任务
+  // - 分镜/视频都走本地模型时，所有任务仍共用 global 车道
   useEffect(() => {
     if (!enabled) {
-      setExternalBusy(false)
-      return
-    }
-    if (queue.length > 0) {
-      setExternalBusy(false)
+      setExternalBusyLanes([])
       return
     }
 
@@ -116,14 +125,20 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
         search.set('projectId', projectId)
         search.append('status', 'queued')
         search.append('status', 'processing')
-        search.set('limit', '1')
+        search.set('limit', '200')
         const res = await apiFetch(`/api/tasks?${search.toString()}`)
         if (!res.ok) return
         const data = await res.json().catch(() => ({}))
-        const tasks = Array.isArray((data as any)?.tasks) ? (data as any).tasks : []
-        const busy = tasks.length > 0
-        if (!cancelled) setExternalBusy(busy)
-        if (!cancelled && busy) {
+        const payload = data && typeof data === 'object' ? data as { tasks?: unknown } : {}
+        const tasks = Array.isArray(payload.tasks) ? payload.tasks : []
+        const lanes = Array.from(new Set(tasks.map((task) => {
+          const taskType = task && typeof task === 'object' && 'type' in task
+            ? String((task as { type?: unknown }).type || '')
+            : ''
+          return resolveQueueLaneFromTaskType(taskType, allowParallelStoryboardVideo)
+        })))
+        if (!cancelled) setExternalBusyLanes(lanes)
+        if (!cancelled && (lanes.length > 0 || queueRef.current.some((item) => item.status === 'pending'))) {
           timer = window.setTimeout(check, 2000)
         }
       } catch {
@@ -136,96 +151,110 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
       cancelled = true
       if (timer !== null) window.clearTimeout(timer)
     }
-  }, [enabled, projectId, queue.length])
+  }, [allowParallelStoryboardVideo, enabled, projectId])
 
   const startNextIfIdle = useCallback(() => {
     if (!enabled) return
-    if (externalBusy) return
-    if (runningRef.current) return
-    runningRef.current = true
+    setQueue((prev) => promoteRunnableQueueItems(prev, {
+      allowParallelStoryboardVideo,
+      externalBusyLanes,
+    }))
+  }, [allowParallelStoryboardVideo, enabled, externalBusyLanes])
 
-    setQueue((prev) => {
-      const next = [...prev]
-      const idx = next.findIndex(item => item.status === 'pending')
-      if (idx === -1) {
-        runningRef.current = false
-        return prev
-      }
-      next[idx] = { ...next[idx], status: 'running', error: null }
-      return next
-    })
-  }, [enabled, externalBusy])
-
-  // 当队列中出现 running，但没有 taskId 时，立即 submit
   useEffect(() => {
     if (!enabled) return
-    const current = queue.find(item => item.status === 'running') || null
-    if (!current) {
-      runningRef.current = false
-      // 若还有 pending，继续尝试
-      if (queue.some(i => i.status === 'pending')) startNextIfIdle()
-      return
-    }
-    if (current.taskId) return
+    if (!queue.some((item) => item.status === 'pending')) return
+    startNextIfIdle()
+  }, [enabled, externalBusyLanes, queue, startNextIfIdle])
 
-    let cancelled = false
-    ;(async () => {
-      try {
-        setShowPopup(true)
-        const { taskId } = await current.submit()
-        if (cancelled) return
-        const normalizedTaskId = String(taskId || '').trim()
-        if (!normalizedTaskId) {
-          // 同步完成：不依赖 SSE，直接判定为成功并进入下一项
-          setQueue((prev) => prev.map((item) => item.id === current.id ? { ...item, status: 'succeeded' } : item))
-          try {
-            await current.onDone?.('')
-          } finally {
-            runningRef.current = false
-            startNextIfIdle()
+  // 当队列中出现 running，但没有 taskId 时，立即 submit。分镜/视频并行时可能同时提交多个车道。
+  useEffect(() => {
+    if (!enabled) return
+    const runnableItems = queue.filter((item) =>
+      item.status === 'running' &&
+      !item.taskId &&
+      !submittingItemIdsRef.current.has(item.id),
+    )
+    if (runnableItems.length === 0) return
+
+    for (const current of runnableItems) {
+      submittingItemIdsRef.current.add(current.id)
+      ;(async () => {
+        try {
+          setShowPopup(true)
+          const { taskId } = await current.submit()
+          const normalizedTaskId = String(taskId || '').trim()
+          if (!normalizedTaskId) {
+            // 同步完成：不依赖 SSE，直接判定为成功并进入下一项
+            setQueue((prev) => prev.map((item) => item.id === current.id ? { ...item, status: 'succeeded' } : item))
+            try {
+              await current.onDone?.('')
+            } finally {
+              submittingItemIdsRef.current.delete(current.id)
+              startNextIfIdle()
+            }
+            return
           }
-          return
+          setQueue((prev) => prev.map((item) => item.id === current.id ? { ...item, taskId: normalizedTaskId } : item))
+          submittingItemIdsRef.current.delete(current.id)
+        } catch (err) {
+          const message = normalizeError(err)
+          setQueue((prev) => prev.map((item) => item.id === current.id ? { ...item, status: 'failed', error: message } : item))
+          submittingItemIdsRef.current.delete(current.id)
+          // 自动继续下一个
+          startNextIfIdle()
         }
-        setQueue((prev) => prev.map((item) => item.id === current.id ? { ...item, taskId: normalizedTaskId } : item))
-      } catch (err) {
-        if (cancelled) return
-        const message = normalizeError(err)
-        setQueue((prev) => prev.map((item) => item.id === current.id ? { ...item, status: 'failed', error: message } : item))
-        runningRef.current = false
-        // 自动继续下一个
-        startNextIfIdle()
-      }
-    })()
-    return () => { cancelled = true }
+      })()
+    }
   }, [enabled, queue, startNextIfIdle])
 
   const handleTerminal = useCallback(async (event: SSEEvent) => {
     if (!enabled) return
     if (!isTaskTerminalLifecycle(event)) return
     const taskId = event.taskId
+    const isCompleted = isTaskCompleted(event)
 
-    const current = queue.find(item => item.status === 'running' && item.taskId === taskId) || null
-    if (!current) return
+    // 使用 setQueue 函数式更新，避免闭包捕获陈旧的 queue 引用。
+    // 长时间运行的任务完成时，SSE 事件到达时的 queue 闭包可能已过期，
+    // 导致 queue.find() 找不到匹配的 running 项。
+    let matchedItem: QueueItemState | null = null
+    let hadRunningItem = false
+    setQueue((prev) => {
+      const found = prev.find(item => item.status === 'running' && item.taskId === taskId) || null
+      matchedItem = found
+      hadRunningItem = prev.some(item => item.status === 'running')
+      if (!matchedItem) return prev
 
-    if (isTaskCompleted(event)) {
-      setQueue((prev) => prev.map((item) => item.id === current.id ? { ...item, status: 'succeeded' } : item))
+      if (isCompleted) {
+        return prev.map((item) => item.id === matchedItem!.id ? { ...item, status: 'succeeded' } : item)
+      }
+      return prev.map((item) => item.id === matchedItem!.id ? { ...item, status: 'failed', error: 'task failed' } : item)
+    })
+
+    // matchedItem 为 null 时，说明这个 terminal 事件没有匹配到队列中的 running 项。
+    // 可能原因：队列项已被清理、SSE 重播放了旧事件、或 taskId 不匹配。
+    // 此时仍需确保 runningRef 正确重置，否则队列会永久卡死。
+    const terminalItem = matchedItem as QueueItemState | null
+    if (!terminalItem) {
+      if (!hadRunningItem) startNextIfIdle()
+      return
+    }
+
+    if (isCompleted) {
       try {
-        await current.onDone?.(taskId)
+        await terminalItem.onDone?.(taskId)
       } finally {
-        runningRef.current = false
         startNextIfIdle()
       }
       return
     }
 
-    setQueue((prev) => prev.map((item) => item.id === current.id ? { ...item, status: 'failed', error: 'task failed' } : item))
     try {
-      await current.onFail?.(taskId, event)
+      await terminalItem.onFail?.(taskId, event)
     } finally {
-      runningRef.current = false
       startNextIfIdle()
     }
-  }, [enabled, queue, startNextIfIdle])
+  }, [enabled, startNextIfIdle])
 
   useEffect(() => {
     if (!enabled) return
@@ -307,21 +336,23 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
   }, [])
 
   const cancelCurrent = useCallback(async () => {
-    const current = queue.find(item => item.status === 'running') || null
+    const current = queueRef.current.find(item => item.status === 'running') || null
     if (!current?.taskId) return
     try {
       await apiFetch(`/api/tasks/${encodeURIComponent(current.taskId)}`, { method: 'DELETE' })
     } catch {
       // ignore
     }
-  }, [queue])
+  }, [])
 
   const value = useMemo<TaskQueueContextValue>(() => ({
     enabled,
     projectId,
     queue,
     activeItem,
+    activeItems,
     activeTarget,
+    activeTargets,
     showPopup,
     setShowPopup,
     notice,
@@ -331,7 +362,9 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
     cancelCurrent,
   }), [
     activeItem,
+    activeItems,
     activeTarget,
+    activeTargets,
     cancelCurrent,
     clearPending,
     enqueue,

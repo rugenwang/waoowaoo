@@ -110,6 +110,7 @@ export {
     useAnalyzeProjectGlobalAssets,
     useCopyProjectAssetFromGlobal,
     useAiModifyProjectShotPrompt,
+    useRefineProjectStoryboardPrompt,
     useUpdateProjectConfig,
     useUpdateProjectEpisodeField,
     useAnalyzeProjectAssets,

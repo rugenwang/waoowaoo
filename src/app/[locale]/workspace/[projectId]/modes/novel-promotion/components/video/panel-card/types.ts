@@ -76,4 +76,12 @@ export interface VideoPanelCardShellProps {
     firstPanelId?: string,
   ) => void
   onPreviewImage?: (imageUrl: string) => void
+  /**
+   * 上传本地视频到分镜
+   */
+  onUploadVideo?: (panelId: string, file: File) => void
+  /**
+   * 是否正在上传视频
+   */
+  isUploadingVideo?: boolean
 }

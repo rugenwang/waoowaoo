@@ -22,7 +22,8 @@ export default function QueueProgressPopup() {
     projectId,
     queue,
     activeItem,
-    activeTarget,
+    activeItems,
+    activeTargets,
     showPopup,
     setShowPopup,
     clearPending,
@@ -45,8 +46,10 @@ export default function QueueProgressPopup() {
 
   const total = queue.length
   const doneCount = queue.filter((i) => i.status === 'succeeded' || i.status === 'failed').length
-  const runningIndex = activeItem ? doneCount + 1 : doneCount
-  const currentLabel = activeItem?.label || ''
+  const runningCount = activeItems.length
+  const runningIndex = runningCount > 0 ? doneCount + runningCount : doneCount
+  const currentLabel = activeItems.map((item) => item.label).join('、')
+  const activeTarget = activeTargets[0] || null
 
   // 仅订阅 overlay（不开启服务端轮询），进度由 SSE 写入 overlay
   const { getState } = useTaskTargetStateMap(
@@ -84,13 +87,6 @@ export default function QueueProgressPopup() {
     hasOutput: true,
   })
 
-  const idleDoneState = resolveTaskPresentationState({
-    phase: 'completed',
-    intent: 'generate',
-    resource: 'image',
-    hasOutput: true,
-  })
-
   const body = (
     <div className="glass-surface-modal min-w-[320px] max-w-[90vw] p-4">
       <div className="flex items-start gap-3">
@@ -116,7 +112,9 @@ export default function QueueProgressPopup() {
           </div>
           {!hasRecoveredActive && currentLabel && (
             <div className="mt-1 text-sm text-(--glass-text-secondary)">
-              正在处理（{resolveGroupLabel(activeItem?.group)}）：{currentLabel}
+              {activeItems.length > 1
+                ? `正在并行处理：${currentLabel}`
+                : `正在处理（${resolveGroupLabel(activeItem?.group)}）：${currentLabel}`}
             </div>
           )}
           {stageLabel && (

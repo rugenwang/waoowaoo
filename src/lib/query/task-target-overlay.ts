@@ -3,7 +3,7 @@ import { queryKeys } from './keys'
 import { TASK_EVENT_TYPE } from '@/lib/task/types'
 import type { TaskIntent } from '@/lib/task/intent'
 
-export const TASK_TARGET_OVERLAY_TTL_MS = 30_000
+export const TASK_TARGET_OVERLAY_TTL_MS = 300_000
 
 export type TaskTargetOverlayPhase = 'queued' | 'processing'
 

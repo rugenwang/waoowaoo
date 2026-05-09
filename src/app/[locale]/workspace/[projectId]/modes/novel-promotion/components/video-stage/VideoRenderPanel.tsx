@@ -75,7 +75,15 @@ interface VideoRenderPanelProps {
     panelKey: string,
     value: string,
     field?: PromptField,
-  ) => Promise<void>
+   ) => Promise<void>
+   /**
+    * 上传本地视频到分镜
+    */
+  onUploadVideo?: (panelId: string, file: File) => void
+   /**
+    * 是否正在上传视频
+    */
+  isUploadingVideo?: boolean
 }
 
 export default function VideoRenderPanel({
@@ -118,6 +126,8 @@ export default function VideoRenderPanel({
   getLocalPrompt,
   updateLocalPrompt,
   savePrompt,
+  onUploadVideo,
+  isUploadingVideo,
 }: VideoRenderPanelProps) {
   return (
     <>
@@ -205,7 +215,9 @@ export default function VideoRenderPanel({
                 onResetFlPrompt={onResetFlPrompt}
                 onGenerateFirstLastFrame={onGenerateFirstLastFrame}
                 onPreviewImage={onPreviewImage}
-              />
+                onUploadVideo={onUploadVideo}
+                isUploadingVideo={isUploadingVideo}
+               />
             </div>
           )
         })}

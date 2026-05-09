@@ -149,7 +149,9 @@ export function useSSE({
         if (shouldInvalidateQueries && isLifecycleEvent && shouldInvalidateTasksList) {
           queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(projectId) })
         }
-        if (shouldInvalidateQueries && isLifecycleEvent && shouldInvalidateTargetStates) {
+        // targetStates 是 UI 轮询的底层数据源，即使在 minimal/队列模式下也需要刷新，
+        // 否则 overlay 过期后 UI 无法感知任务完成状态
+        if (isLifecycleEvent && shouldInvalidateTargetStates) {
           if (targetStatesInvalidateTimerRef.current === null) {
             targetStatesInvalidateTimerRef.current = window.setTimeout(() => {
               queryClient.invalidateQueries({ queryKey: queryKeys.tasks.targetStatesAll(projectId), exact: false })
@@ -185,8 +187,16 @@ export function useSSE({
           eventTs: typeof payload.ts === 'string' ? payload.ts : null,
         })
 
-        // 队列模式下避免 completed/failed 触发大面积 invalidate，数据刷新交给队列 onDone 精准控制
+        // 队列模式下避免 completed/failed 触发大面积 invalidate，数据刷新交给队列 onDone 精准控制。
+        // 但 onDone 可能因队列匹配失败而未执行，因此即使 minimal 模式也需要刷新 episodeData/storyboards，
+        // 确保 videoUrl 等关键数据能及时更新。
         if (!shouldInvalidateQueries) {
+          if (
+            normalizedLifecycleType === TASK_EVENT_TYPE.COMPLETED ||
+            normalizedLifecycleType === TASK_EVENT_TYPE.FAILED
+          ) {
+            invalidateEpisodeScoped(resolvedEpisodeId)
+          }
           return
         }
 

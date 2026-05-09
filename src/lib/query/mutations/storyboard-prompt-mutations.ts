@@ -43,6 +43,36 @@ export function useAiModifyProjectShotPrompt(projectId: string) {
     })
 }
 
+export function useRefineProjectStoryboardPrompt(projectId: string) {
+    return useMutation({
+        mutationFn: async (payload: {
+            panelId: string
+            locale?: 'zh' | 'en'
+            draft?: {
+                shotType?: string | null
+                cameraMove?: string | null
+                description?: string | null
+                videoPrompt?: string | null
+                location?: string | null
+                characters?: Array<{ name: string; appearance: string; slot?: string }>
+            }
+        }) => await requestJsonWithError<{
+            prompt: string
+            refinedPrompt: string
+            source: 'description' | 'storyboard'
+            strength: 'conservative' | 'medium' | 'simple'
+        }>(
+            `/api/novel-promotion/${projectId}/refine-storyboard-prompt`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            },
+            'Failed to refine storyboard prompt',
+        ),
+    })
+}
+
 /**
  * 设计音色（项目）
  */

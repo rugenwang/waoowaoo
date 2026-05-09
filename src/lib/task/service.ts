@@ -391,15 +391,19 @@ export async function isTaskActive(taskId: string) {
 }
 
 export async function tryMarkTaskProcessing(taskId: string, externalId?: string | null) {
+  const data: Prisma.TaskUpdateManyMutationInput = {
+    status: TASK_STATUS.PROCESSING,
+    startedAt: new Date(),
+    heartbeatAt: new Date(),
+    attempt: { increment: 1 },
+  }
+  if (externalId !== undefined) {
+    data.externalId = externalId || null
+  }
+
   const result = await taskModel.updateMany({
     where: activeTaskWhere(taskId),
-    data: {
-      status: TASK_STATUS.PROCESSING,
-      startedAt: new Date(),
-      heartbeatAt: new Date(),
-      externalId: externalId || null,
-      attempt: { increment: 1 },
-    },
+    data,
   })
   return result.count > 0
 }

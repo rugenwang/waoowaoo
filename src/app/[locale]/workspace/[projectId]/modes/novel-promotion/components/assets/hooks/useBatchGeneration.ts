@@ -22,6 +22,12 @@ import {
     type ManualRegenerationBaseline,
 } from './useBatchGeneration.helpers'
 
+function extractSubmittedTaskId(data: unknown): string {
+    if (!data || typeof data !== 'object') return ''
+    const taskId = (data as { taskId?: unknown }).taskId
+    return typeof taskId === 'string' ? taskId : ''
+}
+
 interface UseBatchGenerationProps {
     projectId: string
     // 🔥 V6.6：移除 onGenerateImage，内部使用 mutation hooks
@@ -102,9 +108,10 @@ export function useBatchGeneration({
             }
         }
 
-        const queueUiKey = taskQueue.activeItem?.projectId === projectId ? (taskQueue.activeItem.uiKey || '') : ''
-        if (queueUiKey) {
-            generated.add(queueUiKey)
+        for (const item of taskQueue.activeItems) {
+            if (item.projectId !== projectId) continue
+            const queueUiKey = item.uiKey || ''
+            if (queueUiKey) generated.add(queueUiKey)
         }
         if (!queueMode) {
             for (const key of pendingRegenerationKeys) {
@@ -113,7 +120,7 @@ export function useBatchGeneration({
         }
 
         return generated
-    }, [characters, locations, pendingRegenerationKeys, projectId, queueMode, taskQueue.activeItem])
+    }, [characters, locations, pendingRegenerationKeys, projectId, queueMode, taskQueue.activeItems])
 
     useEffect(() => {
         if (pendingRegenerationKeys.size === 0) return
@@ -216,14 +223,14 @@ export function useBatchGeneration({
                             characterId: task.id,
                             appearanceId: task.appearanceId,
                             count: characterGenerationCount,
-                        }) as any
-                        return { taskId: String(res?.taskId || '') }
+                        })
+                        return { taskId: extractSubmittedTaskId(res) }
                     }
                     const res = await generateLocationImage.mutateAsync({
                         locationId: task.id,
                         count: locationGenerationCount,
-                    }) as any
-                    return { taskId: String(res?.taskId || '') }
+                    })
+                    return { taskId: extractSubmittedTaskId(res) }
                 },
                 onDone: async () => {
                     refreshAssets()
@@ -351,14 +358,14 @@ export function useBatchGeneration({
                             characterId: task.id,
                             appearanceId: task.appearanceId,
                             count: characterGenerationCount,
-                        }) as any
-                        return { taskId: String(res?.taskId || '') }
+                        })
+                        return { taskId: extractSubmittedTaskId(res) }
                     }
                     const res = await generateLocationImage.mutateAsync({
                         locationId: task.id,
                         count: locationGenerationCount,
-                    }) as any
-                    return { taskId: String(res?.taskId || '') }
+                    })
+                    return { taskId: extractSubmittedTaskId(res) }
                 },
                 onDone: async () => {
                     refreshAssets()

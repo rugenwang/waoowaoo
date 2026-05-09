@@ -36,6 +36,12 @@ import {
   fuzzyMatchLocation,
 } from './script-view/clip-asset-utils'
 
+function extractSubmittedTaskId(data: unknown): string {
+  if (!data || typeof data !== 'object') return ''
+  const taskId = (data as { taskId?: unknown }).taskId
+  return typeof taskId === 'string' ? taskId : ''
+}
+
 // Hooks
 import { useCharacterActions } from './assets/hooks/useCharacterActions'
 import { useLocationActions } from './assets/hooks/useLocationActions'
@@ -82,7 +88,7 @@ export default function AssetsStage({
       projectId,
     },
     {
-      taskTargets: queueMode ? (taskQueue.activeTarget ? [taskQueue.activeTarget] : []) : undefined,
+      taskTargets: queueMode ? taskQueue.activeTargets : undefined,
     },
   )
   const characters = useMemo(
@@ -164,7 +170,7 @@ export default function AssetsStage({
             })
           }
           const data = await response.json().catch(() => ({}))
-          return { taskId: String((data as any)?.taskId || '') }
+          return { taskId: extractSubmittedTaskId(data) }
         },
         onDone: async () => {
           refreshAssets()
@@ -210,7 +216,7 @@ export default function AssetsStage({
             })
           }
           const data = await response.json().catch(() => ({}))
-          return { taskId: String((data as any)?.taskId || '') }
+          return { taskId: extractSubmittedTaskId(data) }
         },
         onDone: async () => {
           refreshAssets()
@@ -256,7 +262,7 @@ export default function AssetsStage({
             })
           }
           const data = await response.json().catch(() => ({}))
-          return { taskId: String((data as any)?.taskId || '') }
+          return { taskId: extractSubmittedTaskId(data) }
         },
         onDone: async () => {
           refreshAssets()
@@ -266,7 +272,7 @@ export default function AssetsStage({
         },
       })
     }
-  }, [generateCharacterImage, generateLocationImage, projectId, propAssetActions, queryClient, queueMode, refreshAssets, taskQueue])
+  }, [characters, generateCharacterImage, generateLocationImage, locations, projectId, propAssetActions, props, queryClient, queueMode, refreshAssets, taskQueue])
 
   const t = useTranslations('assets')
   // 计算资产总数
