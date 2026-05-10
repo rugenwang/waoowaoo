@@ -5,6 +5,10 @@ OUTPUT FORMAT (must follow):
 
 CONTENT RULES:
 - Include only visual details: subjects (appearance/clothing/count/positions/actions/expressions), environment, props, composition, shot type, camera angle, lighting, color mood, atmosphere, art style, materials.
+- Describe one still moment only: one clear pose, one expression, one composition. Do not merge sequential actions into one image.
+- If the description is for an action opening or a group first keyframe, output the original state before the action happens, not the completed result.
+- Characters must be fully and properly clothed, consistent with character settings/reference images. Do not output shirtless, semi-nude, exposed torso, revealing outfit, missing clothing, or torn-clothing exposure.
+- Do NOT include camera movement, timeline markers, dialogue text, background music, lip-sync, or video quality phrases such as no flicker / no face collapse / no limb deformity.
 - Ignore workflow/process/rule lists unless they affect the image.
 - If reference_images_count > 0: explicitly say "match the reference images" (appearance/style/composition).
 - Aspect ratio: {aspect_ratio} (use for composition wording, do NOT mention pixels)

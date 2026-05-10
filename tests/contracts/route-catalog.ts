@@ -119,6 +119,7 @@ const ROUTE_FILES = [
   'src/app/api/novel-promotion/[projectId]/photography-plan/route.ts',
   'src/app/api/novel-promotion/[projectId]/reference-to-character/route.ts',
   'src/app/api/novel-promotion/[projectId]/regenerate-group/route.ts',
+  'src/app/api/novel-promotion/[projectId]/regenerate-panel-frame-image/route.ts',
   'src/app/api/novel-promotion/[projectId]/regenerate-panel-image/route.ts',
   'src/app/api/novel-promotion/[projectId]/regenerate-single-image/route.ts',
   'src/app/api/novel-promotion/[projectId]/regenerate-storyboard-text/route.ts',
@@ -221,6 +222,7 @@ function resolveContractGroup(routeFile: string): RouteContractGroup {
     || routeFile.endsWith('/modify-storyboard-image/route.ts')
     || routeFile.endsWith('/panel-variant/route.ts')
     || routeFile.endsWith('/regenerate-group/route.ts')
+    || routeFile.endsWith('/regenerate-panel-frame-image/route.ts')
     || routeFile.endsWith('/regenerate-panel-image/route.ts')
     || routeFile.endsWith('/regenerate-single-image/route.ts')
     || routeFile.endsWith('/regenerate-storyboard-text/route.ts')

@@ -30,7 +30,12 @@ export const GET = apiHandler(async (
       storyboards: {
         include: {
           clip: true,
-          panels: { orderBy: { panelIndex: 'asc' } }
+          panels: {
+            orderBy: { panelIndex: 'asc' },
+            include: {
+              frames: { orderBy: { frameIndex: 'asc' } },
+            },
+          }
         },
         orderBy: { createdAt: 'asc' }
       },

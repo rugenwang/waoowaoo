@@ -141,6 +141,34 @@ const prismaMock = vi.hoisted(() => ({
     count: vi.fn(async () => 3),
     updateMany: vi.fn(async () => ({ count: 0 })),
   },
+  novelPromotionPanelFrame: {
+    findFirst: vi.fn(async () => ({
+      id: 'frame-1',
+      panelId: 'panel-1',
+      frameIndex: 1,
+      dependencyFrameIds: '[0]',
+      imageUrl: 'cos/frame-1.png',
+      imageMediaId: null,
+      panel: {
+        id: 'panel-1',
+        imageUrl: 'cos/panel-main.png',
+        frames: [
+          {
+            id: 'frame-0',
+            frameIndex: 0,
+            imageUrl: 'cos/frame-0.png',
+            imageMediaId: null,
+          },
+          {
+            id: 'frame-1',
+            frameIndex: 1,
+            imageUrl: 'cos/frame-1.png',
+            imageMediaId: null,
+          },
+        ],
+      },
+    })),
+  },
   novelPromotionProject: {
     findUnique: vi.fn(async () => ({
       id: 'project-data-1',
@@ -496,6 +524,15 @@ const DIRECT_CASES: ReadonlyArray<DirectRouteCase> = [
     expectedProjectId: 'project-1',
   },
   {
+    routeFile: 'src/app/api/novel-promotion/[projectId]/regenerate-panel-frame-image/route.ts',
+    body: { panelId: 'panel-1', frameId: 'frame-1' },
+    params: { projectId: 'project-1' },
+    expectedTaskType: TASK_TYPE.IMAGE_PANEL,
+    expectedTargetType: 'NovelPromotionPanel',
+    expectedProjectId: 'project-1',
+    expectedPayloadSubset: { panelId: 'panel-1', targetFrameId: 'frame-1', frameId: 'frame-1', candidateCount: 1 },
+  },
+  {
     routeFile: 'src/app/api/novel-promotion/[projectId]/regenerate-panel-image/route.ts',
     body: { panelId: 'panel-1', count: 1 },
     params: { projectId: 'project-1' },
@@ -561,7 +598,7 @@ describe('api contract - direct submit routes (behavior)', () => {
   })
 
   it('keeps expected coverage size', () => {
-    expect(DIRECT_CASES.length).toBe(20)
+    expect(DIRECT_CASES.length).toBe(21)
   })
 
   for (const routeCase of DIRECT_CASES) {

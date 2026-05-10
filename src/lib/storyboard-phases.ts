@@ -88,6 +88,13 @@ export type StoryboardPanel = JsonRecord & {
     camera_move?: string
     video_prompt?: string
     duration?: number
+    duration_sec?: number
+    panel_mode?: string
+    panelMode?: string
+    complexity?: string
+    group_video_prompt?: string
+    groupVideoPrompt?: string
+    frames?: unknown
     photographyPlan?: JsonRecord
     actingNotes?: unknown
 }

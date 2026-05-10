@@ -1,5 +1,5 @@
 You are a senior storyboard detail refiner.
-Refine panel-level visual details and video prompts using a structured three-module format.
+Refine panel-level visual details and video prompts using a cinematic short-drama video prompt format.
 
 Panel input JSON:
 {panels_json}
@@ -27,43 +27,58 @@ Required fields per panel:
 - source_text
 - shot_type
 - camera_move
-- video_prompt (three-module Chinese format, see below)
+- video_prompt (Chinese cinematic video prompt format, see below)
 - duration (seconds, integer)
+- duration_sec (seconds, integer; same as duration)
+- panel_mode ("single" or "group")
+- group_video_prompt (Chinese video prompt for the whole panel/group)
+- frames (key image frames for this panel)
 
-【video_prompt THREE-MODULE FORMAT — MANDATORY】
+Key-frame group rules:
+- Use panel_mode="single" for simple dialogue, one stable image, or one small action. Output exactly 1 frame.
+- Use panel_mode="group" for visible action change, scene transition, spatial movement, or multi-stage emotion/action. Output 2-4 frames.
+- group duration_sec must be <= 20 seconds. single duration_sec should usually be 2-8 seconds; group duration_sec should usually be 6-20 seconds.
+- Each frame must include frame_index, frame_time_sec, frame_role, dependency_frame_ids, image_prompt, video_prompt, reference_policy.
+- frame_time_sec starts at 0, increases in playback order, and never exceeds duration_sec.
+- dependency_frame_ids may only reference earlier frame_index values. Use it to keep the next generated image consistent with the prior frame or base reference.
+- image_prompt must be a direct positive image-generation prompt and preserve character identity, clothing, scene, light, aspect, and visual style across the group.
+- The first group frame (frame_index=0, frame_time_sec=0, frame_role="hero") MUST be the original state before the video action starts: the character has not completed later actions, emotional changes, movement, fight results, or transition results.
+- The first frame image_prompt must explicitly describe before-action/original position/initial pose/initial expression and must naturally lead into later frames.
+- Every frame image_prompt must state that characters are fully and properly clothed, with clothing consistent with character settings/reference images. Do not create shirtless, semi-nude, exposed torso, missing clothing, revealing outfit, or torn-clothing exposure unless explicitly required by the source text; even then keep clothing decent.
+- group_video_prompt must describe positive visual quality, background music style, segmented timeline, camera movement, characters, actions, expressions, dialogue, and transitions. Avoid exaggerated action.
 
-video_prompt MUST be written in Chinese following this three-module structure:
+【video_prompt CINEMATIC SHORT-DRAMA FORMAT — MANDATORY】
 
-Module 1 — 【正面提示词】(Positive Prompt, REQUIRED):
-Defines the overall style, scene, characters, atmosphere for this panel. One line.
-Must include: 4K画质, scene description, character details (age+gender, clothing), shot type, visual style, 画面清晰无模糊, BGM description.
+video_prompt MUST be written in Chinese following this structure:
 
-Example:
-4K画质，室内书房场景，暖黄色台灯，1名年轻女子，扎高马尾，穿白色衬衫，氛围安静治愈，镜头以中景和近景为主，画面清晰无模糊。背景音乐为轻柔钢琴乐。
-
-Module 2 — 【时间轴提示词】(Timeline Prompt, REQUIRED):
-Precisely describes actions, dialogue, camera changes at each time point using format: AtXs: description.
-- Time starts from At0s, increments through the panel duration
-- Interval: simple actions 0.5-1s, complex actions 1-2s
-- Minimum 3 time points covering the full duration
-- Dialogue format: 说话人："内容" (use age+gender for speaker labels, e.g. 年轻女子, 中年男子)
-- Use "+" for simultaneous actions
-- Must include movement/dynamic elements, no purely static descriptions
-
-Example:【时间轴提示词】
-At0s：年轻女子从画面右侧走入，走到书桌前，抬手拉开椅子，坐下，表情放松。
-At1.5s：年轻女子伸手打开笔记本电脑，手指点击键盘，轻声说："今天也要好好加油呀。"
-At3s：镜头切换到电脑屏幕特写，年轻女子眼神专注，手指继续敲击键盘。
-At4.5s：年轻女子抬手揉了揉眼睛，身体微微后仰，对着镜头笑："写了这么久，休息一下吧。"
-
-Module 3 — 【辅助提示词】(Auxiliary Prompt, OPTIONAL):
-Supplementary sound effects, prop details, etc. Omit if not needed.
+Part 1 — Positive prompt + background music style (REQUIRED):
+Write one natural Chinese paragraph. Do NOT use a heading.
+Must include: 高清 4K or 4K, cinematic quality, scene and light, character details using age+gender, smooth camera movement, fluid character motion, vivid expression, lip-sync with dialogue, no flicker / no face collapse / no limb deformity in Chinese wording, visual tone/style, and background music style.
 
 Example:
-【辅助提示词】At1.5s：键盘敲击声轻柔，音量适中。全程BGM为轻柔钢琴乐，音量平稳。
+高清 4K，电影级质感，现代书房场景，暖黄色台灯光影柔和，氛围安静治愈，1名年轻女子扎高马尾，穿白色衬衫，人物动作流畅不僵硬，表情神态生动，口型和台词同步，无画面闪烁、无脸部崩坏、无肢体畸形，色调温暖柔和，沉浸式都市短剧质感，背景音乐为轻柔钢琴纯音乐，旋律舒缓，节奏轻柔贴合剧情，贯穿全片。
+
+Part 2 — segmented timeline (REQUIRED):
+Use time ranges such as 00:00-00:03.
+Every segment MUST include exactly these Chinese field labels:
+运镜：
+人物：
+动作：
+表情：
+台词：
+If there is no dialogue, write 台词：无台词.
+Dialogue must use age+gender speaker labels and Chinese corner brackets, for example: 年轻女子对年轻男子说：「我明白了」.
+
+Example:
+00:00-00:03
+运镜：平视中景缓缓推近，从书桌侧面推向年轻女子
+人物：年轻女子
+动作：从画面右侧走到书桌前，抬手拉开椅子坐下
+表情：神情放松，嘴角带着轻微笑意
+台词：年轻女子轻声说：「今天也要好好加油呀。」
 
 Full video_prompt example (as a single JSON string, use \n for line breaks):
-"4K画质，现代书房场景，暖黄色台灯，1名年轻女子，扎高马尾，穿白色衬衫，氛围安静治愈，镜头以中景和近景为主，画面清晰无模糊。全程BGM为轻柔钢琴乐，音量平稳，无中途切换或突变。\n\n At0s：年轻女子从画面右侧走入，走到书桌前，抬手拉开椅子，坐下，表情放松。\nAt1.5s：年轻女子伸手打开笔记本电脑，手指点击键盘，轻声说：\u201c今天也要好好加油呀。\u201d\nAt3s：镜头切换到电脑屏幕特写，年轻女子眼神专注，手指继续敲击键盘。\nAt4.5s：年轻女子抬手揉了揉眼睛，身体微微后仰，对着镜头笑：\u201c写了这么久，休息一下吧。\u201d\nAt6s：年轻女子起身，拿起桌上的温水杯，拧开瓶盖喝了一口，放下水杯。\n\n【辅助提示词】At1.5s：键盘敲击声轻柔，音量适中。"
+"高清 4K，电影级质感，现代书房场景，暖黄色台灯光影柔和，氛围安静治愈，1名年轻女子扎高马尾，穿白色衬衫，人物动作流畅不僵硬，表情神态生动，口型和台词同步，无画面闪烁、无脸部崩坏、无肢体畸形，色调温暖柔和，沉浸式都市短剧质感，背景音乐为轻柔钢琴纯音乐，旋律舒缓，节奏轻柔贴合剧情，贯穿全片。\n\n00:00-00:03\n运镜：平视中景缓缓推近，从书桌侧面推向年轻女子\n人物：年轻女子\n动作：从画面右侧走到书桌前，抬手拉开椅子坐下\n表情：神情放松，嘴角带着轻微笑意\n台词：年轻女子轻声说：「今天也要好好加油呀。」"
 
 Output schema example (field names must be preserved):
 [
@@ -76,25 +91,41 @@ Output schema example (field names must be preserved):
     "source_text": "source text excerpt",
     "shot_type": "medium shot",
     "camera_move": "static",
-    "video_prompt": "motion-ready prompt",
     "duration": 3,
-    "video_prompt": "4K画质，现代书房场景，暖黄色台灯，1名年轻女子，扎高马尾，穿白色衬衫，氛围安静治愈，镜头以中景和近景为主，画面清晰无模糊。全程BGM：轻柔钢琴乐，音量平稳，无中途切换或突变。\n\n At0s：年轻女子从画面右侧走入，走到书桌前，抬手拉开椅子，坐下，表情放松，镜头缓缓推近。\nAt1.5s：年轻女子伸手打开笔记本电脑，手指点击键盘，轻声说："今天也要好好加油呀。"\nAt3s：镜头切换到电脑屏幕特写，年轻女子眼神专注，手指继续敲击键盘。\nAt4.5s：年轻女子抬手揉了揉眼睛，身体微微后仰，对着镜头笑："写了这么久，休息一下吧。"\nAt6s：年轻女子起身，拿起桌上的温水杯，拧开瓶盖喝了一口，放下水杯。\n\n【辅助提示词】At1.5s：键盘敲击声轻柔，音量适中。",
+    "duration_sec": 3,
+    "panel_mode": "single",
+    "group_video_prompt": "高清 4K，电影级质感，现代书房场景，暖黄色台灯光影柔和，1名年轻女子扎高马尾，穿白色衬衫，人物动作流畅不僵硬，表情神态生动，口型和台词同步，无画面闪烁、无脸部崩坏、无肢体畸形，背景音乐为轻柔钢琴纯音乐，旋律舒缓，节奏轻柔贴合剧情，贯穿全片。\n\n00:00-00:03\n运镜：平视中景缓缓推近\n人物：年轻女子\n动作：走到书桌前坐下并打开电脑\n表情：神情放松\n台词：年轻女子轻声说：「今天也要好好加油呀。」",
+    "frames": [
+      {
+        "frame_index": 0,
+        "frame_time_sec": 0,
+        "frame_role": "hero",
+        "dependency_frame_ids": [],
+        "image_prompt": "4K画质，现代书房场景，暖黄色台灯，年轻女子扎高马尾穿白色衬衫，坐在书桌前打开笔记本电脑，神情放松，平视中景，画面清晰无模糊。",
+        "video_prompt": "00:00-00:03 运镜平视中景缓缓推近，年轻女子走到书桌前坐下并打开电脑，神情放松，轻声说「今天也要好好加油呀」。",
+        "reference_policy": {"character_consistency": "保持发型、服饰、五官一致", "scene_consistency": "保持书房与暖黄色台灯光线一致"}
+      }
+    ],
+    "video_prompt": "高清 4K，电影级质感，现代书房场景，暖黄色台灯光影柔和，氛围安静治愈，1名年轻女子扎高马尾，穿白色衬衫，人物动作流畅不僵硬，表情神态生动，口型和台词同步，无画面闪烁、无脸部崩坏、无肢体畸形，色调温暖柔和，沉浸式都市短剧质感，背景音乐为轻柔钢琴纯音乐，旋律舒缓，节奏轻柔贴合剧情，贯穿全片。\n\n00:00-00:03\n运镜：平视中景缓缓推近，从书桌侧面推向年轻女子\n人物：年轻女子\n动作：从画面右侧走到书桌前，抬手拉开椅子坐下\n表情：神情放松，嘴角带着轻微笑意\n台词：年轻女子轻声说：「今天也要好好加油呀。」",
   }
 ]
 
 Rules:
 1. Keep panel order unchanged.
 2. Keep source_text semantically aligned with input; do not rewrite story meaning.
-3. video_prompt MUST follow the three-module Chinese format: 【正面提示词】 + 【时间轴提示词】 + optional 【辅助提示词】.
+3. video_prompt MUST follow the Chinese cinematic short-drama format: first paragraph is positive prompt + background music style, followed by segmented timeline ranges such as 00:00-00:03.
 4. Use age+gender wording (e.g. 年轻女子, 中年男子) for character references in video_prompt — NO character names.
 5. Preserve every input `slot` when the character is stably positioned, and reflect it as a preferred anchor.
 6. `slot` is not an absolute boundary. If the shot is clearly about movement, entry/exit, path traversal, transition space, temporary space, empty space, imagination, dream, memory, or abstract/non-literal space, you may remove `slot` or keep it without forcing a rigid static match.
 7. When no `slot` is used, decide placement freely from source text, action flow, spatial logic, and cinematic staging.
 8. Do not shorten, rewrite, summarize, or replace a provided `slot` phrase with a short token.
 9. Return JSON array only. No markdown, no code fences, no explanatory text.
-10. ⚠️ JSON SAFETY: All English double quotes inside video_prompt string values MUST use Chinese corner brackets「」instead. Use \n for line breaks within video_prompt strings. The video_prompt value starts with 【正面提示词】.
+10. ⚠️ JSON SAFETY: All English double quotes inside video_prompt string values MUST use Chinese corner brackets「」instead. Use \n for line breaks within video_prompt strings. The video_prompt value must start with 高清 4K or 4K, must include 背景音乐为, and must include at least one time range like 00:00-00:03.
 11. shot_type format: perspective + shot size (e.g. "平视中景", "仰拍全景").
-12. video_prompt must NOT contain any English letters, pinyin, or abbreviations (except "At" for timeline markers). All content must be Chinese.
-13. Timeline prompts must contain dynamic elements — no purely static descriptions.
+12. video_prompt must NOT contain English letters, pinyin, or abbreviations. All content must be Chinese.
+13. Every timeline segment must include 运镜、人物、动作、表情、台词 and contain dynamic elements.
 14. Dialogue must have speaker labels using age+gender, never character names.
 15. duration range: 2-8 seconds, integer. Dialogue/micro-actions 3-7s, major actions 4-8s, close-ups 2-4s.
+16. For group panels, duration_sec must be <= 20 seconds and frames count must be 2-4.
+17. For single panels, frames count must be exactly 1.
+18. Every frame image_prompt must be suitable for direct image generation and keep group visual continuity.

@@ -96,6 +96,17 @@ async function attachMediaFieldsToPanel<T extends Record<string, unknown>>(panel
   const lipSyncVideoMedia = await resolveMediaRef(panel.lipSyncVideoMediaId, panel.lipSyncVideoUrl)
   const sketchImageMedia = await resolveMediaRef(panel.sketchImageMediaId, panel.sketchImageUrl)
   const previousImageMedia = await resolveMediaRef(panel.previousImageMediaId, panel.previousImageUrl)
+  const frames = await Promise.all(
+    ((panel.frames as Array<Record<string, unknown>>) || []).map(async (frame) => {
+      const frameImageMedia = await resolveMediaRef(frame.imageMediaId, frame.imageUrl)
+      return {
+        ...frame,
+        media: frameImageMedia,
+        imageMedia: frameImageMedia,
+        imageUrl: frameImageMedia?.url || frame.imageUrl || null,
+      }
+    }),
+  )
 
   const candidateRaw = parseStringArray(panel.candidateImages)
   const candidateMediaUrls: string[] = []
@@ -122,6 +133,7 @@ async function attachMediaFieldsToPanel<T extends Record<string, unknown>>(panel
     sketchImageUrl: sketchImageMedia?.url || panel.sketchImageUrl || null,
     previousImageUrl: previousImageMedia?.url || panel.previousImageUrl || null,
     candidateImages: candidateRaw.length > 0 ? JSON.stringify(candidateMediaUrls) : panel.candidateImages,
+    frames,
   }
 }
 

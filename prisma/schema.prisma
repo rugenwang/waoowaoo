@@ -200,6 +200,10 @@ model NovelPromotionPanel {
   srtStart          Float?
   srtEnd            Float?
   duration          Float?
+  panelMode         String?                   @default("single") @db.VarChar(32)
+  groupDurationSec  Float?
+  groupVideoPrompt  String?                   @db.Text
+  groupPlanJson     String?                   @db.Text
   imagePrompt       String?                   @db.Text
   imageUrl          String?                   @db.Text
   imageMediaId      String?
@@ -229,6 +233,7 @@ model NovelPromotionPanel {
   previousImageMediaId String?
   previousImageMedia MediaObject?             @relation("NovelPromotionPanelPreviousImageMedia", fields: [previousImageMediaId], references: [id], onDelete: SetNull)
   storyboard        NovelPromotionStoryboard  @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  frames            NovelPromotionPanelFrame[]
   matchedVoiceLines NovelPromotionVoiceLine[]
 
   @@unique([storyboardId, panelIndex])
@@ -239,6 +244,32 @@ model NovelPromotionPanel {
   @@index([sketchImageMediaId])
   @@index([previousImageMediaId])
   @@map("novel_promotion_panels")
+}
+
+model NovelPromotionPanelFrame {
+  id                 String                @id @default(uuid())
+  panelId            String
+  frameIndex         Int
+  frameTimeSec       Float
+  frameRole          String?               @db.Text
+  dependencyFrameIds String?               @db.Text
+  imagePrompt        String?               @db.Text
+  videoPrompt        String?               @db.Text
+  promptJson         String?               @db.Text
+  referencePolicy    String?               @db.Text
+  imageUrl           String?               @db.Text
+  imageMediaId       String?
+  imageMedia         MediaObject?          @relation("NovelPromotionPanelFrameImageMedia", fields: [imageMediaId], references: [id], onDelete: SetNull)
+  generationStatus   String?               @db.Text
+  errorMessage       String?               @db.Text
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @default(now()) @updatedAt
+  panel              NovelPromotionPanel   @relation(fields: [panelId], references: [id], onDelete: Cascade)
+
+  @@unique([panelId, frameIndex])
+  @@index([panelId])
+  @@index([imageMediaId])
+  @@map("novel_promotion_panel_frames")
 }
 
 model NovelPromotionProject {
@@ -991,6 +1022,7 @@ model MediaObject {
   novelPromotionPanelLipSyncVideos      NovelPromotionPanel[]       @relation("NovelPromotionPanelLipSyncVideoMedia")
   novelPromotionPanelSketchImages       NovelPromotionPanel[]       @relation("NovelPromotionPanelSketchMedia")
   novelPromotionPanelPreviousImages     NovelPromotionPanel[]       @relation("NovelPromotionPanelPreviousImageMedia")
+  novelPromotionPanelFrameImages        NovelPromotionPanelFrame[]  @relation("NovelPromotionPanelFrameImageMedia")
   novelPromotionShotImages              NovelPromotionShot[]        @relation("NovelPromotionShotImageMedia")
   supplementaryPanelImages              SupplementaryPanel[]        @relation("SupplementaryPanelImageMedia")
   novelPromotionVoiceLineAudios         NovelPromotionVoiceLine[]   @relation("NovelPromotionVoiceLineAudioMedia")

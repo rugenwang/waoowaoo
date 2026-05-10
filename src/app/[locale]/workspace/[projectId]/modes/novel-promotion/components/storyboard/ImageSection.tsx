@@ -78,7 +78,11 @@ export default function ImageSection({
     { targetType: 'NovelPromotionPanel', targetId: panelId, types: ['image_panel'] },
   ])
   const taskState = taskStateMap.getState('NovelPromotionPanel', panelId)
-  const canCancel = !!taskState?.runningTaskId && (taskState.phase === 'queued' || taskState.phase === 'processing')
+  const runningTaskId = taskState?.runningTaskId || null
+  const canCancel =
+    !!runningTaskId &&
+    !runningTaskId.startsWith('optimistic:') &&
+    (taskState?.phase === 'queued' || taskState?.phase === 'processing')
 
   const triggerPulse = () => {
     setIsTaskPulseAnimating(true)
@@ -207,7 +211,7 @@ export default function ImageSection({
           {canCancel && (
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); cancelTask.mutate(taskState!.runningTaskId!) }}
+              onClick={(e) => { e.stopPropagation(); cancelTask.mutate(runningTaskId!) }}
               disabled={cancelTask.isPending}
               className="glass-btn-base glass-btn-tone-danger h-6 w-6 rounded-md"
               title="取消任务"

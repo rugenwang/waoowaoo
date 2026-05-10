@@ -102,4 +102,36 @@ describe('task-target-overlay', () => {
     const overlay = getOverlay(queryClient, projectId, key)
     expect(overlay).toBeNull()
   })
+
+  it('clears optimistic overlay on completed event from the real taskId', () => {
+    const queryClient = new QueryClient()
+    const projectId = 'project-1'
+    const key = 'NovelPromotionPanel:panel-4'
+
+    upsertTaskTargetOverlay(queryClient, {
+      projectId,
+      targetType: 'NovelPromotionPanel',
+      targetId: 'panel-4',
+      runningTaskType: 'image_panel',
+      intent: 'generate',
+    })
+
+    applyTaskLifecycleToOverlay(queryClient, {
+      projectId,
+      lifecycleType: TASK_EVENT_TYPE.COMPLETED,
+      targetType: 'NovelPromotionPanel',
+      targetId: 'panel-4',
+      taskId: 'task-real-4',
+      taskType: 'image_panel',
+      intent: 'generate',
+      hasOutputAtStart: null,
+      progress: 100,
+      stage: null,
+      stageLabel: null,
+      eventTs: new Date().toISOString(),
+    })
+
+    const overlay = getOverlay(queryClient, projectId, key)
+    expect(overlay).toBeNull()
+  })
 })

@@ -44,6 +44,20 @@ export function useRegenerateProjectPanelImage(projectId: string) {
                 intent: 'regenerate',
             })
         },
+        onSuccess: (data, { panelId }) => {
+            const result = data as { async?: boolean; taskId?: unknown; status?: unknown }
+            const taskId = typeof result?.taskId === 'string' ? result.taskId.trim() : ''
+            if (!result?.async || !taskId) return
+            upsertTaskTargetOverlay(queryClient, {
+                projectId,
+                targetType: 'NovelPromotionPanel',
+                targetId: panelId,
+                phase: result.status === 'processing' ? 'processing' : 'queued',
+                runningTaskId: taskId,
+                runningTaskType: 'image_panel',
+                intent: 'regenerate',
+            })
+        },
         onError: (_error, { panelId }) => {
             clearTaskTargetOverlay(queryClient, {
                 projectId,
@@ -75,6 +89,82 @@ export function useUploadProjectPanelImage(projectId: string) {
                 method: 'POST',
                 body: formData,
             }, '上传分镜图失败')
+        },
+        onSettled: () => {
+            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+        },
+    })
+}
+
+export function useUploadProjectPanelFrameImage(projectId: string) {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: async ({
+            file,
+            frameId,
+        }: {
+            file: File
+            frameId: string
+        }) => {
+            const formData = new FormData()
+            formData.append('file', file)
+            formData.append('frameId', frameId)
+
+            return await requestJsonWithError(`/api/novel-promotion/${projectId}/upload-panel-frame-image`, {
+                method: 'POST',
+                body: formData,
+            }, '上传关键帧图片失败')
+        },
+        onSettled: () => {
+            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+        },
+    })
+}
+
+export function useRegenerateProjectPanelFrameImage(projectId: string) {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: async ({
+            panelId,
+            frameId,
+        }: {
+            panelId: string
+            frameId: string
+        }) => {
+            return await requestJsonWithError(`/api/novel-promotion/${projectId}/regenerate-panel-frame-image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ panelId, frameId, count: 1 }),
+            }, '重新生成关键帧失败')
+        },
+        onMutate: ({ panelId }) => {
+            upsertTaskTargetOverlay(queryClient, {
+                projectId,
+                targetType: 'NovelPromotionPanel',
+                targetId: panelId,
+                intent: 'regenerate',
+            })
+        },
+        onSuccess: (data, { panelId }) => {
+            const result = data as { async?: boolean; taskId?: unknown; status?: unknown }
+            const taskId = typeof result?.taskId === 'string' ? result.taskId.trim() : ''
+            if (!result?.async || !taskId) return
+            upsertTaskTargetOverlay(queryClient, {
+                projectId,
+                targetType: 'NovelPromotionPanel',
+                targetId: panelId,
+                phase: result.status === 'processing' ? 'processing' : 'queued',
+                runningTaskId: taskId,
+                runningTaskType: 'image_panel',
+                intent: 'regenerate',
+            })
+        },
+        onError: (_error, { panelId }) => {
+            clearTaskTargetOverlay(queryClient, {
+                projectId,
+                targetType: 'NovelPromotionPanel',
+                targetId: panelId,
+            })
         },
         onSettled: () => {
             invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])

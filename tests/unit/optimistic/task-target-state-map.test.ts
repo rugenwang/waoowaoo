@@ -190,7 +190,7 @@ describe('task target state map behavior', () => {
     expect(state?.runningTaskType).toBe('VIDEO_PANEL')
   })
 
-  it('allows active overlay to override completed state even with timestamp skew', async () => {
+  it('keeps newer completed server state over stale active overlay', async () => {
     runtime.apiStates = [
       {
         targetType: 'NovelPromotionPanel',
@@ -232,9 +232,55 @@ describe('task target state map behavior', () => {
     ])
 
     const state = result.getState('NovelPromotionPanel', 'panel-3')
-    expect(state?.phase).toBe('queued')
-    expect(state?.runningTaskId).toBe('task-overlay-old')
-    expect(state?.runningTaskType).toBe('VIDEO_PANEL')
+    expect(state?.phase).toBe('completed')
+    expect(state?.runningTaskId).toBeNull()
+    expect(state?.runningTaskType).toBeNull()
+  })
+
+  it('ignores stale optimistic overlay when server has no active task', async () => {
+    runtime.apiStates = [
+      {
+        targetType: 'NovelPromotionPanel',
+        targetId: 'panel-5',
+        phase: 'idle',
+        runningTaskId: null,
+        runningTaskType: null,
+        intent: 'process',
+        hasOutputAtStart: null,
+        progress: null,
+        stage: null,
+        stageLabel: null,
+        lastError: null,
+        updatedAt: null,
+      },
+    ]
+    runtime.overlayStates = {
+      'NovelPromotionPanel:panel-5': {
+        targetType: 'NovelPromotionPanel',
+        targetId: 'panel-5',
+        phase: 'queued',
+        runningTaskId: 'optimistic:NovelPromotionPanel:panel-5:old',
+        runningTaskType: 'IMAGE_PANEL',
+        intent: 'regenerate',
+        hasOutputAtStart: false,
+        progress: null,
+        stage: null,
+        stageLabel: null,
+        updatedAt: new Date(Date.now() - 31_000).toISOString(),
+        lastError: null,
+        expiresAt: Date.now() + 30_000,
+      },
+    }
+
+    const { useTaskTargetStateMap } = await import('@/lib/query/hooks/useTaskTargetStateMap')
+
+    const result = useTaskTargetStateMap('project-1', [
+      { targetType: 'NovelPromotionPanel', targetId: 'panel-5', types: ['IMAGE_PANEL'] },
+    ])
+
+    const state = result.getState('NovelPromotionPanel', 'panel-5')
+    expect(state?.phase).toBe('idle')
+    expect(state?.runningTaskId).toBeNull()
   })
 
   it('matches task type whitelist case-insensitively', async () => {

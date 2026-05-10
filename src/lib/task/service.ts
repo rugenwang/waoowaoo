@@ -426,6 +426,16 @@ export async function trySetTaskExternalId(taskId: string, externalId: string) {
   return result.count > 0
 }
 
+export async function clearTaskExternalId(taskId: string) {
+  const result = await taskModel.updateMany({
+    where: activeTaskWhere(taskId),
+    data: {
+      externalId: null,
+    },
+  })
+  return result.count > 0
+}
+
 export async function touchTaskHeartbeat(taskId: string) {
   const result = await taskModel.updateMany({
     where: activeTaskWhere(taskId),

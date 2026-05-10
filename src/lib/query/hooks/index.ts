@@ -118,6 +118,8 @@ export {
     useUpdateProjectPanelVideoPrompt,
     useRegenerateProjectPanelImage,
     useUploadProjectPanelImage,
+    useUploadProjectPanelFrameImage,
+    useRegenerateProjectPanelFrameImage,
     useModifyProjectStoryboardImage,
     useDownloadProjectImages,
     useUpdateProjectPanel,

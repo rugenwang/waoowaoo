@@ -29,7 +29,7 @@ Output format (single JSON object only):
   "source_text": "source text or transition shot",
   "shot_type": "shot type",
   "camera_move": "camera movement",
-  "video_prompt": "video prompt",
+  "video_prompt": "Chinese cinematic video prompt",
   "duration": 3
 }
 
@@ -42,3 +42,8 @@ Rules:
 6. If `slot` is used, it must copy one full placement phrase from the available slots list verbatim. Do not shorten or rename it.
 7. JSON only, no markdown.
 8. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.
+9. video_prompt MUST be Chinese and follow this format:
+   - First paragraph starts with 高清 4K or 4K and contains positive visual quality, scene lighting, character details, smooth motion, vivid expression, lip-sync with dialogue, no flicker / no face collapse / no limb deformity in Chinese wording, visual tone, and background music style.
+   - Then use segmented time ranges such as 00:00-00:03.
+   - Every segment must include these labels: 运镜：人物：动作：表情：台词：
+   - Use age+gender labels instead of character names inside video_prompt.

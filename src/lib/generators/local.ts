@@ -25,6 +25,12 @@ type LocalVideoOptions = {
   random_seed?: boolean
   generationMode?: 'normal' | 'firstlastframe'
   lastFrameImageUrl?: string
+  keyframes?: Array<{
+    imageUrl?: string
+    image?: string
+    frameTimeSec?: number
+    frameIndex?: number
+  }>
 }
 
 function requireBaseUrl(baseUrl: string | undefined, providerId: string): string {
@@ -169,15 +175,48 @@ export class LocalVideoGenerator extends BaseVideoGenerator {
     // 只要存在 lastFrameImageUrl，就视为首尾帧模式。
     const isFirstLastFrame = typeof opt.lastFrameImageUrl === 'string' && opt.lastFrameImageUrl.trim().length > 0
     const keyframes = await (async () => {
+      const seconds = typeof duration === 'number' ? duration : 4
+      const f = typeof fps === 'number' ? fps : 24
+      const frameCount = calcFrames(seconds, f)
+      const lastIdx = Math.max(0, frameCount - 1)
+
+      if (Array.isArray(opt.keyframes) && opt.keyframes.length > 0) {
+        const rows = opt.keyframes
+          .map((item, index) => {
+            const image = typeof item?.imageUrl === 'string' && item.imageUrl.trim()
+              ? item.imageUrl.trim()
+              : typeof item?.image === 'string' && item.image.trim()
+                ? item.image.trim()
+                : ''
+            if (!image) return null
+            const rawFrameIndex = typeof item.frameIndex === 'number' && Number.isFinite(item.frameIndex)
+              ? item.frameIndex
+              : typeof item.frameTimeSec === 'number' && Number.isFinite(item.frameTimeSec)
+                ? Math.round(item.frameTimeSec * f)
+                : index === 0
+                  ? 0
+                  : Math.round((index / Math.max(1, opt.keyframes!.length - 1)) * lastIdx)
+            return {
+              image,
+              frame_index: Math.max(0, Math.min(lastIdx, Math.round(rawFrameIndex))),
+            }
+          })
+          .filter((item): item is { image: string; frame_index: number } => item !== null)
+          .sort((left, right) => left.frame_index - right.frame_index)
+
+        if (rows.length > 0) {
+          return await Promise.all(rows.map(async (row, index) => ({
+            image: await normalizeToBase64ForGeneration(row.image),
+            frame_index: index === 0 ? 0 : row.frame_index,
+          })))
+        }
+      }
+
       if (!isFirstLastFrame) {
         return [{ image: cover, frame_index: 0 }]
       }
 
       const lastFrame = await normalizeToBase64ForGeneration(opt.lastFrameImageUrl as string)
-      const seconds = typeof duration === 'number' ? duration : 4
-      const f = typeof fps === 'number' ? fps : 24
-      const frames = calcFrames(seconds, f)
-      const lastIdx = Math.max(0, frames - 1)
       return [
         { image: cover, frame_index: 0 },
         { image: lastFrame, frame_index: lastIdx },

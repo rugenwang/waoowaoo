@@ -8,6 +8,7 @@ import {
   assertTaskActive,
   getProjectModels,
   resolveImageSourceFromGeneration,
+  toSignedUrlIfCos,
   uploadImageSourceToCos,
 } from '../utils'
 import { normalizeReferenceImagesForGeneration } from '@/lib/media/outbound-image'
@@ -26,9 +27,20 @@ import {
 } from '@/lib/location-available-slots'
 import { executeAiTextStep } from '@/lib/ai-runtime/client'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
+import { clearTaskExternalId } from '@/lib/task/service'
 
 type PromptRecord = Record<string, unknown>
 type PromptCharacter = { name?: unknown; appearance?: unknown; slot?: unknown }
+type PanelFrameForGeneration = {
+  id: string
+  frameIndex: number
+  frameTimeSec: number
+  frameRole: string | null
+  dependencyFrameIds: string | null
+  imagePrompt: string | null
+  videoPrompt: string | null
+  imageUrl?: string | null
+}
 
 function parseJsonUnknown(raw: string | null | undefined): unknown | null {
   if (!raw) return null
@@ -171,8 +183,8 @@ export function buildPanelStructuredPrompt(params: {
   const shotType = String(params.context.panel.shot_type || '').trim()
   const cameraMove = String(params.context.panel.camera_move || '').trim()
   const description = String(params.context.panel.description || '').trim()
+  const imagePrompt = String(params.context.panel.image_prompt || '').trim()
   const location = String(params.context.panel.location || '').trim()
-  const videoPrompt = String(params.context.panel.video_prompt || '').trim()
 
   const characterLines = (() => {
     const chars = Array.isArray(params.context.panel.characters)
@@ -251,13 +263,14 @@ export function buildPanelStructuredPrompt(params: {
     const parts = [
       `Aspect ratio: ${params.aspectRatio}`,
       shotType || cameraMove ? `Shot: ${[shotType, cameraMove].filter(Boolean).join(', ')}` : '',
+      imagePrompt ? `Static image prompt: ${imagePrompt}` : '',
       description ? `Description: ${description}` : '',
       location ? `Location: ${location}` : '',
       characterLines,
       actingText,
       photographyText,
-      videoPrompt ? `Additional prompt: ${videoPrompt}` : '',
       params.styleText ? `Style: ${params.styleText}` : '',
+      'Generate one still image only. Do not depict camera movement, timeline segments, subtitles, dialogue text, music, or multiple action moments.',
     ].filter(Boolean)
     return parts.join('\n')
   }
@@ -265,13 +278,14 @@ export function buildPanelStructuredPrompt(params: {
   const parts = [
     `画面比例：${params.aspectRatio}`,
     shotType || cameraMove ? `镜头：${[shotType, cameraMove].filter(Boolean).join('，')}` : '',
+    imagePrompt ? `静态生图提示：${imagePrompt}` : '',
     description ? `画面描述：${description}` : '',
     location ? `场景：${location}` : '',
     characterLines,
     actingText,
     photographyText,
-    videoPrompt ? `补充提示：${videoPrompt}` : '',
     params.styleText ? `风格：${params.styleText}` : '',
+    '只生成一张静态镜头图。不要画运镜、时间轴、字幕、台词文字、背景音乐或多个连续动作瞬间。',
   ].filter(Boolean)
   return parts.join('\n')
 }
@@ -285,6 +299,59 @@ function buildPanelDescriptionPrompt(params: {
   if (!clean) return ''
   // 直接用画面描述作为 prompt，风格放末尾（与其他生图链路保持一致）
   return params.styleText ? `${clean}，${params.styleText}` : clean
+}
+
+function parseDependencyFrameIds(raw: string | null | undefined): number[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((item) => {
+        const value = typeof item === 'number' ? item : typeof item === 'string' ? Number(item) : NaN
+        return Number.isFinite(value) ? Math.floor(value) : null
+      })
+      .filter((item): item is number => item !== null && item >= 0)
+  } catch {
+    return []
+  }
+}
+
+function buildPanelFramePrompt(params: {
+  locale: TaskJobData['locale']
+  aspectRatio: string
+  styleText: string
+  frame: PanelFrameForGeneration
+  panelDescription: string | null
+  groupVideoPrompt: string | null
+  hardConstraints: string
+}) {
+  const framePrompt = String(params.frame.imagePrompt || params.panelDescription || '').trim()
+  const motionPrompt = String(params.frame.videoPrompt || '').trim()
+  const lines = params.locale === 'en'
+    ? [
+      `Aspect ratio: ${params.aspectRatio}`,
+      framePrompt ? `Key frame image prompt: ${framePrompt}` : '',
+      `Frame time: ${params.frame.frameTimeSec}s`,
+      params.frame.frameRole ? `Frame role: ${params.frame.frameRole}` : '',
+      params.frame.frameIndex === 0 ? 'This is the opening keyframe: show the original state before any later action, movement, emotional change, fight result, or transition result.' : '',
+      motionPrompt ? `Continuity note for this still frame only: ${motionPrompt}` : '',
+      params.styleText ? `Style: ${params.styleText}` : '',
+      'Generate exactly one still image for this key frame. Keep visual continuity with reference images. Do not depict camera movement, timeline segments, dialogue text, music, or multiple action moments.',
+      params.hardConstraints,
+    ]
+    : [
+      `画面比例：${params.aspectRatio}`,
+      framePrompt ? `关键帧生图提示：${framePrompt}` : '',
+      `所在秒点：${params.frame.frameTimeSec}s`,
+      params.frame.frameRole ? `关键帧角色：${params.frame.frameRole}` : '',
+      params.frame.frameIndex === 0 ? '这是开头关键帧：必须表现后续动作发生前的原始状态，人物尚未完成移动、转身、打斗、情绪变化或事件结果。' : '',
+      motionPrompt ? `本帧静态衔接提示：${motionPrompt}` : '',
+      params.styleText ? `风格：${params.styleText}` : '',
+      '只生成这一秒点的一张静态关键帧图，必须与参考图保持人物、服饰、场景、光线和画风连贯。不要画运镜、时间轴、字幕、台词文字、背景音乐或多个连续动作瞬间。',
+      params.hardConstraints,
+    ]
+  return lines.filter(Boolean).join('\n')
 }
 
 export function buildStoryboardHardConstraints(params: {
@@ -303,6 +370,7 @@ export function buildStoryboardHardConstraints(params: {
       '- No text in image (no subtitles/labels/numbers/watermarks/symbols).',
       '- Output exactly ONE frame (no collage / no multi-panel).',
       '- Do NOT include duplicated identical characters (no clones of the same person with identical appearance in the same frame).',
+      '- Characters must be fully and properly clothed, consistent with their reference outfit; no shirtless, semi-nude, exposed torso, revealing outfit, missing clothing, or torn-clothing exposure.',
       ratio ? `- Aspect ratio must be EXACT: ${ratio}.` : null,
       hasRefs ? '- Match the reference images for identity/style/composition; do NOT draw any text from references.' : null,
       style ? `- Keep visual style consistent: ${style}.` : null,
@@ -314,6 +382,7 @@ export function buildStoryboardHardConstraints(params: {
     '- 画面中绝对禁止出现任何文字（字幕/标签/编号/水印/符号）。',
     '- 只生成一张镜头画面（禁止拼图/多镜头/多格）。',
     '- 禁止在同一个镜头中出现“形象完全一样的人”（禁止克隆同一人物外貌/服装/发型完全一致的多个个体）。',
+    '- 人物必须衣着完整、服饰得体，并与角色参考图/设定服装一致；禁止半裸、裸露上身、暴露服装、缺少衣服、衣物破损导致裸露。',
     ratio ? `- 画面比例必须严格为：${ratio}` : null,
     hasRefs ? '- 有参考图时：外貌/风格/构图需与参考图一致；参考图上的文字标签仅供识别，禁止画入图中。' : null,
     style ? `- 风格必须与参考一致：${style}` : null,
@@ -333,10 +402,14 @@ export function cleanupRefinedPrompt(raw: string): string {
 export async function handlePanelImageTask(job: Job<TaskJobData>) {
   const payload = (job.data.payload || {}) as AnyObj
   const panelId = pickFirstString(payload.panelId, job.data.targetId)
+  const targetFrameId = pickFirstString(payload.targetFrameId, payload.frameId)
   if (!panelId) throw new Error('panelId missing')
 
   const panel = await prisma.novelPromotionPanel.findUnique({
     where: { id: panelId },
+    include: {
+      frames: { orderBy: { frameIndex: 'asc' } },
+    },
   })
 
   if (!panel) throw new Error('Panel not found')
@@ -518,6 +591,171 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     })
     : ''
 
+  const sortedFrames = Array.isArray(panel.frames)
+    ? [...panel.frames].sort((left, right) => left.frameIndex - right.frameIndex)
+    : []
+  const isPanelGroup = panel.panelMode === 'group' || sortedFrames.length > 1
+  if (isPanelGroup && sortedFrames.length > 1) {
+    const generatedByFrameIndex = new Map<number, string>()
+    const generatedUrls: string[] = []
+    const targetFrame = targetFrameId
+      ? sortedFrames.find((frame) => frame.id === targetFrameId)
+      : null
+    if (targetFrameId && !targetFrame) {
+      throw new Error('Target frame not found')
+    }
+    const existingGeneratedFrames = sortedFrames.filter((frame) => {
+      if (targetFrameId && frame.id === targetFrameId) return false
+      return typeof frame.imageUrl === 'string' && frame.imageUrl.trim()
+    })
+    const shouldResumePartialGroup =
+      !targetFrameId &&
+      existingGeneratedFrames.length > 0 &&
+      existingGeneratedFrames.length < sortedFrames.length
+
+    for (const frame of existingGeneratedFrames) {
+      generatedByFrameIndex.set(frame.frameIndex, frame.imageUrl!)
+      if (!targetFrameId) generatedUrls.push(frame.imageUrl!)
+    }
+
+    if (shouldResumePartialGroup) {
+      const existingRepresentativeImageUrl = sortedFrames[0]?.imageUrl || existingGeneratedFrames[0]?.imageUrl || null
+      if (existingRepresentativeImageUrl && panel.imageUrl !== existingRepresentativeImageUrl) {
+        await prisma.novelPromotionPanel.update({
+          where: { id: panel.id },
+          data: {
+            imageUrl: existingRepresentativeImageUrl,
+            candidateImages: null,
+          },
+        })
+      }
+    }
+
+    const framesToGenerate = targetFrame
+      ? [targetFrame]
+      : sortedFrames.filter((frame) => !(shouldResumePartialGroup && frame.imageUrl))
+
+    for (const frame of targetFrame ? framesToGenerate : []) {
+      for (const dependencyIndex of parseDependencyFrameIds(frame.dependencyFrameIds)) {
+        if (!generatedByFrameIndex.get(dependencyIndex)) {
+          throw new Error(`请先生成关联帧 F${dependencyIndex + 1}，再重新生成 F${frame.frameIndex + 1}`)
+        }
+      }
+    }
+
+    for (let i = 0; i < framesToGenerate.length; i += 1) {
+      const frame = framesToGenerate[i] as PanelFrameForGeneration
+      await reportTaskProgress(job, 12 + Math.floor((i / Math.max(sortedFrames.length, 1)) * 74), {
+        stage: 'generate_panel_candidate',
+        candidateIndex: i,
+        frameIndex: frame.frameIndex,
+      })
+      await prisma.novelPromotionPanelFrame.update({
+        where: { id: frame.id },
+        data: {
+          generationStatus: 'processing',
+          errorMessage: null,
+        },
+      })
+
+      const dependencyUrls = parseDependencyFrameIds(frame.dependencyFrameIds)
+        .map((dependencyIndex) => generatedByFrameIndex.get(dependencyIndex))
+        .filter((value): value is string => Boolean(value))
+        .map((value) => toSignedUrlIfCos(value, 3600))
+        .filter((value): value is string => Boolean(value))
+      const normalizedFrameRefs = dependencyUrls.length > 0
+        ? [
+          ...normalizedRefs,
+          ...await normalizeReferenceImagesForGeneration(dependencyUrls),
+        ]
+        : normalizedRefs
+      const framePrompt = prependAnimeStyleLabel({
+        prompt: buildPanelFramePrompt({
+          locale: job.data.locale,
+          aspectRatio,
+          styleText: artStyle || '',
+          frame,
+          panelDescription: panel.description,
+          groupVideoPrompt: panel.groupVideoPrompt || panel.videoPrompt,
+          hardConstraints: buildStoryboardHardConstraints({
+            locale: job.data.locale,
+            aspectRatio,
+            styleText: artStyle || '',
+            referenceImagesCount: normalizedFrameRefs.length,
+          }),
+        }),
+        artStyle: modelConfig.artStyle,
+        locale: job.data.locale === 'en' ? 'en' : 'zh',
+      })
+
+      try {
+        await clearTaskExternalId(job.data.taskId)
+        const source = await resolveImageSourceFromGeneration(job, {
+          userId: job.data.userId,
+          modelId: modelKey,
+          prompt: framePrompt,
+          options: {
+            referenceImages: normalizedFrameRefs,
+            aspectRatio,
+          },
+          allowTaskExternalIdResume: false,
+          pollProgress: {
+            start: 18 + Math.floor((i / Math.max(framesToGenerate.length, 1)) * 64),
+            end: 18 + Math.floor(((i + 1) / Math.max(framesToGenerate.length, 1)) * 64),
+          },
+        })
+        await assertTaskActive(job, 'upload_panel_candidate')
+        const cosKey = await uploadImageSourceToCos(source, 'panel-frame', `${panel.id}-${frame.frameIndex}`, job)
+        generatedByFrameIndex.set(frame.frameIndex, cosKey)
+        generatedUrls.push(cosKey)
+        await prisma.novelPromotionPanelFrame.update({
+          where: { id: frame.id },
+          data: {
+            imageUrl: cosKey,
+            generationStatus: 'completed',
+            errorMessage: null,
+          },
+        })
+        if (frame.frameIndex === 0 || !panel.imageUrl) {
+          await prisma.novelPromotionPanel.update({
+            where: { id: panel.id },
+            data: {
+              imageUrl: cosKey,
+              candidateImages: null,
+            },
+          })
+          panel.imageUrl = cosKey
+        }
+      } catch (error) {
+        await prisma.novelPromotionPanelFrame.update({
+          where: { id: frame.id },
+          data: {
+            generationStatus: 'failed',
+            errorMessage: error instanceof Error ? error.message : String(error),
+          },
+        })
+        throw error
+      }
+    }
+
+    const representativeImageUrl = generatedByFrameIndex.get(0) || generatedUrls[0] || null
+    await assertTaskActive(job, 'persist_panel_image')
+    await prisma.novelPromotionPanel.update({
+      where: { id: panel.id },
+      data: {
+        imageUrl: representativeImageUrl,
+        candidateImages: null,
+      },
+    })
+
+    return {
+      panelId: panel.id,
+      candidateCount: generatedUrls.length,
+      imageUrl: representativeImageUrl,
+      ...(targetFrame ? { frameId: targetFrame.id, frameIndex: targetFrame.frameIndex } : {}),
+    }
+  }
+
   const finalPrompt = hardConstraints
     ? `${withAnimeStyle}\n\n${hardConstraints}`
     : withAnimeStyle
@@ -574,6 +812,16 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       data: {
         previousImageUrl: panel.imageUrl,
         candidateImages: JSON.stringify(candidates),
+      },
+    })
+  }
+  if (sortedFrames.length > 0 && candidates[0]) {
+    await prisma.novelPromotionPanelFrame.update({
+      where: { id: sortedFrames[0].id },
+      data: {
+        imageUrl: candidates[0],
+        generationStatus: 'completed',
+        errorMessage: null,
       },
     })
   }

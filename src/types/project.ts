@@ -174,6 +174,10 @@ export interface NovelPromotionPanel {
   srtStart: number | null
   srtEnd: number | null
   duration: number | null
+  panelMode?: 'single' | 'group' | string | null
+  groupDurationSec?: number | null
+  groupVideoPrompt?: string | null
+  groupPlanJson?: string | null
   imagePrompt: string | null
   imageUrl: string | null
   candidateImages?: string | null
@@ -196,6 +200,29 @@ export interface NovelPromotionPanel {
   imageTaskRunning?: boolean
   videoTaskRunning?: boolean
   imageErrorMessage?: string | null  // 图片生成错误消息
+  frames?: NovelPromotionPanelFrame[]
+}
+
+export interface NovelPromotionPanelFrame {
+  id: string
+  panelId: string
+  frameIndex: number
+  frameTimeSec: number
+  frameRole: string | null
+  dependencyFrameIds: string | null
+  imagePrompt: string | null
+  videoPrompt: string | null
+  promptJson: string | null
+  referencePolicy: string | null
+  imageUrl: string | null
+  imageMediaId?: string | null
+  imageMedia?: MediaRef | null
+  media?: MediaRef | null
+  generationStatus: string | null
+  errorMessage: string | null
+  createdAt?: string | Date
+  updatedAt?: string | Date
+  virtual?: boolean
 }
 
 export interface NovelPromotionStoryboard {

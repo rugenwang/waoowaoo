@@ -194,6 +194,10 @@ model NovelPromotionPanel {
   srtStart          Float?
   srtEnd            Float?
   duration          Float?
+  panelMode         String?                   @default("single")
+  groupDurationSec  Float?
+  groupVideoPrompt  String?
+  groupPlanJson     String?
   imagePrompt       String?
   imageUrl          String?
   imageMediaId      String?
@@ -223,6 +227,7 @@ model NovelPromotionPanel {
   previousImageMediaId String?
   previousImageMedia MediaObject?             @relation("NovelPromotionPanelPreviousImageMedia", fields: [previousImageMediaId], references: [id], onDelete: SetNull)
   storyboard        NovelPromotionStoryboard  @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  frames            NovelPromotionPanelFrame[]
   matchedVoiceLines NovelPromotionVoiceLine[]
 
   @@unique([storyboardId, panelIndex])
@@ -233,6 +238,32 @@ model NovelPromotionPanel {
   @@index([sketchImageMediaId])
   @@index([previousImageMediaId])
   @@map("novel_promotion_panels")
+}
+
+model NovelPromotionPanelFrame {
+  id                 String                @id @default(uuid())
+  panelId            String
+  frameIndex         Int
+  frameTimeSec       Float
+  frameRole          String?
+  dependencyFrameIds String?
+  imagePrompt        String?
+  videoPrompt        String?
+  promptJson         String?
+  referencePolicy    String?
+  imageUrl           String?
+  imageMediaId       String?
+  imageMedia         MediaObject?          @relation("NovelPromotionPanelFrameImageMedia", fields: [imageMediaId], references: [id], onDelete: SetNull)
+  generationStatus   String?
+  errorMessage       String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @default(now()) @updatedAt
+  panel              NovelPromotionPanel   @relation(fields: [panelId], references: [id], onDelete: Cascade)
+
+  @@unique([panelId, frameIndex])
+  @@index([panelId])
+  @@index([imageMediaId])
+  @@map("novel_promotion_panel_frames")
 }
 
 model NovelPromotionProject {
@@ -828,6 +859,7 @@ model MediaObject {
   novelPromotionPanelLipSyncVideos      NovelPromotionPanel[]       @relation("NovelPromotionPanelLipSyncVideoMedia")
   novelPromotionPanelSketchImages       NovelPromotionPanel[]       @relation("NovelPromotionPanelSketchMedia")
   novelPromotionPanelPreviousImages     NovelPromotionPanel[]       @relation("NovelPromotionPanelPreviousImageMedia")
+  novelPromotionPanelFrameImages        NovelPromotionPanelFrame[]  @relation("NovelPromotionPanelFrameImageMedia")
   novelPromotionShotImages              NovelPromotionShot[]        @relation("NovelPromotionShotImageMedia")
   supplementaryPanelImages              SupplementaryPanel[]        @relation("SupplementaryPanelImageMedia")
   novelPromotionVoiceLineAudios         NovelPromotionVoiceLine[]   @relation("NovelPromotionVoiceLineAudioMedia")

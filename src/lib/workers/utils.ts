@@ -63,6 +63,10 @@ function sanitizeGenerationOptionsForConsole(options: Record<string, unknown>): 
       out.referenceImages = { count: v.length, omitted: true }
       continue
     }
+    if (k === 'keyframes' && Array.isArray(v)) {
+      out.keyframes = { count: v.length, omitted: true }
+      continue
+    }
     if ((k === 'imageUrl' || k === 'lastFrameImageUrl') && typeof v === 'string') {
       // 可能是 dataURL/base64，控制台里仅显示长度避免污染
       out[k] = { length: v.length, omitted: true }
@@ -694,8 +698,9 @@ export async function resolveVideoSourceFromGeneration(
       aspectRatio?: string
       generateAudio?: boolean
       lastFrameImageUrl?: string
-      generationMode?: 'normal' | 'firstlastframe'
-      [key: string]: string | number | boolean | undefined
+      generationMode?: 'normal' | 'firstlastframe' | 'keyframes'
+      keyframes?: Array<{ imageUrl: string; frameTimeSec?: number; frameIndex?: number }>
+      [key: string]: unknown
     }
     pollProgress?: { start?: number; end?: number }
   },
@@ -763,9 +768,9 @@ export async function resolveVideoSourceFromGeneration(
     runtimeSelections,
   })
 
-  const providerCapabilityOptions: Record<string, string | number | boolean> = { ...capabilityOptions }
+  const providerCapabilityOptions: Record<string, unknown> = { ...capabilityOptions }
   delete providerCapabilityOptions.generationMode
-  const providerRequestOptions: Record<string, string | number | boolean> = {}
+  const providerRequestOptions: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(params.options || {})) {
     if (key === 'generationMode' || value === undefined) continue
     providerRequestOptions[key] = value

@@ -4,6 +4,7 @@ import { TASK_EVENT_TYPE } from '@/lib/task/types'
 import type { TaskIntent } from '@/lib/task/intent'
 
 export const TASK_TARGET_OVERLAY_TTL_MS = 300_000
+export const OPTIMISTIC_TASK_TARGET_OVERLAY_TTL_MS = 30_000
 
 export type TaskTargetOverlayPhase = 'queued' | 'processing'
 
@@ -33,6 +34,10 @@ function normalizeOptionalString(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return trimmed || null
+}
+
+function isOptimisticTaskId(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith('optimistic:')
 }
 
 function buildOptimisticTaskId(targetType: string, targetId: string, now: number): string {
@@ -73,9 +78,14 @@ export function upsertTaskTargetOverlay(
     (prev) => {
       const next = pruneExpiredOverlay(prev, now)
       const existing = next[key]
-      const runningTaskId = normalizeOptionalString(params.runningTaskId)
-        || normalizeOptionalString(existing?.runningTaskId)
+      const incomingTaskId = normalizeOptionalString(params.runningTaskId)
+      const existingTaskId = normalizeOptionalString(existing?.runningTaskId)
+      const runningTaskId = incomingTaskId
+        || existingTaskId
         || buildOptimisticTaskId(params.targetType, params.targetId, now)
+      const ttl = isOptimisticTaskId(runningTaskId)
+        ? OPTIMISTIC_TASK_TARGET_OVERLAY_TTL_MS
+        : TASK_TARGET_OVERLAY_TTL_MS
       const runningTaskType = normalizeOptionalString(params.runningTaskType)
         || normalizeOptionalString(existing?.runningTaskType)
       next[key] = {
@@ -91,7 +101,7 @@ export function upsertTaskTargetOverlay(
         stageLabel: params.stageLabel ?? null,
         updatedAt: params.updatedAt || new Date(now).toISOString(),
         lastError: null,
-        expiresAt: now + TASK_TARGET_OVERLAY_TTL_MS,
+        expiresAt: now + ttl,
       }
       return next
     },
@@ -184,7 +194,12 @@ export function applyTaskLifecycleToOverlay(
         const current = prev[key]
         const incomingTaskId = normalizeOptionalString(params.taskId)
         const currentTaskId = normalizeOptionalString(current.runningTaskId)
-        if (incomingTaskId && currentTaskId && incomingTaskId !== currentTaskId) {
+        if (
+          incomingTaskId &&
+          currentTaskId &&
+          incomingTaskId !== currentTaskId &&
+          !isOptimisticTaskId(currentTaskId)
+        ) {
           return prev
         }
         const next: TaskTargetOverlayMap = { ...prev }

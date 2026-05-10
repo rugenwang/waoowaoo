@@ -3,8 +3,14 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query/keys'
-import { NovelPromotionStoryboard, NovelPromotionClip, NovelPromotionPanel } from '@/types/project'
+import { NovelPromotionStoryboard, NovelPromotionClip, NovelPromotionPanel, NovelPromotionPanelFrame } from '@/types/project'
 import { PanelEditData } from '../../PanelEditForm'
+import {
+  getPanelRepresentativeImageUrl,
+  getSortedPanelFrames,
+  normalizePanelMode,
+  type PanelMode,
+} from '@/lib/novel-promotion/panel-frames'
 import {
   computeStoryboardStartIndex,
   computeTotalPanels,
@@ -24,6 +30,11 @@ export interface StoryboardPanel {
   location?: string
   srt_range?: string
   duration?: number
+  panelMode?: PanelMode
+  groupDurationSec?: number | null
+  groupVideoPrompt?: string | null
+  groupPlanJson?: string | null
+  frames?: NovelPromotionPanelFrame[]
   video_prompt?: string
   source_text?: string
   candidateImages?: string
@@ -99,7 +110,7 @@ export function useStoryboardState({
   const getPanelImages = (storyboard: NovelPromotionStoryboard): Array<string | null> => {
     const panels = getStoryboardPanels(storyboard)
     if (panels.length > 0) {
-      return panels.map((p) => p.imageUrl || null)
+      return panels.map((p) => getPanelRepresentativeImageUrl(p))
     }
     return []
   }
@@ -140,6 +151,11 @@ export function useStoryboardState({
         characters,
         srt_range: p.srtStart && p.srtEnd ? `${p.srtStart}-${p.srtEnd}` : undefined,
         duration: p.duration ?? undefined,
+        panelMode: normalizePanelMode(p),
+        groupDurationSec: p.groupDurationSec ?? null,
+        groupVideoPrompt: p.groupVideoPrompt ?? null,
+        groupPlanJson: p.groupPlanJson ?? null,
+        frames: getSortedPanelFrames(p),
         video_prompt: p.videoPrompt || undefined,
         source_text: p.srtSegment || undefined,
         candidateImages: p.candidateImages || undefined,

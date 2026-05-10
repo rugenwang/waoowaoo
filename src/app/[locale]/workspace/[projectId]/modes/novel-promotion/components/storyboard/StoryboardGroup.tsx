@@ -55,6 +55,8 @@ export default function StoryboardGroup({
   onRetryPanelSave,
   onRegeneratePanelImage,
   onUploadImage,
+  onUploadFrameImage,
+  onRegenerateFrameImage,
   onOpenEditModal,
   onOpenAIDataModal,
   getPanelCandidates,
@@ -226,6 +228,8 @@ export default function StoryboardGroup({
         onRetryPanelSave={onRetryPanelSave}
         onRegeneratePanelImage={handleRegeneratePanelImage}
         onUploadImage={onUploadImage}
+        onUploadFrameImage={onUploadFrameImage}
+        onRegenerateFrameImage={onRegenerateFrameImage}
         onOpenEditModal={onOpenEditModal}
         onOpenAIDataModal={onOpenAIDataModal}
         onSelectPanelCandidateIndex={onSelectPanelCandidateIndex}

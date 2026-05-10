@@ -46,6 +46,7 @@ type TaskTargetStateBatch = {
 
 const TARGET_STATE_BATCH_WINDOW_MS = 120
 const TARGET_STATE_CHUNK_SIZE = 500
+const OPTIMISTIC_OVERLAY_MAX_AGE_MS = 30_000
 const pendingTaskTargetStateBatches = new Map<string, TaskTargetStateBatch>()
 const mergeTraceSignatureByKey = new Map<string, string>()
 const taskTargetStateLogger = createScopedLogger({
@@ -59,6 +60,16 @@ function traceFrontend(event: string, details: Record<string, unknown>) {
 
 function stateKey(targetType: string, targetId: string) {
   return `${targetType}:${targetId}`
+}
+
+function toTime(value: string | null | undefined): number | null {
+  if (!value) return null
+  const time = Date.parse(value)
+  return Number.isFinite(time) ? time : null
+}
+
+function isOptimisticTaskId(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith('optimistic:')
 }
 
 function targetQueryKey(target: TaskTargetStateQuery) {
@@ -352,6 +363,26 @@ export function useTaskTargetStateMap(
         }
         continue
       }
+      const runtimeUpdatedAt = toTime(runtime.updatedAt)
+      if (
+        isOptimisticTaskId(runtime.runningTaskId) &&
+        runtimeUpdatedAt !== null &&
+        Date.now() - runtimeUpdatedAt > OPTIMISTIC_OVERLAY_MAX_AGE_MS
+      ) {
+        if (shouldTraceMergeTarget(target.targetType)) {
+          logMergeDecision({
+            projectId,
+            key,
+            decision: 'overlay_expired',
+            runtimePhase: runtime.phase,
+            runtimeTaskId: runtime.runningTaskId,
+            runtimeTaskType: runtime.runningTaskType,
+            currentPhase: map.get(key)?.phase || null,
+            whitelist: target.types || [],
+          })
+        }
+        continue
+      }
       // Skip overlay if the target has a types whitelist and the task type doesn't match
       if (!matchesTaskTypeWhitelist(target.types, runtime.runningTaskType)) {
         if (shouldTraceMergeTarget(target.targetType)) {
@@ -373,6 +404,27 @@ export function useTaskTargetStateMap(
       if (current) {
         // Server-side processing state is authoritative.
         if (current.phase === 'processing') {
+          if (shouldTraceMergeTarget(target.targetType)) {
+            logMergeDecision({
+              projectId,
+              key,
+              decision: 'server_processing_authoritative',
+              runtimePhase: runtime.phase,
+              runtimeTaskId: runtime.runningTaskId,
+              runtimeTaskType: runtime.runningTaskType,
+              currentPhase: current.phase,
+              whitelist: target.types || [],
+            })
+          }
+          continue
+        }
+        const currentUpdatedAt = toTime(current.updatedAt)
+        if (
+          (current.phase === 'completed' || current.phase === 'failed') &&
+          currentUpdatedAt !== null &&
+          runtimeUpdatedAt !== null &&
+          currentUpdatedAt >= runtimeUpdatedAt
+        ) {
           if (shouldTraceMergeTarget(target.targetType)) {
             logMergeDecision({
               projectId,
@@ -410,7 +462,7 @@ export function useTaskTargetStateMap(
       }
     }
     return map
-  }, [normalizedTargets, overlayQuery.data, query.data])
+  }, [normalizedTargets, overlayQuery.data, projectId, query.data])
 
   const mergedData = useMemo(() => {
     return normalizedTargets.map((target) =>

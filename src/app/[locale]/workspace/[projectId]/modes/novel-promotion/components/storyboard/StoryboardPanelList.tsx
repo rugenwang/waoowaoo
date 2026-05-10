@@ -34,6 +34,8 @@ interface StoryboardPanelListProps {
   onRetryPanelSave: (panelId: string) => void
   onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean) => void
   onUploadImage?: (panelId: string, file: File) => void | Promise<void>
+  onUploadFrameImage?: (frameId: string, file: File) => void | Promise<void>
+  onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onOpenEditModal: (panelIndex: number) => void
   onOpenAIDataModal: (panelIndex: number) => void
   onSelectPanelCandidateIndex: (panelId: string, index: number) => void
@@ -71,6 +73,8 @@ export default function StoryboardPanelList({
   onRetryPanelSave,
   onRegeneratePanelImage,
   onUploadImage,
+  onUploadFrameImage,
+  onRegenerateFrameImage,
   onOpenEditModal,
   onOpenAIDataModal,
   onSelectPanelCandidateIndex,
@@ -152,6 +156,8 @@ export default function StoryboardPanelList({
               onRemoveLocation={() => onRemoveLocation(panel)}
               onRegeneratePanelImage={onRegeneratePanelImage}
               onUploadImage={onUploadImage}
+              onUploadFrameImage={onUploadFrameImage}
+              onRegenerateFrameImage={onRegenerateFrameImage}
               onOpenEditModal={() => onOpenEditModal(index)}
               onOpenAIDataModal={() => onOpenAIDataModal(index)}
               onSelectCandidateIndex={onSelectPanelCandidateIndex}

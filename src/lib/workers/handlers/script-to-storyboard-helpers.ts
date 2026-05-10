@@ -41,9 +41,195 @@ export function toPositiveInt(value: unknown): number | null {
 
 function normalizeDurationSeconds(value: unknown): number | null {
   if (value === null || value === undefined) return null
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null
-  const n = Math.floor(value)
+  const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  if (!Number.isFinite(numeric)) return null
+  const n = Math.floor(numeric)
   return n > 0 ? n : null
+}
+
+const MAX_PANEL_GROUP_DURATION_SEC = 20
+const MAX_PANEL_FRAMES = 4
+
+type PanelFramePersistenceRow = {
+  frameIndex: number
+  frameTimeSec: number
+  frameRole: string | null
+  dependencyFrameIds: string | null
+  imagePrompt: string | null
+  videoPrompt: string | null
+  promptJson: string | null
+  referencePolicy: string | null
+  generationStatus: string | null
+}
+
+export type PanelFramePersistence = {
+  panelMode: 'single' | 'group'
+  groupDurationSec: number | null
+  groupVideoPrompt: string | null
+  groupPlanJson: string | null
+  duration: number | null
+  frames: PanelFramePersistenceRow[]
+}
+
+function readString(record: JsonRecord, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
+}
+
+function readNumber(record: JsonRecord, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = record[key]
+    const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+    if (Number.isFinite(numeric)) return numeric
+  }
+  return null
+}
+
+function toJsonText(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return null
+  }
+}
+
+function toJsonArrayText(value: unknown): string | null {
+  if (!Array.isArray(value)) return null
+  const normalized = value
+    .map((item) => {
+      if (typeof item === 'number' && Number.isFinite(item)) return Math.floor(item)
+      if (typeof item === 'string' && item.trim()) return item.trim()
+      return null
+    })
+    .filter((item): item is string | number => item !== null)
+  return normalized.length > 0 ? toJsonText(normalized) : null
+}
+
+function clampFrameTime(value: number | null, duration: number | null, fallback: number) {
+  const raw = value ?? fallback
+  const safe = Number.isFinite(raw) ? raw : fallback
+  const max = duration ?? MAX_PANEL_GROUP_DURATION_SEC
+  const clamped = Math.max(0, Math.min(max, safe))
+  return Math.round(clamped * 10) / 10
+}
+
+function normalizePanelFrameRows(panel: StoryboardPanel, duration: number | null): PanelFramePersistenceRow[] {
+  const rawFrames = Array.isArray(panel.frames) ? panel.frames.slice(0, MAX_PANEL_FRAMES) : []
+  const sourceRows = rawFrames
+    .map((item) => asJsonRecord(item))
+    .filter((item): item is JsonRecord => item !== null)
+
+  const rows = sourceRows.length > 0
+    ? sourceRows.map((frame, index): PanelFramePersistenceRow => {
+      const frameIndex = Math.max(0, Math.floor(readNumber(frame, ['frame_index', 'frameIndex', 'index']) ?? index))
+      const fallbackTime = sourceRows.length <= 1 || duration === null
+        ? 0
+        : (duration / Math.max(1, sourceRows.length - 1)) * index
+      const frameTimeSec = clampFrameTime(
+        readNumber(frame, ['frame_time_sec', 'frameTimeSec', 'time_sec', 'timeSec', 'second']),
+        duration,
+        fallbackTime,
+      )
+      const dependencies = frame.dependency_frame_ids ?? frame.dependencyFrameIds ?? frame.dependencies ?? frame.depends_on
+      return {
+        frameIndex,
+        frameTimeSec,
+        frameRole: readString(frame, ['frame_role', 'frameRole', 'role']) || (index === 0 ? 'hero' : 'continuity'),
+        dependencyFrameIds: toJsonArrayText(dependencies),
+        imagePrompt: readString(frame, ['image_prompt', 'imagePrompt', 'prompt', 'description']),
+        videoPrompt: readString(frame, ['video_prompt', 'videoPrompt', 'motion_prompt', 'motionPrompt']),
+        promptJson: toJsonText(frame),
+        referencePolicy: toJsonText(frame.reference_policy ?? frame.referencePolicy ?? frame.references ?? null),
+        generationStatus: 'pending',
+      }
+    })
+    : [{
+      frameIndex: 0,
+      frameTimeSec: 0,
+      frameRole: 'hero',
+      dependencyFrameIds: null,
+      imagePrompt: readString(panel, ['image_prompt', 'imagePrompt', 'description', 'source_text']),
+      videoPrompt: readString(panel, ['video_prompt', 'videoPrompt']),
+      promptJson: null,
+      referencePolicy: null,
+      generationStatus: 'pending',
+    }]
+
+  return rows
+    .sort((left, right) => left.frameTimeSec - right.frameTimeSec || left.frameIndex - right.frameIndex)
+    .map((row, index) => ({
+      ...row,
+      frameIndex: index,
+    }))
+}
+
+export function buildPanelFramePersistence(panel: StoryboardPanel): PanelFramePersistence {
+  const declaredMode = readString(panel, ['panel_mode', 'panelMode', 'mode'])
+  const durationFromGroup = normalizeDurationSeconds(
+    readNumber(panel, ['duration_sec', 'durationSec', 'group_duration_sec', 'groupDurationSec']),
+  )
+  const durationFromPanel = normalizeDurationSeconds(panel.duration)
+  const duration = Math.min(
+    durationFromGroup ?? durationFromPanel ?? 0,
+    MAX_PANEL_GROUP_DURATION_SEC,
+  ) || null
+  const frames = normalizePanelFrameRows(panel, duration)
+  const hasMultipleFrames = frames.length > 1
+  const panelMode = declaredMode === 'group' || declaredMode === 'complex' || hasMultipleFrames
+    ? 'group'
+    : 'single'
+  const groupVideoPrompt = readString(panel, [
+    'group_video_prompt',
+    'groupVideoPrompt',
+    'video_prompt',
+    'videoPrompt',
+  ])
+  const groupPlanJson = panelMode === 'group'
+    ? toJsonText({
+      panelMode,
+      complexity: panel.complexity ?? null,
+      durationSec: duration,
+      frames: Array.isArray(panel.frames) ? panel.frames : [],
+    })
+    : null
+
+  return {
+    panelMode,
+    groupDurationSec: panelMode === 'group' ? duration : null,
+    groupVideoPrompt: panelMode === 'group' ? groupVideoPrompt : null,
+    groupPlanJson,
+    duration,
+    frames,
+  }
+}
+
+async function createPanelFrames(
+  tx: { novelPromotionPanelFrame: unknown },
+  panelId: string,
+  frames: PanelFramePersistenceRow[],
+) {
+  const frameModel = tx.novelPromotionPanelFrame as unknown as {
+    createMany: (args: { data: Array<Record<string, unknown>> }) => Promise<unknown>
+  }
+  if (!frames.length) return
+  await frameModel.createMany({
+    data: frames.map((frame) => ({
+      panelId,
+      frameIndex: frame.frameIndex,
+      frameTimeSec: frame.frameTimeSec,
+      frameRole: frame.frameRole,
+      dependencyFrameIds: frame.dependencyFrameIds,
+      imagePrompt: frame.imagePrompt,
+      videoPrompt: frame.videoPrompt,
+      promptJson: frame.promptJson,
+      referencePolicy: frame.referencePolicy,
+      generationStatus: frame.generationStatus,
+    })),
+  })
 }
 
 function parsePanelCharacters(raw: string | null): string[] {
@@ -190,6 +376,7 @@ export async function persistStoryboardsAndPanels(params: {
       const persistedPanels: PersistedStoryboard['panels'] = []
       for (let i = 0; i < clipEntry.finalPanels.length; i += 1) {
         const panel = clipEntry.finalPanels[i]
+        const framePersistence = buildPanelFramePersistence(panel)
         const created = await panelModel.create({
           data: {
             storyboardId: storyboard.id,
@@ -205,7 +392,11 @@ export async function persistStoryboardsAndPanels(params: {
             srtSegment: panel.source_text || null,
             photographyRules: panel.photographyPlan ? JSON.stringify(panel.photographyPlan) : null,
             actingNotes: panel.actingNotes ? JSON.stringify(panel.actingNotes) : null,
-            duration: normalizeDurationSeconds(panel.duration),
+            duration: framePersistence.duration,
+            panelMode: framePersistence.panelMode,
+            groupDurationSec: framePersistence.groupDurationSec,
+            groupVideoPrompt: framePersistence.groupVideoPrompt,
+            groupPlanJson: framePersistence.groupPlanJson,
           },
           select: {
             id: true,
@@ -216,6 +407,7 @@ export async function persistStoryboardsAndPanels(params: {
             props: true,
           },
         })
+        await createPanelFrames(tx, created.id, framePersistence.frames)
         persistedPanels.push(created)
       }
 
@@ -284,6 +476,7 @@ export async function persistStoryboardOutputs(params: {
       const persistedPanels: PersistedStoryboard['panels'] = []
       for (let i = 0; i < clipEntry.finalPanels.length; i += 1) {
         const panel = clipEntry.finalPanels[i]
+        const framePersistence = buildPanelFramePersistence(panel)
         const created = await panelModel.create({
           data: {
             storyboardId: storyboard.id,
@@ -299,7 +492,11 @@ export async function persistStoryboardOutputs(params: {
             srtSegment: panel.source_text || null,
             photographyRules: panel.photographyPlan ? JSON.stringify(panel.photographyPlan) : null,
             actingNotes: panel.actingNotes ? JSON.stringify(panel.actingNotes) : null,
-            duration: normalizeDurationSeconds(panel.duration),
+            duration: framePersistence.duration,
+            panelMode: framePersistence.panelMode,
+            groupDurationSec: framePersistence.groupDurationSec,
+            groupVideoPrompt: framePersistence.groupVideoPrompt,
+            groupPlanJson: framePersistence.groupPlanJson,
           },
           select: {
             id: true,
@@ -310,6 +507,7 @@ export async function persistStoryboardOutputs(params: {
             props: true,
           },
         })
+        await createPanelFrames(tx, created.id, framePersistence.frames)
         panelIdByStoryboardRef.set(`${storyboard.id}:${created.panelIndex}`, created.id)
         panelIdByStoryboardRef.set(`${clipEntry.clipId}:${created.panelIndex}`, created.id)
         persistedPanels.push(created)

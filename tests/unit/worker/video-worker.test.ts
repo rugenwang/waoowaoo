@@ -193,6 +193,7 @@ describe('worker video processor behavior', () => {
       {
         Authorization: 'Bearer oa-key',
       },
+      expect.objectContaining({ data: expect.objectContaining({ taskId: 'task-1' }) }),
     )
   })
 

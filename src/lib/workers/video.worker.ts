@@ -22,8 +22,16 @@ import { getProviderConfig } from '@/lib/api-config'
 type AnyObj = Record<string, unknown>
 type VideoOptionValue = string | number | boolean
 type VideoOptionMap = Record<string, VideoOptionValue>
-type VideoGenerationMode = 'normal' | 'firstlastframe'
-type PanelRecord = NonNullable<Awaited<ReturnType<typeof prisma.novelPromotionPanel.findUnique>>>
+type VideoGenerationMode = 'normal' | 'firstlastframe' | 'keyframes'
+type PanelFrameRecord = {
+  id: string
+  frameIndex: number
+  frameTimeSec: number
+  imageUrl: string | null
+}
+type PanelRecord = NonNullable<Awaited<ReturnType<typeof prisma.novelPromotionPanel.findUnique>>> & {
+  frames?: PanelFrameRecord[]
+}
 
 function toDurationMs(value: number | null | undefined): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
@@ -52,6 +60,9 @@ async function fetchPanelByStoryboardIndex(storyboardId: string, panelIndex: num
       storyboardId,
       panelIndex,
     },
+    include: {
+      frames: { orderBy: { frameIndex: 'asc' } },
+    },
   })
 }
 
@@ -60,7 +71,12 @@ async function getPanelForVideoTask(job: Job<TaskJobData>) {
 
   // 优先使用 targetType=NovelPromotionPanel 直接定位
   if (job.data.targetType === 'NovelPromotionPanel') {
-    const panel = await prisma.novelPromotionPanel.findUnique({ where: { id: job.data.targetId } })
+    const panel = await prisma.novelPromotionPanel.findUnique({
+      where: { id: job.data.targetId },
+      include: {
+        frames: { orderBy: { frameIndex: 'asc' } },
+      },
+    })
     if (!panel) throw new Error('Panel not found')
     return panel
   }
@@ -77,6 +93,14 @@ async function getPanelForVideoTask(job: Job<TaskJobData>) {
   return panel
 }
 
+function getUsablePanelFrames(panel: PanelRecord): PanelFrameRecord[] {
+  return Array.isArray(panel.frames)
+    ? panel.frames
+      .filter((frame) => typeof frame.imageUrl === 'string' && frame.imageUrl.trim())
+      .sort((left, right) => left.frameTimeSec - right.frameTimeSec || left.frameIndex - right.frameIndex)
+    : []
+}
+
 async function generateVideoForPanel(
   job: Job<TaskJobData>,
   panel: PanelRecord,
@@ -85,7 +109,9 @@ async function generateVideoForPanel(
   projectVideoRatio: string | null | undefined,
   generationOptions: VideoOptionMap,
 ): Promise<{ cosKey: string; generationMode: VideoGenerationMode; actualVideoTokens?: number }> {
-  if (!panel.imageUrl) {
+  const usableFrames = getUsablePanelFrames(panel)
+  const sourceFrameImageUrl = usableFrames[0]?.imageUrl || panel.imageUrl
+  if (!sourceFrameImageUrl) {
     throw new Error(`Panel ${panel.id} has no imageUrl`)
   }
 
@@ -96,19 +122,24 @@ async function generateVideoForPanel(
   const firstLastCustomPrompt = typeof firstLastFramePayload?.customPrompt === 'string' ? firstLastFramePayload.customPrompt : null
   const persistedFirstLastPrompt = firstLastFramePayload ? panel.firstLastFramePrompt : null
   const customPrompt = typeof payload.customPrompt === 'string' ? payload.customPrompt : null
-  const prompt = firstLastCustomPrompt || persistedFirstLastPrompt || customPrompt || panel.videoPrompt || panel.description
+  const prompt = firstLastCustomPrompt
+    || persistedFirstLastPrompt
+    || customPrompt
+    || panel.groupVideoPrompt
+    || panel.videoPrompt
+    || panel.description
   if (!prompt) {
     throw new Error(`Panel ${panel.id} has no video prompt`)
   }
 
-  const sourceImageUrl = toSignedUrlIfCos(panel.imageUrl, 3600)
+  const sourceImageUrl = toSignedUrlIfCos(sourceFrameImageUrl, 3600)
   if (!sourceImageUrl) {
     throw new Error(`Panel ${panel.id} image url invalid`)
   }
   const sourceImageBase64 = await normalizeToBase64ForGeneration(sourceImageUrl)
 
   let lastFrameImageBase64: string | undefined
-  const generationMode: VideoGenerationMode = firstLastFramePayload ? 'firstlastframe' : 'normal'
+  let generationMode: VideoGenerationMode = firstLastFramePayload ? 'firstlastframe' : 'normal'
   const requestedGenerateAudio = typeof generationOptions.generateAudio === 'boolean'
     ? generationOptions.generateAudio
     : undefined
@@ -141,6 +172,23 @@ async function generateVideoForPanel(
     }
   }
 
+  const parsedVideoModel = parseModelKeyStrict(model)
+  const panelKeyframes = !firstLastFramePayload && parsedVideoModel?.provider === 'local' && usableFrames.length > 1
+    ? usableFrames
+      .map((frame) => {
+        const url = toSignedUrlIfCos(frame.imageUrl, 3600)
+        if (!url) return null
+        return {
+          imageUrl: url,
+          frameTimeSec: frame.frameTimeSec,
+        }
+      })
+      .filter((item): item is { imageUrl: string; frameTimeSec: number } => item !== null)
+    : []
+  if (panelKeyframes.length > 1) {
+    generationMode = 'keyframes'
+  }
+
   const generatedVideo = await resolveVideoSourceFromGeneration(job, {
     userId: job.data.userId,
     modelId: model,
@@ -152,6 +200,7 @@ async function generateVideoForPanel(
       generationMode,
       ...(typeof requestedGenerateAudio === 'boolean' ? { generateAudio: requestedGenerateAudio } : {}),
       ...(lastFrameImageBase64 ? { lastFrameImageUrl: lastFrameImageBase64 } : {}),
+      ...(panelKeyframes.length > 1 ? { keyframes: panelKeyframes } : {}),
     },
   })
 
@@ -160,11 +209,10 @@ async function generateVideoForPanel(
   if (generatedVideo.downloadHeaders) {
     downloadHeaders = generatedVideo.downloadHeaders
   } else if (typeof videoSource === 'string') {
-    const parsedModel = parseModelKeyStrict(model)
     const isGoogleDownloadUrl = videoSource.includes('generativelanguage.googleapis.com/')
       && videoSource.includes('/files/')
       && videoSource.includes(':download')
-    if (parsedModel?.provider === 'google' && isGoogleDownloadUrl) {
+    if (parsedVideoModel?.provider === 'google' && isGoogleDownloadUrl) {
       const { apiKey } = await getProviderConfig(job.data.userId, 'google')
       downloadHeaders = { 'x-goog-api-key': apiKey }
     }
@@ -192,8 +240,15 @@ async function handleVideoPanelTask(job: Job<TaskJobData>) {
 
   const generationOptions = extractGenerationOptions(payload)
   // 分镜级时长兜底：如果请求未携带 duration，则使用面板本身的 duration（秒）
-  if (generationOptions.duration === undefined && typeof panel.duration === 'number' && Number.isFinite(panel.duration)) {
-    generationOptions.duration = panel.duration
+  if (generationOptions.duration === undefined) {
+    const panelDuration = typeof panel.groupDurationSec === 'number' && Number.isFinite(panel.groupDurationSec)
+      ? panel.groupDurationSec
+      : typeof panel.duration === 'number' && Number.isFinite(panel.duration)
+        ? panel.duration
+        : null
+    if (panelDuration !== null) {
+      generationOptions.duration = panelDuration
+    }
   }
 
   await reportTaskProgress(job, 10, {
@@ -234,7 +289,12 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
 
   let panel: PanelRecord | null = null
   if (job.data.targetType === 'NovelPromotionPanel') {
-    panel = await prisma.novelPromotionPanel.findUnique({ where: { id: job.data.targetId } })
+    panel = await prisma.novelPromotionPanel.findUnique({
+      where: { id: job.data.targetId },
+      include: {
+        frames: { orderBy: { frameIndex: 'asc' } },
+      },
+    })
   }
 
   if (
