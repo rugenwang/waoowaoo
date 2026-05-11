@@ -1,6 +1,7 @@
 // 视频阶段共享类型定义
 import type { ModelCapabilities } from '@/lib/model-config-contract'
 import type { VideoPricingTier } from '@/lib/model-pricing/video-tier'
+import type { NovelPromotionPanelFrame } from '@/types/project'
 
 // 用户视频模型选项
 export interface VideoModelOption {
@@ -43,6 +44,10 @@ export interface Panel {
   duration?: number | null
   imagePrompt?: string | null
   imageUrl?: string | null  // 图片URL
+  panelMode?: 'single' | 'group' | string | null
+  groupDurationSec?: number | null
+  groupVideoPrompt?: string | null
+  frames?: NovelPromotionPanelFrame[]
   videoPrompt?: string | null
   firstLastFramePrompt?: string | null
   videoUrl?: string | null
@@ -85,6 +90,11 @@ export interface VideoPanel {
   textPanel?: TextPanel
   firstLastFramePrompt?: string
   imageUrl?: string
+  panelMode?: 'single' | 'group' | string | null
+  groupDurationSec?: number | null
+  groupVideoPrompt?: string | null
+  videoPrompt?: string | null
+  frames?: NovelPromotionPanelFrame[]
   videoUrl?: string
   videoGenerationMode?: VideoGenerationMode
   videoTaskRunning?: boolean

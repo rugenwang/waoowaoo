@@ -1,6 +1,7 @@
 import { safeParseJsonArray } from '@/lib/json-repair'
 import { buildCharactersIntroduction } from '@/lib/constants'
 import { normalizeAnyError } from '@/lib/errors/normalize'
+import { buildForcedStoryboardDurationInstruction } from '@/lib/novel-promotion/script-to-storyboard/orchestrator'
 import type {
   ScriptToStoryboardPromptTemplates,
   ScriptToStoryboardStepMeta,
@@ -335,6 +336,7 @@ export async function runScriptToStoryboardAtomicRetry(params: {
   retryTarget: StoryboardRetryTarget
   retryStepAttempt: number
   locale?: 'zh' | 'en'
+  forcedStoryboardDurationSec?: 8 | 10 | 15 | 20 | null
   clip: StoryboardClipInput
   clipIndex: number
   totalClipCount: number
@@ -363,6 +365,7 @@ export async function runScriptToStoryboardAtomicRetry(params: {
     clipLocation: null,
     clipProps,
   })).propsDescriptionText
+  const durationInstruction = buildForcedStoryboardDurationInstruction(params.forcedStoryboardDurationSec, params.locale ?? 'zh')
   const baseMeta = buildStepMeta({
     target: params.retryTarget,
     clipIndex: params.clipIndex,
@@ -434,6 +437,9 @@ export async function runScriptToStoryboardAtomicRetry(params: {
     } else {
       phase1Prompt = phase1Prompt.replace('{clip_content}', clipContent)
     }
+    if (durationInstruction) {
+      phase1Prompt = `${phase1Prompt}\n${durationInstruction}`
+    }
     phase1Panels = await runStepWithRetry({
       runStep: params.runStep,
       baseMeta,
@@ -491,6 +497,7 @@ export async function runScriptToStoryboardAtomicRetry(params: {
       .replace('{characters_age_gender}', filteredFullDescription)
       .replace('{locations_description}', filteredLocationsDescription)
       .replace('{props_description}', filteredPropsDescription)
+      + durationInstruction
     phase3Panels = await runStepWithRetry({
       runStep: params.runStep,
       baseMeta,

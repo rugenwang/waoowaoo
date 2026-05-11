@@ -56,6 +56,7 @@ interface StoryboardCanvasProps {
   onUploadImage?: (panelId: string, file: File) => void | Promise<void>
   onUploadFrameImage?: (frameId: string, file: File) => void | Promise<void>
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
+  onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onOpenEditModal: (storyboardId: string, panelIndex: number) => void
   onOpenAIDataModal: (storyboardId: string, panelIndex: number) => void
   getPanelCandidates: (panel: NovelPromotionPanel) => { candidates: string[]; selectedIndex: number } | null
@@ -117,6 +118,7 @@ export default function StoryboardCanvas({
   onUploadImage,
   onUploadFrameImage,
   onRegenerateFrameImage,
+  onUpdateFrameTime,
   onOpenEditModal,
   onOpenAIDataModal,
   getPanelCandidates,
@@ -193,6 +195,7 @@ export default function StoryboardCanvas({
               onUploadImage={onUploadImage}
               onUploadFrameImage={onUploadFrameImage}
               onRegenerateFrameImage={onRegenerateFrameImage}
+              onUpdateFrameTime={onUpdateFrameTime}
               onOpenEditModal={(panelIndex) => onOpenEditModal(storyboard.id, panelIndex)}
               onOpenAIDataModal={(panelIndex) => onOpenAIDataModal(storyboard.id, panelIndex)}
               getPanelCandidates={getPanelCandidates}

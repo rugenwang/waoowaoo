@@ -146,11 +146,17 @@ export default function VideoRenderPanel({
             typeof panel.textPanel?.duration === 'number' && Number.isFinite(panel.textPanel.duration)
               ? panel.textPanel.duration
               : 4
-          const promptField: PromptField = isLinked ? 'firstLastFramePrompt' : 'videoPrompt'
+          const promptField: PromptField = isLinked
+            ? 'firstLastFramePrompt'
+            : panel.groupVideoPrompt
+              ? 'groupVideoPrompt'
+              : 'videoPrompt'
           const defaultFlPrompt = getDefaultFlPrompt(panel.textPanel?.video_prompt, nextPanel?.textPanel?.video_prompt)
           const externalPrompt = isLinked
             ? (panel.firstLastFramePrompt || defaultFlPrompt)
-            : panel.textPanel?.video_prompt
+            : promptField === 'groupVideoPrompt'
+              ? panel.groupVideoPrompt || undefined
+              : panel.videoPrompt || panel.textPanel?.video_prompt
           const localPrompt = getLocalPrompt(panelKey, externalPrompt, promptField)
           const isSavingPrompt = savingPrompts.has(`${promptField}:${panelKey}`)
 

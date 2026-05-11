@@ -46,6 +46,19 @@ interface FirstLastFramePanelProps {
   onPreviewImage?: (imageUrl: string) => void
 }
 
+function getPanelStartFrame(panel: VideoPanel): { imageUrl: string | null; frameIndex?: number; frameTimeSec?: number } {
+  const frames = Array.isArray(panel.frames)
+    ? panel.frames
+      .filter((frame) => typeof frame.imageUrl === 'string' && frame.imageUrl.trim())
+      .sort((left, right) => left.frameTimeSec - right.frameTimeSec || left.frameIndex - right.frameIndex)
+    : []
+  const firstFrame = frames[0]
+  return {
+    imageUrl: firstFrame?.imageUrl || panel.imageUrl || null,
+    ...(firstFrame ? { frameIndex: firstFrame.frameIndex, frameTimeSec: firstFrame.frameTimeSec } : {}),
+  }
+}
+
 export default function FirstLastFramePanel({
   panel,
   nextPanel,
@@ -87,6 +100,8 @@ export default function FirstLastFramePanel({
     : null
   const currentPrompt = customPrompt || defaultPrompt
   const hasCustomPrompt = customPrompt !== ''
+  const nextPanelStartFrame = getPanelStartFrame(nextPanel)
+  const nextPanelStartImage = nextPanelStartFrame.imageUrl
 
   // 根据视频比例设置 aspect ratio（支持任意比例）
   const cssAspectRatio = videoRatio.replace(':', '/')
@@ -121,18 +136,23 @@ export default function FirstLastFramePanel({
           </div>
           <AppIcon name="arrowRight" className="w-4 h-4 text-[var(--glass-tone-info-fg)]" />
           <div className="flex-1 bg-[var(--glass-bg-muted)] rounded overflow-hidden relative" style={{ aspectRatio: cssAspectRatio }}>
-            {nextPanel.imageUrl && (
+            {nextPanelStartImage && (
               <MediaImageWithLoading
-                src={nextPanel.imageUrl}
+                src={nextPanelStartImage}
                 alt={t("firstLastFrame.lastFrame")}
                 containerClassName="w-full h-full"
                 className={`w-full h-full object-cover ${onPreviewImage ? 'cursor-zoom-in' : ''}`}
                 onClick={() => {
-                  if (nextPanel.imageUrl) onPreviewImage?.(nextPanel.imageUrl)
+                  if (nextPanelStartImage) onPreviewImage?.(nextPanelStartImage)
                 }}
               />
             )}
             <span className="absolute bottom-1 left-1 bg-[var(--glass-tone-warning-fg)] text-white text-[10px] px-1 rounded">{t("firstLastFrame.lastFrame")}</span>
+            {nextPanelStartFrame.frameIndex !== undefined && nextPanelStartFrame.frameTimeSec !== undefined ? (
+              <span className="absolute top-1 right-1 bg-black/65 text-white text-[10px] px-1 rounded">
+                F{nextPanelStartFrame.frameIndex + 1} · {nextPanelStartFrame.frameTimeSec}s
+              </span>
+            ) : null}
           </div>
         </div>
         {/* 首尾帧提示词编辑 */}
@@ -160,7 +180,7 @@ export default function FirstLastFramePanel({
       <div className="flex items-center gap-2">
         <button
           onClick={() => onGenerate(panel.storyboardId, panel.panelIndex, nextPanel.storyboardId, nextPanel.panelIndex, panelKey, flGenerationOptions, panel.panelId)}
-          disabled={isVideoTaskRunning || !panel.imageUrl || !nextPanel.imageUrl || !flModel || hasMissingCapabilities}
+          disabled={isVideoTaskRunning || !panel.imageUrl || !nextPanelStartImage || !flModel || hasMissingCapabilities}
           className={`glass-btn-base flex-1 py-2 text-sm font-medium disabled:opacity-50 ${isFirstLastFrameGenerated
             ? 'bg-[var(--glass-tone-success-fg)] text-white'
             : isVideoTaskRunning

@@ -47,6 +47,7 @@ interface PanelCardProps {
   onUploadImage?: (panelId: string, file: File) => void | Promise<void>
   onUploadFrameImage?: (frameId: string, file: File) => void | Promise<void>
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
+  onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onOpenEditModal: () => void
   onOpenAIDataModal: () => void
   onSelectCandidateIndex: (panelId: string, index: number) => void
@@ -66,13 +67,18 @@ function PanelFrameGrid({
   onPreviewImage,
   onUploadFrameImage,
   onRegenerateFrameImage,
+  onUpdateFrameTime,
 }: {
   panelId: string
   frames: NovelPromotionPanelFrame[]
   onPreviewImage?: (url: string) => void
   onUploadFrameImage?: (frameId: string, file: File) => void | Promise<void>
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
+  onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
 }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [frameTimeDrafts, setFrameTimeDrafts] = useState<Record<string, string>>({})
+  const [savingFrameTimeIds, setSavingFrameTimeIds] = useState<Set<string>>(new Set())
   if (frames.length <= 1) return null
 
   const parseDependencies = (raw: string | null | undefined): number[] => {
@@ -136,15 +142,100 @@ function PanelFrameGrid({
     })
   }
 
+  const getFrameTimeDraft = (frame: NovelPromotionPanelFrame) => {
+    return frameTimeDrafts[frame.id] ?? String(frame.frameTimeSec)
+  }
+
+  const setFrameTimeDraft = (frameId: string, value: string) => {
+    setFrameTimeDrafts((prev) => ({ ...prev, [frameId]: value }))
+  }
+
+  const commitFrameTime = async (frame: NovelPromotionPanelFrame) => {
+    if (!onUpdateFrameTime || frame.frameIndex === 0) return
+    const raw = getFrameTimeDraft(frame).trim()
+    const nextValue = Number(raw)
+    if (!Number.isFinite(nextValue) || nextValue <= 0) {
+      alert('F1 之后的关键帧起始时间必须大于 0 秒')
+      setFrameTimeDraft(frame.id, String(frame.frameTimeSec))
+      return
+    }
+    const normalized = Math.round(nextValue * 100) / 100
+    if (normalized === frame.frameTimeSec) {
+      setFrameTimeDraft(frame.id, String(frame.frameTimeSec))
+      return
+    }
+    setSavingFrameTimeIds((prev) => new Set(prev).add(frame.id))
+    try {
+      await Promise.resolve(onUpdateFrameTime(frame.id, normalized))
+      setFrameTimeDraft(frame.id, String(normalized))
+    } catch (error: unknown) {
+      setFrameTimeDraft(frame.id, String(frame.frameTimeSec))
+      if (shouldShowError(error)) {
+        alert(extractErrorMessage(error, '更新关键帧时间失败'))
+      }
+    } finally {
+      setSavingFrameTimeIds((prev) => {
+        const next = new Set(prev)
+        next.delete(frame.id)
+        return next
+      })
+    }
+  }
+
+  const renderFrameTimeControl = (frame: NovelPromotionPanelFrame, compact = false) => {
+    if (!onUpdateFrameTime || frame.frameIndex === 0) {
+      return (
+        <span className="shrink-0 rounded-full bg-[var(--glass-bg-muted)] px-1.5 py-0.5 text-[10px] text-[var(--glass-text-tertiary)]">
+          {frame.frameTimeSec}s
+        </span>
+      )
+    }
+    const isSaving = savingFrameTimeIds.has(frame.id)
+    return (
+      <label className={`shrink-0 rounded-full border border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-muted)] text-[10px] text-[var(--glass-text-secondary)] ${compact ? 'px-1.5 py-0.5' : 'px-2 py-1'}`}>
+        <span className="sr-only">F{frame.frameIndex + 1} 起始时间</span>
+        <input
+          type="number"
+          min="0.1"
+          step="0.1"
+          value={getFrameTimeDraft(frame)}
+          disabled={isSaving}
+          className={`${compact ? 'w-10' : 'w-12'} bg-transparent text-right text-[10px] font-medium outline-none disabled:opacity-60`}
+          onChange={(event) => setFrameTimeDraft(frame.id, event.currentTarget.value)}
+          onBlur={() => void commitFrameTime(frame)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.currentTarget.blur()
+            } else if (event.key === 'Escape') {
+              setFrameTimeDraft(frame.id, String(frame.frameTimeSec))
+              event.currentTarget.blur()
+            }
+          }}
+        />
+        <span className="ml-0.5">s</span>
+      </label>
+    )
+  }
+
   return (
     <div className="border-t border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-surface)] px-3 py-3">
       <div className="mb-2.5 flex items-center justify-between gap-2">
         <div className="text-xs font-medium text-[var(--glass-text-secondary)]">
           分镜组关键帧 · {frames.length} 帧
         </div>
-        <div className="flex items-center gap-1 text-[11px] text-[var(--glass-text-tertiary)]">
-          <AppIcon name="link" size={12} />
-          连贯参考链
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-full border border-[var(--glass-stroke-subtle)] px-2 py-1 text-[11px] text-[var(--glass-text-secondary)] hover:border-[var(--glass-tone-info-fg)] hover:text-[var(--glass-tone-info-fg)]"
+            onClick={() => setIsExpanded(true)}
+          >
+            <AppIcon name="externalLink" size={12} />
+            展开查看
+          </button>
+          <div className="flex items-center gap-1 text-[11px] text-[var(--glass-text-tertiary)]">
+            <AppIcon name="link" size={12} />
+            连贯参考链
+          </div>
         </div>
       </div>
       <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
@@ -243,9 +334,7 @@ function PanelFrameGrid({
                   <div className="truncate text-[11px] font-medium text-[var(--glass-text-secondary)]">
                     {frame.frameRole || '关键状态'}
                   </div>
-                  <div className="shrink-0 rounded-full bg-[var(--glass-bg-muted)] px-1.5 py-0.5 text-[10px] text-[var(--glass-text-tertiary)]">
-                    {frame.frameTimeSec}s
-                  </div>
+                  {renderFrameTimeControl(frame, true)}
                 </div>
                 <div className="inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--glass-stroke-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--glass-text-secondary)]">
                   <AppIcon name="link" size={10} className="shrink-0" />
@@ -259,6 +348,63 @@ function PanelFrameGrid({
           )
         })}
       </div>
+      {isExpanded ? (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setIsExpanded(false)}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--glass-stroke-subtle)] px-4 py-3">
+              <div className="text-sm font-semibold text-[var(--glass-text-primary)]">
+                分镜组关键帧 · {frames.length} 帧
+              </div>
+              <button
+                type="button"
+                className="rounded-full p-2 text-[var(--glass-text-tertiary)] hover:bg-[var(--glass-bg-muted)] hover:text-[var(--glass-text-primary)]"
+                onClick={() => setIsExpanded(false)}
+              >
+                <AppIcon name="close" size={18} />
+              </button>
+            </div>
+            <div className="max-h-[calc(90vh-56px)] overflow-y-auto p-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {frames.map((frame) => (
+                  <div key={frame.id} className="overflow-hidden rounded-lg border border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-surface-strong)]">
+                    <button
+                      type="button"
+                      className="relative block aspect-video w-full bg-[var(--glass-bg-muted)]"
+                      onClick={() => frame.imageUrl && onPreviewImage?.(frame.imageUrl)}
+                    >
+                      {frame.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={frame.imageUrl} alt={`F${frame.frameIndex + 1}`} className="h-full w-full object-contain" />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-sm text-[var(--glass-text-tertiary)]">待生成</div>
+                      )}
+                      <span className="absolute left-2 top-2 rounded-full bg-black/65 px-2 py-1 text-xs font-semibold text-white">
+                        F{frame.frameIndex + 1} · {frame.frameTimeSec}s
+                      </span>
+                    </button>
+                    <div className="space-y-2 p-3">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--glass-text-secondary)]">
+                        <span className="rounded-full bg-[var(--glass-bg-muted)] px-2 py-0.5">{frame.frameRole || '关键状态'}</span>
+                        <span className="rounded-full border border-[var(--glass-stroke-subtle)] px-2 py-0.5">{getRelationText(frame)}</span>
+                        {renderFrameTimeControl(frame)}
+                      </div>
+                      <div className="whitespace-pre-wrap text-xs leading-5 text-[var(--glass-text-secondary)]">
+                        {frame.imagePrompt || frame.videoPrompt || '暂无提示词'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -292,6 +438,7 @@ export default function PanelCard({
   onUploadImage,
   onUploadFrameImage,
   onRegenerateFrameImage,
+  onUpdateFrameTime,
   onOpenEditModal,
   onOpenAIDataModal,
   onSelectCandidateIndex,
@@ -390,6 +537,7 @@ export default function PanelCard({
           onPreviewImage={onPreviewImage}
           onUploadFrameImage={onUploadFrameImage}
           onRegenerateFrameImage={onRegenerateFrameImage}
+          onUpdateFrameTime={onUpdateFrameTime}
         />
         {/* 插入分镜/镜头变体按钮 - 在图片区域右侧垂直居中 */}
         {(onInsertAfter || onVariant) && (

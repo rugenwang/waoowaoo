@@ -23,7 +23,7 @@ type LocalVideoOptions = {
   aspectRatio?: string // '16:9' | '9:16'
   seed?: number
   random_seed?: boolean
-  generationMode?: 'normal' | 'firstlastframe'
+  generationMode?: 'normal' | 'firstlastframe' | 'keyframes'
   lastFrameImageUrl?: string
   keyframes?: Array<{
     imageUrl?: string

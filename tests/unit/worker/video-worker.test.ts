@@ -9,9 +9,17 @@ type PanelRow = {
   videoUrl: string | null
   imageUrl: string | null
   videoPrompt: string | null
+  groupVideoPrompt?: string | null
   description: string | null
   firstLastFramePrompt: string | null
   duration: number | null
+  groupDurationSec?: number | null
+  frames?: Array<{
+    id: string
+    frameIndex: number
+    frameTimeSec: number
+    imageUrl: string | null
+  }>
 }
 
 const workerState = vi.hoisted(() => ({
@@ -42,6 +50,9 @@ const concurrencyGateMock = vi.hoisted(() => ({
   withUserConcurrencyGate: vi.fn(async <T>(input: {
     run: () => Promise<T>
   }) => await input.run()),
+}))
+const modelConfigContractMock = vi.hoisted(() => ({
+  parseModelKeyStrict: vi.fn(() => ({ provider: 'fal' })),
 }))
 
 const prismaMock = vi.hoisted(() => ({
@@ -91,7 +102,7 @@ vi.mock('@/lib/model-capabilities/lookup', () => ({
   resolveBuiltinCapabilitiesByModelKey: vi.fn(() => ({ video: { firstlastframe: true } })),
 }))
 vi.mock('@/lib/model-config-contract', () => ({
-  parseModelKeyStrict: vi.fn(() => ({ provider: 'fal' })),
+  parseModelKeyStrict: modelConfigContractMock.parseModelKeyStrict,
 }))
 vi.mock('@/lib/api-config', () => ({
   getProviderConfig: vi.fn(async () => ({ apiKey: 'api-key' })),
@@ -140,6 +151,7 @@ describe('worker video processor behavior', () => {
 
     prismaMock.novelPromotionPanel.findUnique.mockResolvedValue(buildPanel())
     prismaMock.novelPromotionPanel.findFirst.mockResolvedValue(buildPanel())
+    modelConfigContractMock.parseModelKeyStrict.mockReturnValue({ provider: 'fal' })
     prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValue({
       id: 'line-1',
       audioUrl: 'cos/line-1.mp3',
@@ -223,6 +235,108 @@ describe('worker video processor behavior', () => {
       videoUrl: 'cos/lip-sync/video.mp4',
       actualVideoTokens: 108000,
     })
+  })
+
+  it('VIDEO_PANEL: local 组帧生视频传入所有组内关键帧', async () => {
+    const processor = workerState.processor
+    expect(processor).toBeTruthy()
+
+    modelConfigContractMock.parseModelKeyStrict.mockReturnValue({ provider: 'local' })
+    prismaMock.novelPromotionPanel.findUnique.mockResolvedValueOnce(buildPanel({
+      groupVideoPrompt: 'group timeline prompt',
+      groupDurationSec: 8,
+      frames: [
+        { id: 'frame-1', frameIndex: 0, frameTimeSec: 0, imageUrl: 'cos/f1.png' },
+        { id: 'frame-2', frameIndex: 1, frameTimeSec: 4, imageUrl: 'cos/f2.png' },
+        { id: 'frame-3', frameIndex: 2, frameTimeSec: 8, imageUrl: 'cos/f3.png' },
+      ],
+    }))
+
+    const job = buildJob({
+      type: TASK_TYPE.VIDEO_PANEL,
+      payload: {
+        videoModel: 'local::local/video',
+        generationOptions: {
+          duration: 8,
+        },
+      },
+    })
+
+    await processor!(job)
+
+    expect(utilsMock.resolveVideoSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        modelId: 'local::local/video',
+        imageUrl: 'https://signed.example/cos/f1.png',
+        options: expect.objectContaining({
+          prompt: 'group timeline prompt',
+          generationMode: 'keyframes',
+          keyframes: [
+            { imageUrl: 'https://signed.example/cos/f1.png', frameTimeSec: 0 },
+            { imageUrl: 'https://signed.example/cos/f2.png', frameTimeSec: 4 },
+            { imageUrl: 'https://signed.example/cos/f3.png', frameTimeSec: 8 },
+          ],
+        }),
+      }),
+    )
+  })
+
+  it('VIDEO_PANEL: local 首尾帧链接传入组内关键帧和下一分镜首帧', async () => {
+    const processor = workerState.processor
+    expect(processor).toBeTruthy()
+
+    modelConfigContractMock.parseModelKeyStrict.mockReturnValue({ provider: 'local' })
+    prismaMock.novelPromotionPanel.findUnique.mockResolvedValueOnce(buildPanel({
+      firstLastFramePrompt: 'first last timeline prompt',
+      groupDurationSec: 8,
+      frames: [
+        { id: 'frame-1', frameIndex: 0, frameTimeSec: 0, imageUrl: 'cos/f1.png' },
+        { id: 'frame-2', frameIndex: 1, frameTimeSec: 4, imageUrl: 'cos/f2.png' },
+      ],
+    }))
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce(buildPanel({
+      id: 'panel-2',
+      imageUrl: 'cos/next-cover.png',
+      frames: [
+        { id: 'next-frame-1', frameIndex: 0, frameTimeSec: 0, imageUrl: 'cos/next-f1.png' },
+        { id: 'next-frame-2', frameIndex: 1, frameTimeSec: 6, imageUrl: 'cos/next-tail.png' },
+      ],
+    }))
+
+    const job = buildJob({
+      type: TASK_TYPE.VIDEO_PANEL,
+      payload: {
+        videoModel: 'local::local/video',
+        firstLastFrame: {
+          flModel: 'local::local/video',
+          lastFrameStoryboardId: 'storyboard-1',
+          lastFramePanelIndex: 1,
+        },
+        generationOptions: {
+          duration: 8,
+        },
+      },
+    })
+
+    await processor!(job)
+
+    expect(utilsMock.resolveVideoSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        modelId: 'local::local/video',
+        options: expect.objectContaining({
+          prompt: 'first last timeline prompt',
+          generationMode: 'firstlastframe',
+          lastFrameImageUrl: 'https://signed.example/cos/next-f1.png',
+          keyframes: [
+            { imageUrl: 'https://signed.example/cos/f1.png', frameTimeSec: 0 },
+            { imageUrl: 'https://signed.example/cos/f2.png', frameTimeSec: 4 },
+            { imageUrl: 'https://signed.example/cos/next-f1.png', frameTimeSec: 8 },
+          ],
+        }),
+      }),
+    )
   })
 
   it('LIP_SYNC: 缺少 panel 时显式失败', async () => {

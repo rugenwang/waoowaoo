@@ -38,6 +38,9 @@ export const POST = apiHandler(async (
         },
       },
     },
+    include: {
+      frames: { orderBy: { frameIndex: 'asc' }, take: 1 },
+    },
   })
 
   if (!panel) {
@@ -58,20 +61,38 @@ export const POST = apiHandler(async (
     sizeBytes: processed.length,
   })
 
-  await prisma.novelPromotionPanel.update({
-    where: { id: panelId },
-    data: {
-      previousImageUrl: panel.imageUrl || panel.previousImageUrl || null,
-      previousImageMediaId: panel.imageMediaId || panel.previousImageMediaId || null,
-      imageUrl: key,
-      imageMediaId: media.id,
-      candidateImages: null,
-    },
-  })
+  const firstFrame = panel.frames[0]
+  await prisma.$transaction([
+    prisma.novelPromotionPanel.update({
+      where: { id: panelId },
+      data: {
+        previousImageUrl: panel.imageUrl || panel.previousImageUrl || null,
+        previousImageMediaId: panel.imageMediaId || panel.previousImageMediaId || null,
+        imageUrl: key,
+        imageMediaId: media.id,
+        candidateImages: null,
+      },
+    }),
+    ...(firstFrame
+      ? [
+        prisma.novelPromotionPanelFrame.update({
+          where: { id: firstFrame.id },
+          data: {
+            imageUrl: key,
+            imageMediaId: media.id,
+            generationStatus: 'completed',
+            errorMessage: null,
+          },
+        }),
+      ]
+      : []),
+  ])
 
   return NextResponse.json({
     success: true,
     imageKey: key,
     imageUrl: media.url,
+    frameId: firstFrame?.id || null,
+    frameImageUpdated: Boolean(firstFrame),
   })
 })

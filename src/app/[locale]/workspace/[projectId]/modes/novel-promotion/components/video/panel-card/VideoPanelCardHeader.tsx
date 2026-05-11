@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import TaskStatusOverlay from '@/components/task/TaskStatusOverlay'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 
@@ -8,7 +8,11 @@ import { useTaskQueue } from '@/lib/task-queue'
 import { buildVideoSubmissionKey } from '@/lib/novel-promotion/stages/video-stage-runtime/immediate-video-submission'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import { useTaskTargetStateMap } from '@/lib/query/hooks/useTaskTargetStateMap'
+import { useUpdateProjectPanelFrameTime } from '@/lib/query/hooks'
 import { useCancelTask } from '@/lib/query/mutations'
+import { shouldShowError } from '@/lib/error-utils'
+import { extractErrorMessage } from '@/lib/errors/extract'
+import type { NovelPromotionPanelFrame } from '@/types/project'
 
 interface VideoPanelCardHeaderProps {
   runtime: VideoPanelRuntime
@@ -37,7 +41,7 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
   const [dismissedErrorCodes, _setDismissedErrorCodes] = useState<Set<string>>(new Set())
 
   // 同时更新 state 和 sessionStorage 的辅助方法
-  const setDismissed = (updater: (prev: Set<string>) => Set<string>) => {
+  const setDismissed = useCallback((updater: (prev: Set<string>) => Set<string>) => {
     _setDismissedErrorCodes(prev => {
       const next = updater(prev)
       try {
@@ -49,7 +53,7 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
       } catch {}
       return next
     })
-  }
+  }, [dismissedStorageKey])
 
   // 挂载后或从 sessionStorage key 变化时，从 sessionStorage 恢复（SSR 安全）
   useEffect(() => {
@@ -73,7 +77,7 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
       hasSeenErrorRef.current = false
       setDismissed(() => new Set())
     }
-  }, [currentErrorCode])
+  }, [currentErrorCode, setDismissed])
 
   const [showTooltip, setShowTooltip] = useState(false)
   const taskQueue = useTaskQueue()
@@ -90,6 +94,7 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
   const projectId = layout.projectId || 'unknown-project'
   const targetId = panel.panelId || ''
   const cancelTask = useCancelTask(projectId)
+  const updateFrameTime = useUpdateProjectPanelFrameTime(projectId)
   const taskStateMap = useTaskTargetStateMap(layout.projectId, [
      { targetType: 'NovelPromotionPanel', targetId },
    ], { enabled: !!layout.projectId && !!targetId })
@@ -97,9 +102,47 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
   const canCancel = !!taskState?.runningTaskId && (taskState?.phase === 'queued' || taskState?.phase === 'processing')
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const groupFrames = Array.isArray(panel.frames)
+    ? panel.frames.filter((frame) => typeof frame.imageUrl === 'string' && frame.imageUrl.trim())
+    : []
+  const showGroupFrames = groupFrames.length > 1
+  const [frameTimeDrafts, setFrameTimeDrafts] = useState<Record<string, string>>({})
+
+  const getFrameTimeDraft = (frame: NovelPromotionPanelFrame) => {
+    return frameTimeDrafts[frame.id] ?? String(frame.frameTimeSec)
+  }
+
+  const setFrameTimeDraft = (frameId: string, value: string) => {
+    setFrameTimeDrafts((prev) => ({ ...prev, [frameId]: value }))
+  }
+
+  const commitFrameTime = async (frame: NovelPromotionPanelFrame) => {
+    if (frame.frameIndex === 0) return
+    const raw = getFrameTimeDraft(frame).trim()
+    const nextValue = Number(raw)
+    if (!Number.isFinite(nextValue) || nextValue <= 0) {
+      alert('F1 之后的关键帧起始时间必须大于 0 秒')
+      setFrameTimeDraft(frame.id, String(frame.frameTimeSec))
+      return
+    }
+    const normalized = Math.round(nextValue * 100) / 100
+    if (normalized === frame.frameTimeSec) {
+      setFrameTimeDraft(frame.id, String(frame.frameTimeSec))
+      return
+    }
+    try {
+      await updateFrameTime.mutateAsync({ frameId: frame.id, frameTimeSec: normalized })
+      setFrameTimeDraft(frame.id, String(normalized))
+    } catch (error: unknown) {
+      setFrameTimeDraft(frame.id, String(frame.frameTimeSec))
+      if (shouldShowError(error)) {
+        alert(extractErrorMessage(error, '更新关键帧时间失败'))
+      }
+    }
+  }
 
   return (
-     <div className="bg-[var(--glass-bg-muted)] flex items-center justify-center relative" style={{ aspectRatio: player.cssAspectRatio }}>
+     <div className="group/video-frame bg-[var(--glass-bg-muted)] flex items-center justify-center relative" style={{ aspectRatio: player.cssAspectRatio }}>
        {hasVisibleBaseVideo && player.isPlaying ? (
          <video
           ref={player.videoRef}
@@ -143,6 +186,70 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
        <div className="absolute top-2 left-2 bg-[var(--glass-overlay)] text-white px-2 py-0.5 rounded text-xs font-medium">
          {panelIndex + 1}
        </div>
+
+       {showGroupFrames && (
+         <div className="pointer-events-none absolute left-2 right-2 bottom-2 z-20 flex gap-1.5 overflow-x-auto rounded-lg bg-black/45 p-1.5 backdrop-blur">
+           {groupFrames.map((frame) => (
+             <div
+              key={frame.id}
+              className="pointer-events-auto relative h-12 w-20 shrink-0 overflow-hidden rounded border border-white/35 bg-black/40"
+              title={`F${frame.frameIndex + 1} · 从 ${frame.frameTimeSec}s 开始`}
+             >
+               <button
+                type="button"
+                className="absolute inset-0 h-full w-full"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  if (frame.imageUrl) media.onPreviewImage?.(frame.imageUrl)
+                }}
+                aria-label={`预览关键帧 F${frame.frameIndex + 1}`}
+               >
+               <MediaImageWithLoading
+                src={frame.imageUrl || ''}
+                alt={`F${frame.frameIndex + 1}`}
+                containerClassName="h-full w-full bg-black"
+                className="h-full w-full object-cover"
+               />
+               </button>
+               <span className="absolute left-1 top-1 rounded bg-black/65 px-1 text-[10px] font-semibold text-white">
+                 F{frame.frameIndex + 1}
+               </span>
+               {frame.frameIndex === 0 ? (
+                 <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[10px] font-medium text-white">
+                   {frame.frameTimeSec}s
+                 </span>
+               ) : (
+                 <label
+                  className="absolute bottom-1 right-1 rounded bg-black/75 px-1 text-[10px] font-medium text-white"
+                  onClick={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
+                 >
+                   <span className="sr-only">F{frame.frameIndex + 1} 起始时间</span>
+                   <input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    value={getFrameTimeDraft(frame)}
+                    disabled={updateFrameTime.isPending}
+                    className="w-9 bg-transparent text-right text-[10px] font-medium text-white outline-none disabled:opacity-60"
+                    onChange={(event) => setFrameTimeDraft(frame.id, event.currentTarget.value)}
+                    onBlur={() => void commitFrameTime(frame)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.currentTarget.blur()
+                      } else if (event.key === 'Escape') {
+                        setFrameTimeDraft(frame.id, String(frame.frameTimeSec))
+                        event.currentTarget.blur()
+                      }
+                    }}
+                   />
+                   <span>s</span>
+                 </label>
+               )}
+             </div>
+           ))}
+         </div>
+       )}
 
        {/* 两卡片中间唯一的链接/断开按钮 */}
 
@@ -213,7 +320,7 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
              || !videoModel.selectedModel
              || videoModel.missingCapabilityFields.length > 0
            }
-          className="absolute bottom-2 right-2 bg-[var(--glass-overlay)] hover:bg-[var(--glass-overlay-strong)] text-white p-2 rounded-full transition-all z-20 disabled:cursor-not-allowed disabled:opacity-50"
+          className="absolute bottom-2 right-2 bg-black/75 hover:bg-black/90 text-white p-2 rounded-full transition-all z-30 shadow-lg ring-1 ring-white/20 disabled:cursor-not-allowed disabled:opacity-50"
          >
            <AppIcon name="refresh" className="w-4 h-4" />
          </button>
@@ -224,7 +331,7 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
          <button
           onClick={(e) => { e.stopPropagation(); cancelTask.mutate(taskState!.runningTaskId!) }}
           disabled={cancelTask.isPending}
-          className="absolute bottom-2 right-12 bg-[var(--glass-overlay)] hover:bg-[var(--glass-overlay-strong)] text-white p-2 rounded-full transition-all z-20 disabled:cursor-not-allowed disabled:opacity-50"
+          className="absolute bottom-2 right-12 bg-black/75 hover:bg-black/90 text-white p-2 rounded-full transition-all z-30 shadow-lg ring-1 ring-white/20 disabled:cursor-not-allowed disabled:opacity-50"
           title="取消任务"
          >
            <AppIcon name="close" className="w-4 h-4" />
@@ -270,7 +377,7 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
            <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploadingVideo}
-            className="absolute bottom-2 left-2 bg-[var(--glass-overlay)] hover:bg-[var(--glass-overlay-strong)] text-white p-2 rounded-full transition-all z-20 disabled:opacity-50"
+            className="absolute bottom-2 left-2 bg-black/75 hover:bg-black/90 text-white p-2 rounded-full transition-all z-30 shadow-lg ring-1 ring-white/20 disabled:opacity-50"
             title="上传本地视频"
            >
              <AppIcon name="upload" className="w-4 h-4" />

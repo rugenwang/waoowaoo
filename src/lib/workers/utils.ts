@@ -753,8 +753,13 @@ export async function resolveVideoSourceFromGeneration(
   if (
     params.options?.generationMode === 'normal'
     || params.options?.generationMode === 'firstlastframe'
+    || params.options?.generationMode === 'keyframes'
   ) {
-    runtimeSelections.generationMode = params.options.generationMode
+    // keyframes is an internal local-generator mode. Capability/pricing catalogs
+    // only expose provider-level modes, so validate it as normal I2V.
+    runtimeSelections.generationMode = params.options.generationMode === 'keyframes'
+      ? 'normal'
+      : params.options.generationMode
   }
   if (typeof params.options?.generateAudio === 'boolean') {
     runtimeSelections.generateAudio = params.options.generateAudio

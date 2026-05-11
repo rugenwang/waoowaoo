@@ -123,6 +123,7 @@ export interface ProjectModelConfig {
   localStoryboardPromptRefineLevel: 'conservative' | 'medium' | 'simple'
   localStoryboardUsePanelDescriptionEnabled: boolean
   progressPopupEnabled: boolean
+  forcedStoryboardDurationSec: 8 | 10 | 15 | 20 | null
 }
 
 export interface UserModelConfig {
@@ -206,6 +207,17 @@ export async function getProjectModelConfig(
       : (typeof (userPref as unknown as Record<string, unknown> | null)?.progressPopupEnabled === 'boolean'
         ? (userPref as unknown as Record<string, unknown>).progressPopupEnabled as boolean
         : false)
+  const forcedStoryboardDurationRaw =
+    typeof rawProject?.forcedStoryboardDurationSec === 'number'
+      ? Math.floor(rawProject.forcedStoryboardDurationSec)
+      : null
+  const forcedStoryboardDurationSec =
+    forcedStoryboardDurationRaw === 8
+    || forcedStoryboardDurationRaw === 10
+    || forcedStoryboardDurationRaw === 15
+    || forcedStoryboardDurationRaw === 20
+      ? forcedStoryboardDurationRaw
+      : null
 
   return {
     analysisModel: extractModelKey(projectData?.analysisModel) || extractModelKey(userPref?.analysisModel) || null,
@@ -232,6 +244,7 @@ export async function getProjectModelConfig(
     localStoryboardPromptRefineLevel,
     localStoryboardUsePanelDescriptionEnabled,
     progressPopupEnabled,
+    forcedStoryboardDurationSec,
   }
 }
 

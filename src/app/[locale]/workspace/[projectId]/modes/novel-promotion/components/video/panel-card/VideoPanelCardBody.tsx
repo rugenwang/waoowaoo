@@ -32,6 +32,31 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
   const [isEditingDuration, setIsEditingDuration] = useState(false)
   const [editingDuration, setEditingDuration] = useState<string>('')
   const durationSuffix = useMemo(() => t('promptModal.duration'), [t])
+  const inheritedFirstLastGenerationOptions = useMemo(
+    () => {
+      const next = { ...layout.flGenerationOptions }
+      const fieldDefaults = new Map(
+        layout.flCapabilityFields.map((field) => [field.field, field.options[0]]),
+      )
+      for (const [field, value] of Object.entries(videoModel.generationOptions)) {
+        if (field === 'duration') continue
+        const flValue = layout.flGenerationOptions[field]
+        const defaultValue = fieldDefaults.get(field)
+        const isFlOnlyDefault =
+          flValue === undefined
+          || (
+            defaultValue !== undefined
+            && String(flValue) === String(defaultValue)
+            && String(value) !== String(defaultValue)
+          )
+        if (isFlOnlyDefault) {
+          next[field] = value
+        }
+      }
+      return next
+    },
+    [layout.flCapabilityFields, layout.flGenerationOptions, videoModel.generationOptions],
+  )
 
   const beginEditDuration = () => {
     setEditingDuration(currentDuration ? String(currentDuration) : '')
@@ -173,6 +198,12 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
 
             {showsFirstLastFrameActions ? (() => {
               const linkedNextPanel = layout.nextPanel!
+              const linkedNextStartImage = Array.isArray(linkedNextPanel.frames)
+                ? [...linkedNextPanel.frames]
+                  .filter((frame) => typeof frame.imageUrl === 'string' && frame.imageUrl.trim())
+                  .sort((left, right) => left.frameTimeSec - right.frameTimeSec || left.frameIndex - right.frameIndex)
+                  .at(0)?.imageUrl || linkedNextPanel.imageUrl
+                : linkedNextPanel.imageUrl
               return (
                 <div className="mt-2 flex items-center gap-2">
                   <button
@@ -182,13 +213,13 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                       linkedNextPanel.storyboardId,
                       linkedNextPanel.panelIndex,
                       panelKey,
-                      layout.flGenerationOptions,
+                      inheritedFirstLastGenerationOptions,
                       panel.panelId,
                     )}
                     disabled={
                       taskStatus.isVideoTaskRunning
                       || !panel.imageUrl
-                      || !linkedNextPanel.imageUrl
+                      || !linkedNextStartImage
                       || !layout.flModel
                       || layout.flMissingCapabilityFields.length > 0
                     }
@@ -208,7 +239,7 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                         options: field.options,
                         disabledOptions: field.disabledOptions,
                       }))}
-                      capabilityOverrides={layout.flGenerationOptions}
+                      capabilityOverrides={inheritedFirstLastGenerationOptions}
                       onCapabilityChange={(field, rawValue) => {
                         if (field === 'duration') {
                           const duration = rawValue === '' ? null : Number(rawValue)

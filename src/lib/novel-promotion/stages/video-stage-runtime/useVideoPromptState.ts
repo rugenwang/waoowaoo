@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { logError as _ulogError } from '@/lib/logging/core'
 import type { VideoPanel } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video'
 
-export type PromptField = 'videoPrompt' | 'firstLastFramePrompt'
+export type PromptField = 'videoPrompt' | 'groupVideoPrompt' | 'firstLastFramePrompt'
 
 interface UseVideoPromptStateParams {
   allPanels: VideoPanel[]
@@ -39,7 +39,8 @@ export function useVideoPromptState({
       for (const panel of allPanels) {
         const panelKey = `${panel.storyboardId}-${panel.panelIndex}`
         const promptEntries: Array<[PromptField, string]> = [
-          ['videoPrompt', panel.textPanel?.video_prompt || ''],
+          ['videoPrompt', panel.videoPrompt || ''],
+          ['groupVideoPrompt', panel.groupVideoPrompt || ''],
           ['firstLastFramePrompt', panel.firstLastFramePrompt || ''],
         ]
         for (const [field, value] of promptEntries) {
@@ -78,7 +79,11 @@ export function useVideoPromptState({
         const panelKey = `${panel.storyboardId}-${panel.panelIndex}`
         externalPromptMap.set(
           buildPromptStateKey(panelKey, 'videoPrompt'),
-          panel.textPanel?.video_prompt || '',
+          panel.videoPrompt || '',
+        )
+        externalPromptMap.set(
+          buildPromptStateKey(panelKey, 'groupVideoPrompt'),
+          panel.groupVideoPrompt || '',
         )
         externalPromptMap.set(
           buildPromptStateKey(panelKey, 'firstLastFramePrompt'),

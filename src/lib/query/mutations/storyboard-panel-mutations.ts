@@ -172,6 +172,35 @@ export function useRegenerateProjectPanelFrameImage(projectId: string) {
     })
 }
 
+export function useUpdateProjectPanelFrameTime(projectId: string) {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: async ({
+            frameId,
+            frameTimeSec,
+        }: {
+            frameId: string
+            frameTimeSec: number
+        }) => {
+            return await requestJsonWithError<{
+                success: boolean
+                frameId: string
+                panelId: string
+                frameIndex: number
+                frameTimeSec: number
+            }>(`/api/novel-promotion/${projectId}/panel-frame`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frameId, frameTimeSec }),
+            }, '更新关键帧时间失败')
+        },
+        onSettled: async () => {
+            await invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+            await queryClient.invalidateQueries({ queryKey: ['episode-data', projectId], exact: false })
+        },
+    })
+}
+
 /**
  * 修改镜头图片（storyboard）
  */

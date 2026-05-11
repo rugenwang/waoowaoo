@@ -57,6 +57,7 @@ export default function StoryboardGroup({
   onUploadImage,
   onUploadFrameImage,
   onRegenerateFrameImage,
+  onUpdateFrameTime,
   onOpenEditModal,
   onOpenAIDataModal,
   getPanelCandidates,
@@ -230,6 +231,7 @@ export default function StoryboardGroup({
         onUploadImage={onUploadImage}
         onUploadFrameImage={onUploadFrameImage}
         onRegenerateFrameImage={onRegenerateFrameImage}
+        onUpdateFrameTime={onUpdateFrameTime}
         onOpenEditModal={onOpenEditModal}
         onOpenAIDataModal={onOpenAIDataModal}
         onSelectPanelCandidateIndex={onSelectPanelCandidateIndex}

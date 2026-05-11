@@ -120,6 +120,7 @@ export {
     useUploadProjectPanelImage,
     useUploadProjectPanelFrameImage,
     useRegenerateProjectPanelFrameImage,
+    useUpdateProjectPanelFrameTime,
     useModifyProjectStoryboardImage,
     useDownloadProjectImages,
     useUpdateProjectPanel,

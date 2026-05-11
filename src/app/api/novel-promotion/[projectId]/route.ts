@@ -321,6 +321,8 @@ export const PATCH = apiHandler(async (
     'localStoryboardUsePanelDescriptionEnabled',
     // queue mode (frontend)
     'progressPopupEnabled',
+    // storyboard grouping duration preference
+    'forcedStoryboardDurationSec',
   ] as const
 
   const updateData: Record<string, unknown> = {}
@@ -412,6 +414,19 @@ export const PATCH = apiHandler(async (
         throw new ApiError('INVALID_PARAMS', { code: 'INVALID_BOOLEAN', field })
       }
       updateData.progressPopupEnabled = raw
+      continue
+    }
+    if (field === 'forcedStoryboardDurationSec') {
+      const raw = body[field]
+      if (raw === null || raw === '' || raw === 0) {
+        updateData.forcedStoryboardDurationSec = null
+        continue
+      }
+      const value = typeof raw === 'number' ? Math.floor(raw) : Number(raw)
+      if (value !== 8 && value !== 10 && value !== 15 && value !== 20) {
+        throw new ApiError('INVALID_PARAMS', { code: 'INVALID_ENUM', field })
+      }
+      updateData.forcedStoryboardDurationSec = value
       continue
     }
 

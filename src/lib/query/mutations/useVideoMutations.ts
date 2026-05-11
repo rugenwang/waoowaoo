@@ -94,7 +94,7 @@ export function useUpdateProjectPanelVideoPrompt(projectId: string) {
       storyboardId: string
       panelIndex: number
       value: string
-      field?: 'videoPrompt' | 'firstLastFramePrompt'
+      field?: 'videoPrompt' | 'groupVideoPrompt' | 'firstLastFramePrompt'
     }) =>
       await requestJsonWithError(
         `/api/novel-promotion/${projectId}/panel`,
@@ -106,7 +106,9 @@ export function useUpdateProjectPanelVideoPrompt(projectId: string) {
             panelIndex,
             ...(field === 'firstLastFramePrompt'
               ? { firstLastFramePrompt: value }
-              : { videoPrompt: value }),
+              : field === 'groupVideoPrompt'
+                ? { groupVideoPrompt: value }
+                : { videoPrompt: value }),
           }),
         },
         'update failed',
@@ -117,7 +119,9 @@ export function useUpdateProjectPanelVideoPrompt(projectId: string) {
         panelIndex,
         patch: field === 'firstLastFramePrompt'
           ? { firstLastFramePrompt: value }
-          : { videoPrompt: value },
+          : field === 'groupVideoPrompt'
+            ? { groupVideoPrompt: value }
+            : { videoPrompt: value },
       })
     },
     onSettled: async () => {

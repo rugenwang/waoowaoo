@@ -308,6 +308,8 @@ model NovelPromotionProject {
   localStoryboardUsePanelDescriptionEnabled Boolean @default(false)
   // 进度弹窗提示：开启后前端将批量任务改为顺序排队执行，并减少轮询刷新范围
   progressPopupEnabled Boolean @default(false)
+  // 分镜生成时尽量把每个分镜组控制到指定秒数；null/0 表示不强制
+  forcedStoryboardDurationSec Int?
   editModel       String? // 用户配置的修图/编辑模型
   videoResolution String                    @default("720p")
   capabilityOverrides String?              @db.Text

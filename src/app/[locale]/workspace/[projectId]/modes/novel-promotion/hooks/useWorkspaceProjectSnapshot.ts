@@ -76,6 +76,13 @@ export function useWorkspaceProjectSnapshot({
           : 'medium',
       localStoryboardUsePanelDescriptionEnabled: projectData?.localStoryboardUsePanelDescriptionEnabled === true,
       progressPopupEnabled: projectData?.progressPopupEnabled === true,
+      forcedStoryboardDurationSec:
+        projectData?.forcedStoryboardDurationSec === 8
+        || projectData?.forcedStoryboardDurationSec === 10
+        || projectData?.forcedStoryboardDurationSec === 15
+        || projectData?.forcedStoryboardDurationSec === 20
+          ? projectData.forcedStoryboardDurationSec
+          : null,
     }
   }, [episode?.novelText, episode?.storyboards, project.novelPromotionData, urlStage])
 }

@@ -10,6 +10,7 @@ import StoryboardToolbar from './StoryboardToolbar'
 import StoryboardCanvas from './StoryboardCanvas'
 import { useStoryboardStageController } from './hooks/useStoryboardStageController'
 import { useStoryboardModalRuntime } from './hooks/useStoryboardModalRuntime'
+import { useUpdateProjectPanelFrameTime } from '@/lib/query/hooks'
 
 interface StoryboardStageProps {
   projectId: string
@@ -145,6 +146,24 @@ export default function StoryboardStage({
     updatePanelActingNotesMutation,
   })
 
+  const updatePanelFrameTimeMutation = useUpdateProjectPanelFrameTime(projectId)
+  const updatePanelFrameTime = async (frameId: string, frameTimeSec: number) => {
+    const result = await updatePanelFrameTimeMutation.mutateAsync({ frameId, frameTimeSec })
+    setLocalStoryboards((prev) =>
+      prev.map((storyboard) => ({
+        ...storyboard,
+        panels: storyboard.panels?.map((panel) => ({
+          ...panel,
+          frames: panel.frames?.map((frame) =>
+            frame.id === frameId
+              ? { ...frame, frameTimeSec: result.frameTimeSec ?? frameTimeSec }
+              : frame,
+          ),
+        })),
+      })),
+    )
+  }
+
   return (
       <StoryboardStageShell
         isTransitioning={isTransitioning}
@@ -212,6 +231,7 @@ export default function StoryboardStage({
           onRegenerateFrameImage={async (panelId, frameId) => {
             await regeneratePanelFrameImage(panelId, frameId)
           }}
+          onUpdateFrameTime={updatePanelFrameTime}
           onOpenEditModal={(storyboardId, panelIndex) => setEditingPanel({ storyboardId, panelIndex })}
           onOpenAIDataModal={(storyboardId, panelIndex) => setAIDataPanel({ storyboardId, panelIndex })}
           getPanelCandidates={getPanelCandidates}

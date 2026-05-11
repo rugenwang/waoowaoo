@@ -228,12 +228,19 @@ export function usePanelCrudActions({
 
     try {
       await deletePanelMutation.mutateAsync({ panelId })
-      setLocalStoryboards((previous) => previous.map((storyboard) => {
-        if (storyboard.id !== storyboardId) return storyboard
-        const panels = getStoryboardPanels(storyboard)
-        const updatedPanels = panels.filter((panel) => panel.id !== panelId)
-        return { ...storyboard, panels: updatedPanels }
-      }))
+      setLocalStoryboards((previous) => previous
+        .map((storyboard) => {
+          if (storyboard.id !== storyboardId) return storyboard
+          const panels = getStoryboardPanels(storyboard)
+          const updatedPanels = panels.filter((panel) => panel.id !== panelId)
+          return {
+            ...storyboard,
+            panels: updatedPanels,
+            panelCount: updatedPanels.length,
+          }
+        })
+        .filter((storyboard) => storyboard.id !== storyboardId || getStoryboardPanels(storyboard).length > 0))
+      await onRefresh()
     } catch (error: unknown) {
       if (isAbortError(error)) {
         _ulogInfo('请求被中断（可能是页面刷新），后端仍在执行')
@@ -267,7 +274,7 @@ export function usePanelCrudActions({
         delete saveTimeouts.current[panelId]
       }
     }
-  }, [deletePanelMutation, t])
+  }, [deletePanelMutation, onRefresh, t])
 
   const addCharacterToPanel = useCallback((
     panel: StoryboardPanel,

@@ -68,6 +68,7 @@ interface SettingsModalProps {
     localStoryboardPromptRefineLevel?: 'conservative' | 'medium' | 'simple'
     localStoryboardUsePanelDescriptionEnabled?: boolean
     progressPopupEnabled?: boolean
+    forcedStoryboardDurationSec?: 8 | 10 | 15 | 20 | null
     onArtStyleChange?: (value: string) => void
     onAnalysisModelChange?: (value: string) => void
     onCharacterModelChange?: (value: string) => void
@@ -93,6 +94,7 @@ interface SettingsModalProps {
     onLocalStoryboardPromptRefineLevelChange?: (value: 'conservative' | 'medium' | 'simple') => void
     onLocalStoryboardUsePanelDescriptionEnabledChange?: (value: boolean) => void
     onProgressPopupEnabledChange?: (value: boolean) => void
+    onForcedStoryboardDurationSecChange?: (value: 8 | 10 | 15 | 20 | null) => void
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -178,6 +180,7 @@ export function SettingsModal({
     localStoryboardPromptRefineLevel,
     localStoryboardUsePanelDescriptionEnabled,
     progressPopupEnabled,
+    forcedStoryboardDurationSec,
     onArtStyleChange,
     onAnalysisModelChange,
     onCharacterModelChange,
@@ -202,6 +205,7 @@ export function SettingsModal({
     onLocalStoryboardPromptRefineLevelChange,
     onLocalStoryboardUsePanelDescriptionEnabledChange,
     onProgressPopupEnabledChange,
+    onForcedStoryboardDurationSecChange,
 }: SettingsModalProps) {
     const t = useTranslations('configModal')
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle')
@@ -283,6 +287,13 @@ export function SettingsModal({
     const promptRefineEnabled = localStoryboardPromptRefineEnabled === true
     const promptUseDescriptionEnabled = localStoryboardUsePanelDescriptionEnabled === true
     const progressPopupEnabledValue = progressPopupEnabled === true
+    const forcedStoryboardDurationValue: 8 | 10 | 15 | 20 | null =
+        forcedStoryboardDurationSec === 8
+        || forcedStoryboardDurationSec === 10
+        || forcedStoryboardDurationSec === 15
+        || forcedStoryboardDurationSec === 20
+            ? forcedStoryboardDurationSec
+            : null
     const promptRefineLevel: 'conservative' | 'medium' | 'simple' =
         localStoryboardPromptRefineLevel === 'conservative'
         || localStoryboardPromptRefineLevel === 'simple'
@@ -304,6 +315,9 @@ export function SettingsModal({
     const [promptRefineLevelDraft, setPromptRefineLevelDraft] = useState<'conservative' | 'medium' | 'simple'>(promptRefineLevel)
     const [promptUseDescriptionEnabledDraft, setPromptUseDescriptionEnabledDraft] = useState<boolean>(promptUseDescriptionEnabled)
     const [progressPopupEnabledDraft, setProgressPopupEnabledDraft] = useState<boolean>(progressPopupEnabledValue)
+    const [forcedStoryboardDurationDraft, setForcedStoryboardDurationDraft] = useState<'' | '8' | '10' | '15' | '20'>(
+        forcedStoryboardDurationValue === null ? '' : String(forcedStoryboardDurationValue) as '8' | '10' | '15' | '20',
+    )
 
     useEffect(() => {
         if (!isOpen) return
@@ -318,6 +332,7 @@ export function SettingsModal({
         setPromptRefineLevelDraft(promptRefineLevel)
         setPromptUseDescriptionEnabledDraft(promptUseDescriptionEnabled)
         setProgressPopupEnabledDraft(progressPopupEnabledValue)
+        setForcedStoryboardDurationDraft(forcedStoryboardDurationValue === null ? '' : String(forcedStoryboardDurationValue) as '8' | '10' | '15' | '20')
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen])
 
@@ -669,6 +684,34 @@ export function SettingsModal({
                                         <div className="text-xs text-[var(--glass-text-tertiary)]">
                                             {t('progressPopupHint')}
                                         </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-4">
+                                <div className="text-xs font-medium text-[var(--glass-text-tertiary)]">{t('forcedStoryboardDurationTitle')}</div>
+                                <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                                    <div>
+                                        <label className="text-xs text-[var(--glass-text-tertiary)]">{t('forcedStoryboardDurationLabel')}</label>
+                                        <select
+                                            className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm"
+                                            value={forcedStoryboardDurationDraft}
+                                            onChange={(e) => {
+                                                const raw = e.target.value as '' | '8' | '10' | '15' | '20'
+                                                setForcedStoryboardDurationDraft(raw)
+                                                const next = raw === '' ? null : Number(raw) as 8 | 10 | 15 | 20
+                                                onForcedStoryboardDurationSecChange?.(next)
+                                            }}
+                                        >
+                                            <option value="">{t('forcedStoryboardDurationDefault')}</option>
+                                            <option value="8">8{t('forcedStoryboardDurationUnit')}</option>
+                                            <option value="10">10{t('forcedStoryboardDurationUnit')}</option>
+                                            <option value="15">15{t('forcedStoryboardDurationUnit')}</option>
+                                            <option value="20">20{t('forcedStoryboardDurationUnit')}</option>
+                                        </select>
+                                    </div>
+                                    <div className="md:col-span-2 text-xs text-[var(--glass-text-tertiary)]">
+                                        {t('forcedStoryboardDurationHint')}
                                     </div>
                                 </div>
                             </div>

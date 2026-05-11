@@ -105,7 +105,7 @@ export function useWorkspaceVideoActions({
     storyboardId: string,
     panelIndex: number,
     value: string,
-    field: 'videoPrompt' | 'firstLastFramePrompt' = 'videoPrompt',
+    field: 'videoPrompt' | 'groupVideoPrompt' | 'firstLastFramePrompt' = 'videoPrompt',
   ) => {
     await updateProjectPanelVideoPromptMutation.mutateAsync({ storyboardId, panelIndex, value, field })
   }

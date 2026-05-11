@@ -57,7 +57,7 @@ export interface VideoStageShellProps {
     storyboardId: string,
     panelIndex: number,
     value: string,
-    field?: 'videoPrompt' | 'firstLastFramePrompt',
+    field?: 'videoPrompt' | 'groupVideoPrompt' | 'firstLastFramePrompt',
   ) => Promise<void>
   onUpdatePanelVideoModel: (storyboardId: string, panelIndex: number, model: string) => Promise<void>
   onOpenAssetLibraryForCharacter?: (characterId?: string | null) => void

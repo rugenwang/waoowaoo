@@ -21,6 +21,7 @@ import {
 import { createWorkerLLMStreamCallbacks, createWorkerLLMStreamContext } from './llm-stream'
 import type { TaskJobData } from '@/lib/task/types'
 import {
+  applyForcedStoryboardGrouping,
   buildStoryboardJsonFromClipPanels,
   parseEffort,
   parseTemperature,
@@ -182,6 +183,14 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
       }
     },
   })
+  const rawNovelData = novelData as unknown as { forcedStoryboardDurationSec?: unknown }
+  const forcedStoryboardDurationSec =
+    rawNovelData.forcedStoryboardDurationSec === 8
+    || rawNovelData.forcedStoryboardDurationSec === 10
+    || rawNovelData.forcedStoryboardDurationSec === 15
+    || rawNovelData.forcedStoryboardDurationSec === 20
+      ? rawNovelData.forcedStoryboardDurationSec
+      : null
 
   const runStep = async (
     meta: ScriptToStoryboardStepMeta,
@@ -301,6 +310,7 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
                     phase2ActingTemplate,
                     phase3DetailTemplate,
                   },
+                  forcedStoryboardDurationSec,
                   runStep,
                 })
                 return {
@@ -342,6 +352,7 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
                     phase2ActingTemplate,
                     phase3DetailTemplate,
                   },
+                  forcedStoryboardDurationSec,
                   runStep,
                 })
               } catch (error) {
@@ -364,6 +375,14 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
           await callbacks.flush()
         }
       })()
+      const effectiveClipPanels = applyForcedStoryboardGrouping(
+        orchestratorResult.clipPanels,
+        forcedStoryboardDurationSec,
+      )
+      const effectiveTotalPanelCount = effectiveClipPanels.reduce(
+        (sum, item) => sum + item.finalPanels.length,
+        0,
+      )
 
       const phase1Map = orchestratorResult.phase1PanelsByClipId || {}
       const phase2CinematographyMap = orchestratorResult.phase2CinematographyByClipId || {}
@@ -431,7 +450,7 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
       if (skipVoiceAnalyze) {
         const persisted = await persistStoryboardOutputs({
           episodeId,
-          clipPanels: orchestratorResult.clipPanels,
+          clipPanels: effectiveClipPanels,
           voiceLineRows: null,
         })
         await reportTaskProgress(job, 96, {
@@ -448,7 +467,7 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
         return {
           episodeId,
           storyboardCount: persisted.persistedStoryboards.length,
-          panelCount: orchestratorResult.summary.totalPanelCount,
+          panelCount: effectiveTotalPanelCount,
           voiceLineCount: 0,
           retryStepKey,
         }
@@ -467,7 +486,7 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
             ? (novelData.characters || []).map((item) => item.name).join('、')
             : '无',
           characters_introduction: buildCharactersIntroduction(novelData.characters || []),
-          storyboard_json: buildStoryboardJsonFromClipPanels(orchestratorResult.clipPanels),
+          storyboard_json: buildStoryboardJsonFromClipPanels(effectiveClipPanels),
         },
       })
 
@@ -533,7 +552,7 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
       await assertRunActive('script_to_storyboard_voice_persist')
       const persisted = await persistStoryboardOutputs({
         episodeId,
-        clipPanels: orchestratorResult.clipPanels,
+        clipPanels: effectiveClipPanels,
         voiceLineRows,
       })
 
@@ -546,7 +565,7 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
       return {
         episodeId,
         storyboardCount: persisted.persistedStoryboards.length,
-        panelCount: orchestratorResult.summary.totalPanelCount,
+        panelCount: effectiveTotalPanelCount,
         voiceLineCount: persisted.voiceLineCount,
       }
     },

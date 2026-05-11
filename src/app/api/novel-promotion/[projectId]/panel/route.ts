@@ -205,11 +205,20 @@ export const DELETE = apiHandler(async (
       where: { storyboardId }
     })
 
-    // 4. 更新 storyboard 的 panelCount
-    await tx.novelPromotionStoryboard.update({
-      where: { id: storyboardId },
-      data: { panelCount }
-    })
+    // 4. 更新 storyboard 的 panelCount；最后一张被删掉时同步移除空分镜组，避免前端刷新后又看到空壳
+    if (panelCount === 0) {
+      await tx.supplementaryPanel.deleteMany({
+        where: { storyboardId }
+      })
+      await tx.novelPromotionStoryboard.delete({
+        where: { id: storyboardId }
+      })
+    } else {
+      await tx.novelPromotionStoryboard.update({
+        where: { id: storyboardId },
+        data: { panelCount }
+      })
+    }
   }, {
     maxWait: 15000, // 等待事务开始的最长时间：15 秒
     timeout: 30000  // 事务执行超时：30 秒 (针对大量 panels 的批量更新)
@@ -239,7 +248,7 @@ export const PATCH = apiHandler(async (
   const panelModel = prisma.novelPromotionPanel as unknown as {
     create: (args: { data: Record<string, unknown> }) => Promise<unknown>
   }
-  const { panelId, storyboardId, panelIndex, videoPrompt, firstLastFramePrompt, duration } = body
+  const { panelId, storyboardId, panelIndex, videoPrompt, groupVideoPrompt, firstLastFramePrompt, duration } = body
 
   // 🔥 方式1：通过 panelId 直接更新（优先）
   if (panelId) {
@@ -254,10 +263,12 @@ export const PATCH = apiHandler(async (
     // 构建更新数据
     const updateData: {
       videoPrompt?: string | null
+      groupVideoPrompt?: string | null
       firstLastFramePrompt?: string | null
       duration?: number | null
     } = {}
     if (videoPrompt !== undefined) updateData.videoPrompt = videoPrompt
+    if (groupVideoPrompt !== undefined) updateData.groupVideoPrompt = groupVideoPrompt
     if (firstLastFramePrompt !== undefined) updateData.firstLastFramePrompt = firstLastFramePrompt
     if (duration !== undefined) updateData.duration = parseNullableIntField(duration)
 
@@ -286,11 +297,15 @@ export const PATCH = apiHandler(async (
   // 构建更新数据
   const updateData: {
     videoPrompt?: string | null
+    groupVideoPrompt?: string | null
     firstLastFramePrompt?: string | null
     duration?: number | null
   } = {}
   if (videoPrompt !== undefined) {
     updateData.videoPrompt = videoPrompt
+  }
+  if (groupVideoPrompt !== undefined) {
+    updateData.groupVideoPrompt = groupVideoPrompt
   }
   if (firstLastFramePrompt !== undefined) {
     updateData.firstLastFramePrompt = firstLastFramePrompt
@@ -318,6 +333,7 @@ export const PATCH = apiHandler(async (
         panelNumber: panelIndex + 1,
         imageUrl: null,
         videoPrompt: videoPrompt ?? null,
+        groupVideoPrompt: groupVideoPrompt ?? null,
         firstLastFramePrompt: firstLastFramePrompt ?? null,
         duration: duration !== undefined ? parseNullableIntField(duration) : null,
       }

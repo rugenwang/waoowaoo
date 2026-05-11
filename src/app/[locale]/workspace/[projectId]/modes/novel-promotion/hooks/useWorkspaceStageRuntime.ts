@@ -51,7 +51,7 @@ interface UseWorkspaceStageRuntimeParams {
     storyboardId: string,
     panelIndex: number,
     value: string,
-    field?: 'videoPrompt' | 'firstLastFramePrompt',
+    field?: 'videoPrompt' | 'groupVideoPrompt' | 'firstLastFramePrompt',
   ) => Promise<void>
   handleUpdatePanelVideoModel: (storyboardId: string, panelIndex: number, model: string) => Promise<void>
 }

@@ -66,6 +66,7 @@ interface WorkspaceHeaderShellProps {
   localStoryboardPromptRefineLevel: 'conservative' | 'medium' | 'simple'
   localStoryboardUsePanelDescriptionEnabled: boolean
   progressPopupEnabled: boolean
+  forcedStoryboardDurationSec: 8 | 10 | 15 | 20 | null
   onUpdateConfig: (key: string, value: unknown) => Promise<void>
   globalAssetText: string
   projectName: string
@@ -126,6 +127,7 @@ export default function WorkspaceHeaderShell({
   localStoryboardPromptRefineLevel,
   localStoryboardUsePanelDescriptionEnabled,
   progressPopupEnabled,
+  forcedStoryboardDurationSec,
   onUpdateConfig,
   globalAssetText,
   projectName,
@@ -178,6 +180,7 @@ export default function WorkspaceHeaderShell({
         localStoryboardPromptRefineLevel={localStoryboardPromptRefineLevel}
         localStoryboardUsePanelDescriptionEnabled={localStoryboardUsePanelDescriptionEnabled}
         progressPopupEnabled={progressPopupEnabled}
+        forcedStoryboardDurationSec={forcedStoryboardDurationSec}
         onArtStyleChange={(value) => { onUpdateConfig('artStyle', value) }}
         onAnalysisModelChange={(value) => { onUpdateConfig('analysisModel', value) }}
         onCharacterModelChange={(value) => { onUpdateConfig('characterModel', value) }}
@@ -210,6 +213,7 @@ export default function WorkspaceHeaderShell({
             body: JSON.stringify({ progressPopupEnabled: value }),
           })
         }}
+        onForcedStoryboardDurationSecChange={(value) => { onUpdateConfig('forcedStoryboardDurationSec', value) }}
       />
 
       <WorldContextModal

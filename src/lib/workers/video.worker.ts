@@ -23,6 +23,7 @@ type AnyObj = Record<string, unknown>
 type VideoOptionValue = string | number | boolean
 type VideoOptionMap = Record<string, VideoOptionValue>
 type VideoGenerationMode = 'normal' | 'firstlastframe' | 'keyframes'
+type VideoKeyframeInput = { imageUrl: string; frameTimeSec: number }
 type PanelFrameRecord = {
   id: string
   frameIndex: number
@@ -101,6 +102,28 @@ function getUsablePanelFrames(panel: PanelRecord): PanelFrameRecord[] {
     : []
 }
 
+function resolvePanelDurationSec(panel: PanelRecord, generationOptions: VideoOptionMap): number {
+  if (typeof generationOptions.duration === 'number' && Number.isFinite(generationOptions.duration) && generationOptions.duration > 0) {
+    return generationOptions.duration
+  }
+  if (typeof panel.groupDurationSec === 'number' && Number.isFinite(panel.groupDurationSec) && panel.groupDurationSec > 0) {
+    return panel.groupDurationSec
+  }
+  if (typeof panel.duration === 'number' && Number.isFinite(panel.duration) && panel.duration > 0) {
+    return panel.duration
+  }
+  return 4
+}
+
+function toSignedKeyframe(frame: PanelFrameRecord): VideoKeyframeInput | null {
+  const url = toSignedUrlIfCos(frame.imageUrl, 3600)
+  if (!url) return null
+  return {
+    imageUrl: url,
+    frameTimeSec: frame.frameTimeSec,
+  }
+}
+
 async function generateVideoForPanel(
   job: Job<TaskJobData>,
   panel: PanelRecord,
@@ -138,6 +161,8 @@ async function generateVideoForPanel(
   }
   const sourceImageBase64 = await normalizeToBase64ForGeneration(sourceImageUrl)
 
+  const parsedRequestedVideoModel = parseModelKeyStrict(modelId)
+  let linkedLastFrameUrl: string | undefined
   let lastFrameImageBase64: string | undefined
   let generationMode: VideoGenerationMode = firstLastFramePayload ? 'firstlastframe' : 'normal'
   const requestedGenerateAudio = typeof generationOptions.generateAudio === 'boolean'
@@ -163,9 +188,12 @@ async function generateVideoForPanel(
         firstLastFramePayload.lastFrameStoryboardId,
         Number(firstLastFramePayload.lastFramePanelIndex),
       )
-      if (lastPanel?.imageUrl) {
-        const lastFrameUrl = toSignedUrlIfCos(lastPanel.imageUrl, 3600)
+      if (lastPanel) {
+        const lastPanelFrames = getUsablePanelFrames(lastPanel)
+        const lastFrameImageUrl = lastPanelFrames[0]?.imageUrl || lastPanel.imageUrl
+        const lastFrameUrl = toSignedUrlIfCos(lastFrameImageUrl, 3600)
         if (lastFrameUrl) {
+          linkedLastFrameUrl = lastFrameUrl
           lastFrameImageBase64 = await normalizeToBase64ForGeneration(lastFrameUrl)
         }
       }
@@ -173,19 +201,20 @@ async function generateVideoForPanel(
   }
 
   const parsedVideoModel = parseModelKeyStrict(model)
-  const panelKeyframes = !firstLastFramePayload && parsedVideoModel?.provider === 'local' && usableFrames.length > 1
+  const isLocalVideoModel = parsedVideoModel?.provider === 'local' || parsedRequestedVideoModel?.provider === 'local'
+  const panelKeyframes = isLocalVideoModel
     ? usableFrames
-      .map((frame) => {
-        const url = toSignedUrlIfCos(frame.imageUrl, 3600)
-        if (!url) return null
-        return {
-          imageUrl: url,
-          frameTimeSec: frame.frameTimeSec,
-        }
-      })
-      .filter((item): item is { imageUrl: string; frameTimeSec: number } => item !== null)
+      .map(toSignedKeyframe)
+      .filter((item): item is VideoKeyframeInput => item !== null)
     : []
-  if (panelKeyframes.length > 1) {
+  if (isLocalVideoModel && firstLastFramePayload && linkedLastFrameUrl) {
+    const durationSec = resolvePanelDurationSec(panel, generationOptions)
+    if (panelKeyframes.length === 0) {
+      panelKeyframes.push({ imageUrl: sourceImageUrl, frameTimeSec: 0 })
+    }
+    panelKeyframes.push({ imageUrl: linkedLastFrameUrl, frameTimeSec: durationSec })
+  }
+  if (!firstLastFramePayload && panelKeyframes.length > 1) {
     generationMode = 'keyframes'
   }
 

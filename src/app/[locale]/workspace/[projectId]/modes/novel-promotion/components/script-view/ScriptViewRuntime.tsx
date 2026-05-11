@@ -106,6 +106,7 @@ export default function ScriptView({
   const [assetViewMode, setAssetViewMode] = useState<'all' | string>('all')
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
   const [savingClips, setSavingClips] = useState<Set<string>>(new Set())
+  const pendingClipUpdatesRef = useRef<Record<string, Partial<Clip>>>({})
 
   useEffect(() => {
     if (clips.length > 0 && !selectedClipId) {
@@ -113,11 +114,57 @@ export default function ScriptView({
     }
   }, [clips, selectedClipId])
 
+  useEffect(() => {
+    const nextPending: Record<string, Partial<Clip>> = {}
+    Object.entries(pendingClipUpdatesRef.current).forEach(([clipId, updates]) => {
+      const clip = clips.find((item) => item.id === clipId)
+      if (!clip) return
+      const stillPending: Partial<Clip> = {}
+      if (updates.characters !== undefined && clip.characters !== updates.characters) {
+        stillPending.characters = updates.characters
+      }
+      if (updates.location !== undefined && clip.location !== updates.location) {
+        stillPending.location = updates.location
+      }
+      if (updates.props !== undefined && clip.props !== updates.props) {
+        stillPending.props = updates.props
+      }
+      if (Object.keys(stillPending).length > 0) {
+        nextPending[clipId] = stillPending
+      }
+    })
+    pendingClipUpdatesRef.current = nextPending
+  }, [clips])
+
   const fuzzyMatchLocation = (clipLocName: string, libraryLocName: string): boolean =>
     fuzzyMatchLocationFromModule(clipLocName, libraryLocName)
 
   const parseClipAssets = (clip: Clip) => parseClipAssetsFromModule(clip)
   const getAllClipsAssets = useCallback(() => getAllClipsAssetsFromModule(clips), [clips])
+  const getClipWithPendingUpdates = useCallback((clipId: string): Clip | undefined => {
+    const clip = clips.find((item) => item.id === clipId)
+    if (!clip) return undefined
+    return {
+      ...clip,
+      ...(pendingClipUpdatesRef.current[clipId] || {}),
+    }
+  }, [clips])
+
+  const updateClipAssetsField = useCallback(async (clipId: string, data: Partial<Clip>) => {
+    pendingClipUpdatesRef.current = {
+      ...pendingClipUpdatesRef.current,
+      [clipId]: {
+        ...(pendingClipUpdatesRef.current[clipId] || {}),
+        ...data,
+      },
+    }
+    await onClipUpdate?.(clipId, data)
+  }, [onClipUpdate])
+
+  const handleSelectClip = useCallback((clipId: string) => {
+    setSelectedClipId(clipId)
+    setAssetViewMode(clipId)
+  }, [])
 
   useEffect(() => {
     if (isManuallyEditingRef.current) {
@@ -216,34 +263,39 @@ export default function ScriptView({
         (targetChar.appearances?.find((appearance) => appearance.appearanceIndex === PRIMARY_APPEARANCE_INDEX)?.changeReason ||
           primaryLabel)
 
-      if (isAllMode && action === 'remove') {
-        for (const clip of clips) {
+      if (isAllMode) {
+        for (const sourceClip of clips) {
+          const clip = getClipWithPendingUpdates(sourceClip.id) ?? sourceClip
           const newValue = processCharacterInClip({
             clip,
-            action: 'remove',
+            action,
             targetChar,
             appearanceName: optionLabel,
             characters,
             tAssets: (key) => tAssets(key),
           })
           if (newValue !== null) {
-            await onClipUpdate(clip.id, { characters: newValue })
+            await updateClipAssetsField(clip.id, { characters: newValue })
           }
         }
 
         const appearanceKey = `${id}::${finalAppearanceName}`
         const newKeys = new Set(selectedAppearanceKeys)
-        newKeys.delete(appearanceKey)
-        setSelectedAppearanceKeys(newKeys)
-
-        const remainingAppearances = Array.from(newKeys).filter((k) => k.startsWith(`${id}::`))
-        if (remainingAppearances.length === 0) {
-          setActiveCharIds(activeCharIds.filter((aid) => aid !== id))
+        if (action === 'add') {
+          newKeys.add(appearanceKey)
+          setActiveCharIds((previous) => previous.includes(id) ? previous : [...previous, id])
+        } else {
+          newKeys.delete(appearanceKey)
+          const remainingAppearances = Array.from(newKeys).filter((k) => k.startsWith(`${id}::`))
+          if (remainingAppearances.length === 0) {
+            setActiveCharIds((previous) => previous.filter((aid) => aid !== id))
+          }
         }
+        setSelectedAppearanceKeys(newKeys)
         return
       }
 
-      const clip = clips.find((c) => c.id === targetClipId)
+      const clip = targetClipId ? getClipWithPendingUpdates(targetClipId) : undefined
       if (!clip) return
 
       const newValue = processCharacterInClip({
@@ -260,19 +312,19 @@ export default function ScriptView({
       if (action === 'add') {
         newKeys.add(appearanceKey)
         if (!activeCharIds.includes(id)) {
-          setActiveCharIds([...activeCharIds, id])
+          setActiveCharIds((previous) => previous.includes(id) ? previous : [...previous, id])
         }
       } else {
         newKeys.delete(appearanceKey)
         const remainingAppearances = Array.from(newKeys).filter((k) => k.startsWith(`${id}::`))
         if (remainingAppearances.length === 0) {
-          setActiveCharIds(activeCharIds.filter((aid) => aid !== id))
+          setActiveCharIds((previous) => previous.filter((aid) => aid !== id))
         }
       }
       setSelectedAppearanceKeys(newKeys)
 
       if (newValue !== null) {
-        await onClipUpdate(targetClipId!, { characters: newValue })
+        await updateClipAssetsField(targetClipId!, { characters: newValue })
       }
       return
     }
@@ -281,22 +333,27 @@ export default function ScriptView({
       const targetProp = props.find((item) => item.id === id)
       if (!targetProp) return
 
-      if (isAllMode && action === 'remove') {
-        for (const clip of clips) {
+      if (isAllMode) {
+        for (const sourceClip of clips) {
+          const clip = getClipWithPendingUpdates(sourceClip.id) ?? sourceClip
           const newValue = processPropInClip({
             clip,
-            action: 'remove',
+            action,
             targetProp,
           })
           if (newValue !== null) {
-            await onClipUpdate(clip.id, { props: newValue })
+            await updateClipAssetsField(clip.id, { props: newValue })
           }
         }
-        setActivePropIds(activePropIds.filter((propId) => propId !== id))
+        if (action === 'add') {
+          setActivePropIds((previous) => previous.includes(id) ? previous : [...previous, id])
+        } else {
+          setActivePropIds((previous) => previous.filter((propId) => propId !== id))
+        }
         return
       }
 
-      const clip = clips.find((c) => c.id === targetClipId)
+      const clip = targetClipId ? getClipWithPendingUpdates(targetClipId) : undefined
       if (!clip) return
 
       const newValue = processPropInClip({
@@ -308,7 +365,7 @@ export default function ScriptView({
         action === 'add' ? [...activePropIds, id] : activePropIds.filter((propId) => propId !== id)
       setActivePropIds(newActiveIds)
       if (newValue !== null) {
-        await onClipUpdate(targetClipId!, { props: newValue })
+        await updateClipAssetsField(targetClipId!, { props: newValue })
       }
       return
     }
@@ -316,23 +373,29 @@ export default function ScriptView({
     const targetLoc = locations.find((l) => l.id === id)
     if (!targetLoc) return
 
-    if (isAllMode && action === 'remove') {
-      for (const clip of clips) {
+    if (isAllMode) {
+      for (const sourceClip of clips) {
+        const clip = getClipWithPendingUpdates(sourceClip.id) ?? sourceClip
         const newValue = processLocationInClip({
           clip,
-          action: 'remove',
+          action,
           targetLoc,
+          locationName: optionLabel,
           fuzzyMatchLocation,
         })
         if (newValue !== null) {
-          await onClipUpdate(clip.id, { location: newValue })
+          await updateClipAssetsField(clip.id, { location: newValue })
         }
       }
-      setActiveLocationIds(activeLocationIds.filter((lid) => lid !== id))
+      if (action === 'add') {
+        setActiveLocationIds((previous) => previous.includes(id) ? previous : [...previous, id])
+      } else {
+        setActiveLocationIds((previous) => previous.filter((lid) => lid !== id))
+      }
       return
     }
 
-    const clip = clips.find((c) => c.id === targetClipId)
+    const clip = targetClipId ? getClipWithPendingUpdates(targetClipId) : undefined
     if (!clip) return
 
     const newValue = processLocationInClip({
@@ -348,7 +411,7 @@ export default function ScriptView({
     setActiveLocationIds(newActiveIds)
 
     if (newValue !== null) {
-      await onClipUpdate(targetClipId!, { location: newValue })
+      await updateClipAssetsField(targetClipId!, { location: newValue })
     }
   }
 
@@ -415,7 +478,7 @@ export default function ScriptView({
       <ScriptViewScriptPanel
         clips={clips}
         selectedClipId={selectedClipId}
-        onSelectClip={setSelectedClipId}
+        onSelectClip={handleSelectClip}
         savingClips={savingClips}
         onClipEdit={onClipEdit}
         onClipDelete={onClipDelete}

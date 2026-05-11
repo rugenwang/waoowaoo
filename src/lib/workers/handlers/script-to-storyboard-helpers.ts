@@ -48,7 +48,7 @@ function normalizeDurationSeconds(value: unknown): number | null {
 }
 
 const MAX_PANEL_GROUP_DURATION_SEC = 20
-const MAX_PANEL_FRAMES = 4
+const MAX_PANEL_FRAMES = 8
 
 type PanelFramePersistenceRow = {
   frameIndex: number
@@ -205,6 +205,189 @@ export function buildPanelFramePersistence(panel: StoryboardPanel): PanelFramePe
     duration,
     frames,
   }
+}
+
+function isAllowedForcedStoryboardDuration(value: unknown): value is 8 | 10 | 15 | 20 {
+  return value === 8 || value === 10 || value === 15 || value === 20
+}
+
+function hasGroupFrames(panel: StoryboardPanel): boolean {
+  const mode = readString(panel, ['panel_mode', 'panelMode', 'mode'])
+  const rawFrames = Array.isArray(panel.frames) ? panel.frames : []
+  return mode === 'group' || mode === 'complex' || rawFrames.length > 1
+}
+
+function getPreferredFrameCount(durationSec: 8 | 10 | 15 | 20): number {
+  if (durationSec >= 20) return 4
+  if (durationSec >= 15) return 3
+  return 2
+}
+
+function chooseStoryboardGroupSize(remaining: number, preferredFrameCount: number): number {
+  if (remaining <= 1) return remaining
+  if (remaining <= MAX_PANEL_FRAMES) return Math.min(4, remaining)
+  if (remaining - preferredFrameCount === 1) return Math.min(4, preferredFrameCount + 1)
+  return Math.min(4, preferredFrameCount)
+}
+
+function uniqueJsonArray(values: unknown[]): unknown[] {
+  const seen = new Set<string>()
+  const result: unknown[] = []
+  values.forEach((value) => {
+    if (value === null || value === undefined) return
+    const key = typeof value === 'object' ? JSON.stringify(value) : String(value)
+    if (seen.has(key)) return
+    seen.add(key)
+    result.push(value)
+  })
+  return result
+}
+
+function mergePanelArrayField(panels: StoryboardPanel[], field: 'characters' | 'props'): unknown[] | undefined {
+  const values = panels.flatMap((panel) => Array.isArray(panel[field]) ? panel[field] as unknown[] : [])
+  const merged = uniqueJsonArray(values)
+  return merged.length > 0 ? merged : undefined
+}
+
+function formatTimecode(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds))
+  const mm = Math.floor(safe / 60)
+  const ss = safe % 60
+  return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+}
+
+function buildFallbackGroupVideoPrompt(panels: StoryboardPanel[], durationSec: number): string {
+  const segmentDuration = durationSec / Math.max(1, panels.length)
+  const timeline = panels.map((panel, index) => {
+    const start = Math.round(segmentDuration * index)
+    const end = index === panels.length - 1 ? durationSec : Math.max(start + 1, Math.round(segmentDuration * (index + 1)))
+    const characters = Array.isArray(panel.characters)
+      ? panel.characters
+        .map((item) => {
+          const record = asJsonRecord(item)
+          return typeof record?.name === 'string' ? record.name : typeof item === 'string' ? item : ''
+        })
+        .filter(Boolean)
+        .join('、')
+      : '画面内人物'
+    return [
+      `${formatTimecode(start)}-${formatTimecode(end)}`,
+      `运镜：${panel.camera_move || '镜头平稳推进，保持画面连续'}`,
+      `人物：${characters || '画面内人物'}`,
+      `动作：${panel.description || panel.source_text || '承接上一画面继续行动'}`,
+      '表情：自然贴合剧情，神态连贯',
+      `台词：${panel.source_text || '无明确台词'}`,
+    ].join('\n')
+  }).join('\n')
+
+  return [
+    '高清 4K，电影级质感，画面稳定清晰，光影自然，人物建模精致，动作流畅不僵硬，表情生动，口型和台词同步，无画面闪烁、无脸部崩坏、无肢体畸形，背景音乐为贴合剧情氛围的纯音乐，节奏舒缓自然，贯穿整段视频。',
+    timeline,
+  ].join('\n')
+}
+
+function buildFallbackFrame(panel: StoryboardPanel, index: number, total: number, durationSec: number): JsonRecord {
+  const frameTimeSec = total <= 1
+    ? 0
+    : Math.round((durationSec / Math.max(1, total - 1)) * index * 10) / 10
+  return {
+    frame_index: index,
+    frame_time_sec: frameTimeSec,
+    frame_role: index === 0 ? 'hero' : index === total - 1 ? 'ending' : 'continuity',
+    dependency_frame_ids: index === 0 ? [] : [index - 1],
+    image_prompt: panel.image_prompt || panel.description || panel.source_text || '',
+    video_prompt: panel.video_prompt || panel.description || panel.source_text || '',
+    reference_policy: index === 0
+      ? { type: 'base', note: '本组开场原始状态' }
+      : { type: 'depends_on_previous', note: '参考前一关键帧保持人物、服饰、场景、光线连贯' },
+  }
+}
+
+function buildFallbackGroupedPanel(panels: StoryboardPanel[], durationSec: 8 | 10 | 15 | 20): StoryboardPanel {
+  const frameCount = panels.length
+  const first = panels[0]
+  const groupDuration = Math.min(MAX_PANEL_GROUP_DURATION_SEC, Math.max(2, durationSec))
+  return {
+    ...first,
+    panel_mode: 'group',
+    panelMode: 'group',
+    complexity: 'auto_grouped_by_duration_preference',
+    duration: groupDuration,
+    duration_sec: groupDuration,
+    description: panels
+      .map((panel) => panel.description)
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .join('；') || first.description,
+    source_text: panels
+      .map((panel) => panel.source_text)
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .join('\n') || first.source_text,
+    characters: mergePanelArrayField(panels, 'characters') ?? first.characters,
+    props: mergePanelArrayField(panels, 'props') ?? first.props,
+    group_video_prompt: buildFallbackGroupVideoPrompt(panels, groupDuration),
+    groupVideoPrompt: buildFallbackGroupVideoPrompt(panels, groupDuration),
+    frames: panels.map((panel, index) => buildFallbackFrame(panel, index, frameCount, groupDuration)),
+  }
+}
+
+function normalizePanelNumbers(panels: StoryboardPanel[]): StoryboardPanel[] {
+  return panels.map((panel, index) => ({
+    ...panel,
+    panel_number: index + 1,
+  }))
+}
+
+function groupSinglePanelRun(panels: StoryboardPanel[], durationSec: 8 | 10 | 15 | 20): StoryboardPanel[] {
+  if (panels.length <= 1) return panels
+  const preferredFrameCount = getPreferredFrameCount(durationSec)
+  const grouped: StoryboardPanel[] = []
+  for (let index = 0; index < panels.length;) {
+    const remaining = panels.length - index
+    const groupSize = chooseStoryboardGroupSize(remaining, preferredFrameCount)
+    const batch = panels.slice(index, index + groupSize)
+    if (batch.length <= 1) {
+      grouped.push(batch[0])
+    } else {
+      grouped.push(buildFallbackGroupedPanel(batch, durationSec))
+    }
+    index += Math.max(1, groupSize)
+  }
+  return grouped
+}
+
+export function applyForcedStoryboardGrouping(
+  clipPanels: ClipPanelsResult[],
+  durationSec: unknown,
+): ClipPanelsResult[] {
+  if (!isAllowedForcedStoryboardDuration(durationSec)) return clipPanels
+
+  return clipPanels.map((clipEntry) => {
+    const result: StoryboardPanel[] = []
+    let run: StoryboardPanel[] = []
+
+    const flushRun = () => {
+      if (run.length > 0) {
+        result.push(...groupSinglePanelRun(run, durationSec))
+        run = []
+      }
+    }
+
+    for (const panel of clipEntry.finalPanels) {
+      if (hasGroupFrames(panel)) {
+        flushRun()
+        result.push(panel)
+        continue
+      }
+
+      run.push(panel)
+    }
+    flushRun()
+
+    return {
+      ...clipEntry,
+      finalPanels: normalizePanelNumbers(result),
+    }
+  })
 }
 
 async function createPanelFrames(

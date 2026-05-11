@@ -44,6 +44,7 @@ interface ProjectSnapshotInput {
   localStoryboardPromptRefineLevel: 'conservative' | 'medium' | 'simple'
   localStoryboardUsePanelDescriptionEnabled: boolean
   progressPopupEnabled: boolean
+  forcedStoryboardDurationSec: 8 | 10 | 15 | 20 | null
 }
 
 interface BuildWorkspaceControllerViewModelParams {
@@ -135,7 +136,7 @@ interface BuildWorkspaceControllerViewModelParams {
       storyboardId: string,
       panelIndex: number,
       value: string,
-      field?: 'videoPrompt' | 'firstLastFramePrompt',
+      field?: 'videoPrompt' | 'groupVideoPrompt' | 'firstLastFramePrompt',
     ) => Promise<void>
     handleUpdatePanelVideoModel: (storyboardId: string, panelIndex: number, model: string) => Promise<void>
     handleUpdateClip: (clipId: string, updates: Record<string, unknown>) => Promise<void>

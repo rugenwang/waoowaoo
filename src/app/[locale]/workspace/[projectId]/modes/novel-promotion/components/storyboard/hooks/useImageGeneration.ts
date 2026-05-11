@@ -187,7 +187,11 @@ export function useStoryboardImageGeneration({
   ])
 
   const uploadPanelImage = useCallback(async (panelId: string, file: File) => {
-    const result = await uploadPanelImageMutation.mutateAsync({ panelId, file }) as { imageUrl?: string | null }
+    const result = await uploadPanelImageMutation.mutateAsync({ panelId, file }) as {
+      imageUrl?: string | null
+      frameId?: string | null
+      frameImageUpdated?: boolean
+    }
     if (result?.imageUrl) {
       setLocalStoryboards((previousStoryboards) =>
         previousStoryboards.map((storyboard) => {
@@ -196,12 +200,27 @@ export function useStoryboardImageGeneration({
           const updatedPanels = panels.map((panel) => {
             if (panel.id !== panelId) return panel
             changed = true
+            const frames = Array.isArray(panel.frames) ? panel.frames : []
+            const shouldPatchFirstFrame = result.frameImageUpdated !== false
+            const updatedFrames = shouldPatchFirstFrame
+              ? frames.map((frame, index) => {
+                const isFirstFrame = result.frameId ? frame.id === result.frameId : index === 0
+                if (!isFirstFrame) return frame
+                return {
+                  ...frame,
+                  imageUrl: result.imageUrl ?? frame.imageUrl,
+                  generationStatus: 'completed',
+                  errorMessage: null,
+                }
+              })
+              : frames
             return {
               ...panel,
               previousImageUrl: panel.imageUrl ?? null,
               imageUrl: result.imageUrl ?? panel.imageUrl,
               candidateImages: null,
               imageTaskRunning: false,
+              ...(updatedFrames !== frames ? { frames: updatedFrames } : {}),
             }
           })
           return changed ? { ...storyboard, panels: updatedPanels } : storyboard
@@ -220,6 +239,21 @@ export function useStoryboardImageGeneration({
     setLocalStoryboards,
     uploadPanelImageMutation,
   ])
+
+  useEffect(() => {
+    const hasProcessingFrame = localStoryboards.some((storyboard) =>
+      getStoryboardPanels(storyboard).some((panel) =>
+        Array.isArray(panel.frames)
+        && panel.frames.some((frame) => frame.generationStatus === 'processing'),
+      ),
+    )
+    if (!hasProcessingFrame && submittingPanelImageIds.size === 0) return
+    const timer = window.setInterval(() => {
+      refreshEpisode()
+      refreshStoryboards()
+    }, 2500)
+    return () => window.clearInterval(timer)
+  }, [localStoryboards, refreshEpisode, refreshStoryboards, submittingPanelImageIds.size])
 
   const uploadPanelFrameImage = useCallback(async (frameId: string, file: File) => {
     const result = await uploadPanelFrameImageMutation.mutateAsync({ frameId, file }) as {

@@ -122,6 +122,7 @@ function NovelPromotionWorkspaceContent(props: NovelPromotionWorkspaceProps) {
           localStoryboardPromptRefineLevel={vm.project.localStoryboardPromptRefineLevel}
           localStoryboardUsePanelDescriptionEnabled={vm.project.localStoryboardUsePanelDescriptionEnabled}
           progressPopupEnabled={vm.project.progressPopupEnabled}
+          forcedStoryboardDurationSec={vm.project.forcedStoryboardDurationSec}
           onUpdateConfig={vm.actions.handleUpdateConfig}
           globalAssetText={vm.project.globalAssetText}
           projectName={project.name}
