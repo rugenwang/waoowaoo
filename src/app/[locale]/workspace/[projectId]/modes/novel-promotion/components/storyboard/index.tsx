@@ -10,7 +10,7 @@ import StoryboardToolbar from './StoryboardToolbar'
 import StoryboardCanvas from './StoryboardCanvas'
 import { useStoryboardStageController } from './hooks/useStoryboardStageController'
 import { useStoryboardModalRuntime } from './hooks/useStoryboardModalRuntime'
-import { useUpdateProjectPanelFrameTime } from '@/lib/query/hooks'
+import { useDeleteProjectPanelFrame, useUpdateProjectPanelFramePrompt, useUpdateProjectPanelFrameTime } from '@/lib/query/hooks'
 
 interface StoryboardStageProps {
   projectId: string
@@ -71,6 +71,7 @@ export default function StoryboardStage({
     addStoryboardGroup,
     moveStoryboardGroup,
     insertPanel,
+    duplicatePanel,
 
     submittingVariantPanelId,
     generatePanelVariant,
@@ -147,6 +148,8 @@ export default function StoryboardStage({
   })
 
   const updatePanelFrameTimeMutation = useUpdateProjectPanelFrameTime(projectId)
+  const updatePanelFramePromptMutation = useUpdateProjectPanelFramePrompt(projectId)
+  const deletePanelFrameMutation = useDeleteProjectPanelFrame(projectId)
   const updatePanelFrameTime = async (frameId: string, frameTimeSec: number) => {
     const result = await updatePanelFrameTimeMutation.mutateAsync({ frameId, frameTimeSec })
     setLocalStoryboards((prev) =>
@@ -157,6 +160,43 @@ export default function StoryboardStage({
           frames: panel.frames?.map((frame) =>
             frame.id === frameId
               ? { ...frame, frameTimeSec: result.frameTimeSec ?? frameTimeSec }
+              : frame,
+          ),
+        })),
+      })),
+    )
+  }
+  const deletePanelFrame = async (panelId: string, frameId: string) => {
+    const result = await deletePanelFrameMutation.mutateAsync({ frameId })
+    setLocalStoryboards((prev) =>
+      prev.map((storyboard) => ({
+        ...storyboard,
+        panels: storyboard.panels?.map((panel) => {
+          if (panel.id !== panelId && panel.id !== result.panelId) return panel
+          return {
+            ...panel,
+            panelMode: result.panelMode,
+            imageUrl: result.imageUrl,
+            groupDurationSec: result.groupDurationSec,
+            groupVideoPrompt: result.groupVideoPrompt,
+            groupPlanJson: result.groupPlanJson,
+            candidateImages: null,
+            frames: result.frames,
+          }
+        }),
+      })),
+    )
+  }
+  const updatePanelFramePrompt = async (frameId: string, imagePrompt: string) => {
+    const result = await updatePanelFramePromptMutation.mutateAsync({ frameId, imagePrompt })
+    setLocalStoryboards((prev) =>
+      prev.map((storyboard) => ({
+        ...storyboard,
+        panels: storyboard.panels?.map((panel) => ({
+          ...panel,
+          frames: panel.frames?.map((frame) =>
+            frame.id === frameId
+              ? { ...frame, imagePrompt: result.imagePrompt, videoPrompt: result.videoPrompt }
               : frame,
           ),
         })),
@@ -232,6 +272,8 @@ export default function StoryboardStage({
             await regeneratePanelFrameImage(panelId, frameId)
           }}
           onUpdateFrameTime={updatePanelFrameTime}
+          onUpdateFramePrompt={updatePanelFramePrompt}
+          onDeleteFrame={deletePanelFrame}
           onOpenEditModal={(storyboardId, panelIndex) => setEditingPanel({ storyboardId, panelIndex })}
           onOpenAIDataModal={(storyboardId, panelIndex) => setAIDataPanel({ storyboardId, panelIndex })}
           getPanelCandidates={getPanelCandidates}
@@ -240,6 +282,7 @@ export default function StoryboardStage({
           onCancelPanelCandidate={cancelPanelCandidate}
 
           onInsertPanel={insertPanel}
+          onDuplicatePanel={duplicatePanel}
           onPanelVariant={generatePanelVariant}
           addStoryboardGroup={addStoryboardGroup}
           addingStoryboardGroup={addingStoryboardGroup}

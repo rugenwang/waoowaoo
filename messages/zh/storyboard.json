@@ -381,6 +381,8 @@
     },
     "panelActions": {
         "insertPanel": "插入分镜",
+        "duplicatePanel": "复制分镜",
+        "duplicateToNext": "复制到下一分镜",
         "panelVariant": "镜头变体",
         "insertHere": "在此处插入分镜",
         "generateVariant": "基于此镜头生成变体",

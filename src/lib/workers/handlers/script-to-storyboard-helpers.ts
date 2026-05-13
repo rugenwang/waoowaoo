@@ -48,7 +48,7 @@ function normalizeDurationSeconds(value: unknown): number | null {
 }
 
 const MAX_PANEL_GROUP_DURATION_SEC = 20
-const MAX_PANEL_FRAMES = 8
+const MAX_PANEL_FRAMES = 20
 
 type PanelFramePersistenceRow = {
   frameIndex: number
@@ -77,6 +77,19 @@ function readString(record: JsonRecord, keys: string[]): string | null {
     if (typeof value === 'string' && value.trim()) return value.trim()
   }
   return null
+}
+
+function cleanVideoPromptText(value: string | null): string | null {
+  if (!value) return null
+  const cleaned = value
+    .replace(/[①②③④⑤⑥⑦⑧⑨⑩]\s*/g, '')
+    .replace(/(?:[（(]\s*)?(?:主运镜|辅助运镜)(?:\s*[）)])?/g, '')
+    .replace(/【对话】\s*(?:无台词|无明确台词|暂无台词|没有台词)\s*[；;。]?/g, '')
+    .replace(/台词：\s*(?:无台词|无明确台词|暂无台词|没有台词)\s*[；;。]?/g, '')
+    .replace(/[ \t]+([，。；：])/g, '$1')
+    .replace(/；{2,}/g, '；')
+    .trim()
+  return cleaned || null
 }
 
 function readNumber(record: JsonRecord, keys: string[]): number | null {
@@ -141,7 +154,7 @@ function normalizePanelFrameRows(panel: StoryboardPanel, duration: number | null
         frameRole: readString(frame, ['frame_role', 'frameRole', 'role']) || (index === 0 ? 'hero' : 'continuity'),
         dependencyFrameIds: toJsonArrayText(dependencies),
         imagePrompt: readString(frame, ['image_prompt', 'imagePrompt', 'prompt', 'description']),
-        videoPrompt: readString(frame, ['video_prompt', 'videoPrompt', 'motion_prompt', 'motionPrompt']),
+        videoPrompt: cleanVideoPromptText(readString(frame, ['video_prompt', 'videoPrompt', 'motion_prompt', 'motionPrompt'])),
         promptJson: toJsonText(frame),
         referencePolicy: toJsonText(frame.reference_policy ?? frame.referencePolicy ?? frame.references ?? null),
         generationStatus: 'pending',
@@ -153,7 +166,7 @@ function normalizePanelFrameRows(panel: StoryboardPanel, duration: number | null
       frameRole: 'hero',
       dependencyFrameIds: null,
       imagePrompt: readString(panel, ['image_prompt', 'imagePrompt', 'description', 'source_text']),
-      videoPrompt: readString(panel, ['video_prompt', 'videoPrompt']),
+      videoPrompt: cleanVideoPromptText(readString(panel, ['video_prompt', 'videoPrompt'])),
       promptJson: null,
       referencePolicy: null,
       generationStatus: 'pending',
@@ -188,6 +201,7 @@ export function buildPanelFramePersistence(panel: StoryboardPanel): PanelFramePe
     'video_prompt',
     'videoPrompt',
   ])
+  const cleanedGroupVideoPrompt = cleanVideoPromptText(groupVideoPrompt)
   const groupPlanJson = panelMode === 'group'
     ? toJsonText({
       panelMode,
@@ -200,7 +214,7 @@ export function buildPanelFramePersistence(panel: StoryboardPanel): PanelFramePe
   return {
     panelMode,
     groupDurationSec: panelMode === 'group' ? duration : null,
-    groupVideoPrompt: panelMode === 'group' ? groupVideoPrompt : null,
+    groupVideoPrompt: panelMode === 'group' ? cleanedGroupVideoPrompt : null,
     groupPlanJson,
     duration,
     frames,
@@ -217,17 +231,75 @@ function hasGroupFrames(panel: StoryboardPanel): boolean {
   return mode === 'group' || mode === 'complex' || rawFrames.length > 1
 }
 
-function getPreferredFrameCount(durationSec: 8 | 10 | 15 | 20): number {
-  if (durationSec >= 20) return 4
-  if (durationSec >= 15) return 3
+const ACTION_DENSITY_KEYWORDS = [
+  '走', '跑', '冲', '追', '躲', '扑', '撞', '推', '拉', '抬手', '挥', '砍', '打',
+  '踢', '抓', '转身', '回头', '跪', '站起', '坐下', '倒下', '扶起', '递', '拿起',
+  '放下', '打开', '关上', '穿过', '靠近', '后退', '拔剑', '出手',
+]
+
+const TRANSITION_DENSITY_KEYWORDS = [
+  '转场', '切到', '切换', '闪回', '回忆', '梦境', '来到', '进入', '离开', '穿过',
+  '从', '到', '突然', '随后', '接着', '同时', '另一边',
+]
+
+const CAMERA_DENSITY_KEYWORDS = [
+  '推镜', '拉镜', '摇镜', '移镜', '跟镜', '固定镜', '俯拍', '仰拍', '平视', '斜角拍',
+  '环绕', '俯冲', '升降', '甩镜', '变焦', '旋转', '穿梭', '手持', '特写', '近景',
+  '中景', '远景', '全景',
+]
+
+const ULTRA_HIGH_DENSITY_KEYWORDS = [
+  '连续打斗', '混战', '近身搏斗', '高速追逐', '追车', '连击', '闪避', '翻滚', '格挡',
+  '爆炸', '坠落', '跳跃', '飞跃', '快速切换', '连续转场', '密集运镜', '快节奏',
+  '一秒一帧', '每秒', '逐秒',
+]
+
+function countKeywordHits(text: string, keywords: string[]): number {
+  return keywords.reduce((count, keyword) => count + (text.includes(keyword) ? 1 : 0), 0)
+}
+
+function collectDensityText(panel: StoryboardPanel): string {
+  return [
+    panel.description,
+    panel.source_text,
+    panel.video_prompt,
+    panel.camera_move,
+    panel.shot_type,
+    panel.scene_type,
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join(' ')
+}
+
+function getDurationBaseFrameCount(durationSec: 8 | 10 | 15 | 20): number {
+  if (durationSec >= 20) return 5
+  if (durationSec >= 15) return 4
+  if (durationSec >= 10) return 3
   return 2
+}
+
+function getPreferredFrameCount(durationSec: 8 | 10 | 15 | 20, panels: StoryboardPanel[]): number {
+  const text = panels.map(collectDensityText).join(' ')
+  const actionHits = countKeywordHits(text, ACTION_DENSITY_KEYWORDS)
+  const transitionHits = countKeywordHits(text, TRANSITION_DENSITY_KEYWORDS)
+  const cameraHits = countKeywordHits(text, CAMERA_DENSITY_KEYWORDS)
+  const dialogueTurns = (text.match(/[「“"][^」”"]+[」”"]/g) || []).length
+  const sceneTypeBonus = panels.some((panel) => panel.scene_type === 'action' || panel.scene_type === 'suspense') ? 1 : 0
+  const ultraHits = countKeywordHits(text, ULTRA_HIGH_DENSITY_KEYWORDS)
+  const hasUltraHighDensity = ultraHits >= 1
+    || (durationSec >= 15 && actionHits >= 7 && cameraHits >= 3)
+    || (durationSec >= 15 && actionHits >= 5 && transitionHits >= 4)
+    || (durationSec >= 20 && actionHits >= 5 && panels.some((panel) => panel.scene_type === 'action'))
+  if (hasUltraHighDensity) return Math.max(2, Math.min(MAX_PANEL_FRAMES, durationSec))
+
+  const densityScore = actionHits + transitionHits + Math.min(3, cameraHits) + Math.min(2, dialogueTurns) + sceneTypeBonus
+  const densityBonus = densityScore >= 9 ? 3 : densityScore >= 5 ? 2 : densityScore >= 2 ? 1 : 0
+  return Math.max(2, Math.min(MAX_PANEL_FRAMES, getDurationBaseFrameCount(durationSec) + densityBonus))
 }
 
 function chooseStoryboardGroupSize(remaining: number, preferredFrameCount: number): number {
   if (remaining <= 1) return remaining
-  if (remaining <= MAX_PANEL_FRAMES) return Math.min(4, remaining)
-  if (remaining - preferredFrameCount === 1) return Math.min(4, preferredFrameCount + 1)
-  return Math.min(4, preferredFrameCount)
+  const target = Math.max(2, Math.min(MAX_PANEL_FRAMES, preferredFrameCount, remaining))
+  if (remaining > target && remaining - target === 1 && target < MAX_PANEL_FRAMES) return target + 1
+  return target
 }
 
 function uniqueJsonArray(values: unknown[]): unknown[] {
@@ -256,32 +328,46 @@ function formatTimecode(seconds: number): string {
   return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
 }
 
+function selectFallbackMusic(sceneType: unknown): string {
+  if (sceneType === 'action') return '急促鼓点战斗配乐'
+  if (sceneType === 'epic') return '史诗恢弘交响乐'
+  if (sceneType === 'suspense') return '紧张悬疑大片配乐'
+  if (sceneType === 'emotion') return '伤感催泪抒情纯音乐'
+  return '氛围感沉浸式背景音乐'
+}
+
+function normalizeFallbackCameraMove(value: unknown): string {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text) return '推镜'
+  if (text.includes('俯冲')) return '俯冲'
+  if (text.includes('升')) return '升降镜'
+  if (text.includes('环绕')) return '环绕镜'
+  if (text.includes('摇')) return '摇镜'
+  if (text.includes('跟')) return '跟镜'
+  if (text.includes('拉')) return '拉镜'
+  if (text.includes('移') || text.includes('平移')) return '移镜'
+  if (text.includes('固定') || text.includes('定格')) return '固定镜'
+  if (text.includes('俯拍')) return '俯拍'
+  if (text.includes('仰拍')) return '仰拍'
+  return text
+}
+
 function buildFallbackGroupVideoPrompt(panels: StoryboardPanel[], durationSec: number): string {
   const segmentDuration = durationSec / Math.max(1, panels.length)
+  const music = selectFallbackMusic(panels[0]?.scene_type)
   const timeline = panels.map((panel, index) => {
     const start = Math.round(segmentDuration * index)
     const end = index === panels.length - 1 ? durationSec : Math.max(start + 1, Math.round(segmentDuration * (index + 1)))
-    const characters = Array.isArray(panel.characters)
-      ? panel.characters
-        .map((item) => {
-          const record = asJsonRecord(item)
-          return typeof record?.name === 'string' ? record.name : typeof item === 'string' ? item : ''
-        })
-        .filter(Boolean)
-        .join('、')
-      : '画面内人物'
-    return [
-      `${formatTimecode(start)}-${formatTimecode(end)}`,
-      `运镜：${panel.camera_move || '镜头平稳推进，保持画面连续'}`,
-      `人物：${characters || '画面内人物'}`,
-      `动作：${panel.description || panel.source_text || '承接上一画面继续行动'}`,
-      '表情：自然贴合剧情，神态连贯',
-      `台词：${panel.source_text || '无明确台词'}`,
-    ].join('\n')
+    const mainMove = normalizeFallbackCameraMove(panel.camera_move)
+    const actionText = panel.description || panel.source_text || '承接上一画面继续行动'
+    const dialogueText = panel.source_text
+      ? `；【对话】画面内人物声音自然清晰，语气贴合当前情绪，口型与台词同步，低声说：「${String(panel.source_text).replace(/["“”]/g, '「')}」`
+      : ''
+    return `${formatTimecode(start)}-${formatTimecode(end)}：镜头缓慢${mainMove}，围绕画面内人物与场景关系展开，人物站位清晰，动作承接上一段，${actionText}；镜头轻微定格，聚焦关键道具、手部动作或环境细节，强化画面质感与剧情信息；表情特写，捕捉人物眼神、眉眼、嘴角和呼吸变化，神态自然连贯${dialogueText}；背景音中环境声与${music}同步铺开。`
   }).join('\n')
 
   return [
-    '高清 4K，电影级质感，画面稳定清晰，光影自然，人物建模精致，动作流畅不僵硬，表情生动，口型和台词同步，无画面闪烁、无脸部崩坏、无肢体畸形，背景音乐为贴合剧情氛围的纯音乐，节奏舒缓自然，贯穿整段视频。',
+    `高清4K，电影级质感，画面稳定清晰，光影自然，人物建模精致，动作流畅不僵硬，表情生动，口型和台词同步，无画面闪烁、无脸部崩坏、无肢体畸形，背景音乐为${music}，贯穿整段视频。`,
     timeline,
   ].join('\n')
 }
@@ -339,10 +425,11 @@ function normalizePanelNumbers(panels: StoryboardPanel[]): StoryboardPanel[] {
 
 function groupSinglePanelRun(panels: StoryboardPanel[], durationSec: 8 | 10 | 15 | 20): StoryboardPanel[] {
   if (panels.length <= 1) return panels
-  const preferredFrameCount = getPreferredFrameCount(durationSec)
   const grouped: StoryboardPanel[] = []
   for (let index = 0; index < panels.length;) {
     const remaining = panels.length - index
+    const densityWindow = panels.slice(index, index + Math.min(MAX_PANEL_FRAMES, remaining))
+    const preferredFrameCount = getPreferredFrameCount(durationSec, densityWindow)
     const groupSize = chooseStoryboardGroupSize(remaining, preferredFrameCount)
     const batch = panels.slice(index, index + groupSize)
     if (batch.length <= 1) {
@@ -560,6 +647,7 @@ export async function persistStoryboardsAndPanels(params: {
       for (let i = 0; i < clipEntry.finalPanels.length; i += 1) {
         const panel = clipEntry.finalPanels[i]
         const framePersistence = buildPanelFramePersistence(panel)
+        const panelVideoPrompt = cleanVideoPromptText(panel.video_prompt || null)
         const created = await panelModel.create({
           data: {
             storyboardId: storyboard.id,
@@ -568,7 +656,7 @@ export async function persistStoryboardsAndPanels(params: {
             shotType: panel.shot_type || '中景',
             cameraMove: panel.camera_move || '固定',
             description: panel.description || null,
-            videoPrompt: panel.video_prompt || null,
+            videoPrompt: panelVideoPrompt,
             location: panel.location || null,
             characters: panel.characters ? JSON.stringify(panel.characters) : null,
             props: panel.props ? JSON.stringify(panel.props) : null,
@@ -660,6 +748,7 @@ export async function persistStoryboardOutputs(params: {
       for (let i = 0; i < clipEntry.finalPanels.length; i += 1) {
         const panel = clipEntry.finalPanels[i]
         const framePersistence = buildPanelFramePersistence(panel)
+        const panelVideoPrompt = cleanVideoPromptText(panel.video_prompt || null)
         const created = await panelModel.create({
           data: {
             storyboardId: storyboard.id,
@@ -668,7 +757,7 @@ export async function persistStoryboardOutputs(params: {
             shotType: panel.shot_type || '中景',
             cameraMove: panel.camera_move || '固定',
             description: panel.description || null,
-            videoPrompt: panel.video_prompt || null,
+            videoPrompt: panelVideoPrompt,
             location: panel.location || null,
             characters: panel.characters ? JSON.stringify(panel.characters) : null,
             props: panel.props ? JSON.stringify(panel.props) : null,

@@ -93,7 +93,11 @@ interface BuildWorkspaceControllerViewModelParams {
     rebuildConfirmTitle: string
     rebuildConfirmMessage: string
     pendingActionType: 'storyToScript' | 'scriptToStoryboard' | null
-    runWithRebuildConfirm: (action: 'storyToScript' | 'scriptToStoryboard', operation: () => Promise<void>) => Promise<void>
+    runWithRebuildConfirm: (
+      action: 'storyToScript' | 'scriptToStoryboard',
+      operation: () => Promise<void>,
+      options?: { clipId?: string },
+    ) => Promise<void>
     handleCancelRebuildConfirm: () => void
     handleAcceptRebuildConfirm: () => void
   }
@@ -114,7 +118,7 @@ interface BuildWorkspaceControllerViewModelParams {
     handleGenerateTTS: () => Promise<void>
     handleAnalyzeAssets: () => Promise<void>
     runStoryToScriptFlow: () => Promise<void>
-    runScriptToStoryboardFlow: () => Promise<void>
+    runScriptToStoryboardFlow: (clipId?: string) => Promise<void>
     showCreatingToast: boolean
   }
   videoState: {

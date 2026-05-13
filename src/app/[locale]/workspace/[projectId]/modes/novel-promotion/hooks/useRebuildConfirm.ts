@@ -9,6 +9,7 @@ interface RebuildConfirmContext {
   actionType: RebuildActionType
   storyboardCount: number
   panelCount: number
+  scope?: 'episode' | 'clip'
 }
 
 interface DownstreamCheckResult {
@@ -22,11 +23,16 @@ type StoryboardStats = {
   panelCount: number
 }
 
+type RebuildConfirmOptions = {
+  clipId?: string
+}
+
 export function hasDownstreamStoryboardData(stats: StoryboardStats): boolean {
   return stats.storyboardCount > 0 || stats.panelCount > 0
 }
 
 interface StoryboardLike {
+  clipId?: string | null
   panels?: unknown[] | null
 }
 
@@ -48,19 +54,31 @@ export function useRebuildConfirm({
   const [pendingActionType, setPendingActionType] = useState<RebuildActionType | null>(null)
   const pendingRebuildActionRef = useRef<(() => Promise<void>) | null>(null)
 
-  const getFallbackStoryboardStats = useCallback(() => {
+  const getFallbackStoryboardStats = useCallback((clipId?: string) => {
     const storyboards = Array.isArray(episodeStoryboards) ? episodeStoryboards : []
-    const storyboardCount = storyboards.length
-    const panelCount = storyboards.reduce((sum: number, storyboard) => {
+    const scopedStoryboards = clipId
+      ? storyboards.filter((storyboard) => storyboard?.clipId === clipId)
+      : storyboards
+    const storyboardCount = scopedStoryboards.length
+    const panelCount = scopedStoryboards.reduce((sum: number, storyboard) => {
       const panels = Array.isArray(storyboard?.panels) ? storyboard.panels.length : 0
       return sum + panels
     }, 0)
     return { storyboardCount, panelCount }
   }, [episodeStoryboards])
 
-  const checkStoryboardDownstreamData = useCallback(async (): Promise<DownstreamCheckResult> => {
+  const checkStoryboardDownstreamData = useCallback(async (clipId?: string): Promise<DownstreamCheckResult> => {
     if (!episodeId) {
       return { shouldConfirm: false, storyboardCount: 0, panelCount: 0 }
+    }
+
+    if (clipId) {
+      const fallbackStats = getFallbackStoryboardStats(clipId)
+      return {
+        shouldConfirm: hasDownstreamStoryboardData(fallbackStats),
+        storyboardCount: fallbackStats.storyboardCount,
+        panelCount: fallbackStats.panelCount,
+      }
     }
 
     try {
@@ -83,13 +101,14 @@ export function useRebuildConfirm({
 
   const runWithRebuildConfirm = useCallback(async (
     actionType: RebuildActionType,
-    action: () => Promise<void>
+    action: () => Promise<void>,
+    options?: RebuildConfirmOptions,
   ) => {
     if (pendingActionType === actionType) return
 
     setPendingActionType(actionType)
     try {
-      const downstream = await checkStoryboardDownstreamData()
+      const downstream = await checkStoryboardDownstreamData(options?.clipId)
       if (!downstream.shouldConfirm) {
         try {
           await action()
@@ -110,6 +129,7 @@ export function useRebuildConfirm({
         actionType,
         storyboardCount: downstream.storyboardCount,
         panelCount: downstream.panelCount,
+        scope: options?.clipId ? 'clip' : 'episode',
       })
       setShowRebuildConfirm(true)
     } catch (error) {
@@ -156,6 +176,9 @@ export function useRebuildConfirm({
     }
     if (rebuildConfirmContext.actionType === 'storyToScript') {
       return t('rebuildConfirm.storyToScript.message', values)
+    }
+    if (rebuildConfirmContext.scope === 'clip') {
+      return t('rebuildConfirm.scriptToStoryboard.clipMessage', values)
     }
     return t('rebuildConfirm.scriptToStoryboard.message', values)
   }, [rebuildConfirmContext, t])

@@ -317,6 +317,50 @@ function parseDependencyFrameIds(raw: string | null | undefined): number[] {
   }
 }
 
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values) {
+    const clean = value.trim()
+    if (!clean || seen.has(clean)) continue
+    seen.add(clean)
+    result.push(clean)
+  }
+  return result
+}
+
+function uniqueNumbers(values: number[]): number[] {
+  const seen = new Set<number>()
+  const result: number[] = []
+  for (const value of values) {
+    if (!Number.isFinite(value) || seen.has(value)) continue
+    seen.add(value)
+    result.push(value)
+  }
+  return result
+}
+
+function buildFrameReferencePlan(params: {
+  frame: PanelFrameForGeneration
+  generatedByFrameIndex: Map<number, string>
+}) {
+  const dependencyIndexes = parseDependencyFrameIds(params.frame.dependencyFrameIds)
+  const frameReferenceIndexes = params.frame.frameIndex > 0
+    ? uniqueNumbers([
+      0,
+      ...dependencyIndexes,
+      Math.max(0, params.frame.frameIndex - 1),
+    ])
+    : dependencyIndexes
+  const urls = frameReferenceIndexes
+    .map((frameIndex) => params.generatedByFrameIndex.get(frameIndex))
+    .filter((value): value is string => Boolean(value))
+  return {
+    frameReferenceIndexes,
+    urls: uniqueStrings(urls),
+  }
+}
+
 function buildPanelFramePrompt(params: {
   locale: TaskJobData['locale']
   aspectRatio: string
@@ -324,10 +368,31 @@ function buildPanelFramePrompt(params: {
   frame: PanelFrameForGeneration
   panelDescription: string | null
   groupVideoPrompt: string | null
+  frameReferenceIndexes: number[]
+  frameReferenceImageCount: number
   hardConstraints: string
 }) {
   const framePrompt = String(params.frame.imagePrompt || params.panelDescription || '').trim()
   const motionPrompt = String(params.frame.videoPrompt || '').trim()
+  const referenceLabels = params.frameReferenceIndexes.map((index) => `F${index + 1}`).join(', ')
+  const zhReferenceRule = params.frame.frameIndex > 0
+    ? [
+      params.frameReferenceImageCount > 0
+        ? `参考帧规则：参考图前 ${params.frameReferenceImageCount} 张是本分镜组已生成关键帧，${referenceLabels ? `包含 ${referenceLabels}；` : ''}其中 F1 是整组基础帧。`
+        : '参考帧规则：这是基础帧之后的关键帧，必须承接 F1 基础帧的角色、服饰、场景、光线和构图逻辑。',
+      '请根据基础帧、已生成关联帧和本帧剧本描述，生成顺滑过渡到当前秒点的画面；保留身份和服装一致，但不要原样复制基础帧姿势、表情、站位或构图。',
+      '本帧只表现当前秒点的关键状态，要有明确变化，例如动作进展、人物位置、手部/道具状态、视线、表情或场景转化。'
+    ].join('\n')
+    : ''
+  const enReferenceRule = params.frame.frameIndex > 0
+    ? [
+      params.frameReferenceImageCount > 0
+        ? `Reference-frame rule: the first ${params.frameReferenceImageCount} reference image(s) are already generated keyframes from this storyboard group, ${referenceLabels ? `including ${referenceLabels}; ` : ''}F1 is the base opening frame.`
+        : 'Reference-frame rule: this is after the base frame; preserve F1 identity, outfit, scene, light, and composition logic.',
+      'Use the base frame, linked frames, and this frame script description to create a smooth current-frame image. Keep identity/outfit consistent, but do not copy the base-frame pose, expression, position, or composition exactly.',
+      'Show only the current second state with a clear change: action progress, body position, hand/prop state, gaze, expression, or scene transition.'
+    ].join('\n')
+    : ''
   const lines = params.locale === 'en'
     ? [
       `Aspect ratio: ${params.aspectRatio}`,
@@ -335,6 +400,7 @@ function buildPanelFramePrompt(params: {
       `Frame time: ${params.frame.frameTimeSec}s`,
       params.frame.frameRole ? `Frame role: ${params.frame.frameRole}` : '',
       params.frame.frameIndex === 0 ? 'This is the opening keyframe: show the original state before any later action, movement, emotional change, fight result, or transition result.' : '',
+      enReferenceRule,
       motionPrompt ? `Continuity note for this still frame only: ${motionPrompt}` : '',
       params.styleText ? `Style: ${params.styleText}` : '',
       'Generate exactly one still image for this key frame. Keep visual continuity with reference images. Do not depict camera movement, timeline segments, dialogue text, music, or multiple action moments.',
@@ -346,6 +412,7 @@ function buildPanelFramePrompt(params: {
       `所在秒点：${params.frame.frameTimeSec}s`,
       params.frame.frameRole ? `关键帧角色：${params.frame.frameRole}` : '',
       params.frame.frameIndex === 0 ? '这是开头关键帧：必须表现后续动作发生前的原始状态，人物尚未完成移动、转身、打斗、情绪变化或事件结果。' : '',
+      zhReferenceRule,
       motionPrompt ? `本帧静态衔接提示：${motionPrompt}` : '',
       params.styleText ? `风格：${params.styleText}` : '',
       '只生成这一秒点的一张静态关键帧图，必须与参考图保持人物、服饰、场景、光线和画风连贯。不要画运镜、时间轴、字幕、台词文字、背景音乐或多个连续动作瞬间。',
@@ -372,7 +439,7 @@ export function buildStoryboardHardConstraints(params: {
       '- Do NOT include duplicated identical characters (no clones of the same person with identical appearance in the same frame).',
       '- Characters must be fully and properly clothed, consistent with their reference outfit; no shirtless, semi-nude, exposed torso, revealing outfit, missing clothing, or torn-clothing exposure.',
       ratio ? `- Aspect ratio must be EXACT: ${ratio}.` : null,
-      hasRefs ? '- Match the reference images for identity/style/composition; do NOT draw any text from references.' : null,
+      hasRefs ? '- Match reference images for identity, outfit, style, and scene continuity; do NOT copy pose/composition exactly, and do NOT draw any text from references.' : null,
       style ? `- Keep visual style consistent: ${style}.` : null,
     ].filter(Boolean).join('\n')
   }
@@ -384,7 +451,7 @@ export function buildStoryboardHardConstraints(params: {
     '- 禁止在同一个镜头中出现“形象完全一样的人”（禁止克隆同一人物外貌/服装/发型完全一致的多个个体）。',
     '- 人物必须衣着完整、服饰得体，并与角色参考图/设定服装一致；禁止半裸、裸露上身、暴露服装、缺少衣服、衣物破损导致裸露。',
     ratio ? `- 画面比例必须严格为：${ratio}` : null,
-    hasRefs ? '- 有参考图时：外貌/风格/构图需与参考图一致；参考图上的文字标签仅供识别，禁止画入图中。' : null,
+    hasRefs ? '- 有参考图时：外貌、服饰、画风、场景连续性需与参考图一致；禁止原样复制参考图姿势/构图；参考图上的文字标签仅供识别，禁止画入图中。' : null,
     style ? `- 风格必须与参考一致：${style}` : null,
   ].filter(Boolean).join('\n')
 }
@@ -658,17 +725,17 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
         },
       })
 
-      const dependencyUrls = parseDependencyFrameIds(frame.dependencyFrameIds)
-        .map((dependencyIndex) => generatedByFrameIndex.get(dependencyIndex))
-        .filter((value): value is string => Boolean(value))
+      const frameReferencePlan = buildFrameReferencePlan({ frame, generatedByFrameIndex })
+      const dependencyUrls = frameReferencePlan.urls
         .map((value) => toSignedUrlIfCos(value, 3600))
         .filter((value): value is string => Boolean(value))
-      const normalizedFrameRefs = dependencyUrls.length > 0
-        ? [
-          ...normalizedRefs,
-          ...await normalizeReferenceImagesForGeneration(dependencyUrls),
-        ]
-        : normalizedRefs
+      const normalizedFrameReferenceRefs = dependencyUrls.length > 0
+        ? await normalizeReferenceImagesForGeneration(dependencyUrls)
+        : []
+      const normalizedFrameRefs = uniqueStrings([
+        ...normalizedFrameReferenceRefs,
+        ...normalizedRefs,
+      ])
       const framePrompt = prependAnimeStyleLabel({
         prompt: buildPanelFramePrompt({
           locale: job.data.locale,
@@ -677,6 +744,8 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
           frame,
           panelDescription: panel.description,
           groupVideoPrompt: panel.groupVideoPrompt || panel.videoPrompt,
+          frameReferenceIndexes: frameReferencePlan.frameReferenceIndexes,
+          frameReferenceImageCount: normalizedFrameReferenceRefs.length,
           hardConstraints: buildStoryboardHardConstraints({
             locale: job.data.locale,
             aspectRatio,
@@ -739,6 +808,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     }
 
     const representativeImageUrl = generatedByFrameIndex.get(0) || generatedUrls[0] || null
+    const targetFrameImageUrl = targetFrame ? (generatedByFrameIndex.get(targetFrame.frameIndex) || null) : null
     await assertTaskActive(job, 'persist_panel_image')
     await prisma.novelPromotionPanel.update({
       where: { id: panel.id },
@@ -751,7 +821,8 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     return {
       panelId: panel.id,
       candidateCount: generatedUrls.length,
-      imageUrl: representativeImageUrl,
+      imageUrl: targetFrameImageUrl || representativeImageUrl,
+      panelImageUrl: representativeImageUrl,
       ...(targetFrame ? { frameId: targetFrame.id, frameIndex: targetFrame.frameIndex } : {}),
     }
   }

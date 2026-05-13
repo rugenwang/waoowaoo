@@ -37,6 +37,8 @@ interface StoryboardPanelListProps {
   onUploadFrameImage?: (frameId: string, file: File) => void | Promise<void>
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
+  onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
+  onDeleteFrame?: (panelId: string, frameId: string) => void | Promise<void>
   onOpenEditModal: (panelIndex: number) => void
   onOpenAIDataModal: (panelIndex: number) => void
   onSelectPanelCandidateIndex: (panelId: string, index: number) => void
@@ -45,6 +47,7 @@ interface StoryboardPanelListProps {
   onClearPanelTaskError: (panelId: string) => void
   onPreviewImage: (url: string) => void
   onInsertAfter: (panelIndex: number) => void
+  onDuplicatePanel: (panelId: string) => Promise<void>
   onVariant: (panelIndex: number) => void
   isInsertDisabled: (panelId: string) => boolean
 }
@@ -77,6 +80,8 @@ export default function StoryboardPanelList({
   onUploadFrameImage,
   onRegenerateFrameImage,
   onUpdateFrameTime,
+  onUpdateFramePrompt,
+  onDeleteFrame,
   onOpenEditModal,
   onOpenAIDataModal,
   onSelectPanelCandidateIndex,
@@ -85,6 +90,7 @@ export default function StoryboardPanelList({
   onClearPanelTaskError,
   onPreviewImage,
   onInsertAfter,
+  onDuplicatePanel,
   onVariant,
   isInsertDisabled,
 }: StoryboardPanelListProps) {
@@ -161,6 +167,8 @@ export default function StoryboardPanelList({
               onUploadFrameImage={onUploadFrameImage}
               onRegenerateFrameImage={onRegenerateFrameImage}
               onUpdateFrameTime={onUpdateFrameTime}
+              onUpdateFramePrompt={onUpdateFramePrompt}
+              onDeleteFrame={onDeleteFrame}
               onOpenEditModal={() => onOpenEditModal(index)}
               onOpenAIDataModal={() => onOpenAIDataModal(index)}
               onSelectCandidateIndex={onSelectPanelCandidateIndex}
@@ -169,6 +177,7 @@ export default function StoryboardPanelList({
               onClearError={() => onClearPanelTaskError(panel.id)}
               onPreviewImage={onPreviewImage}
               onInsertAfter={() => onInsertAfter(index)}
+              onDuplicatePanel={() => onDuplicatePanel(panel.id)}
               onVariant={() => onVariant(index)}
               isInsertDisabled={isInsertDisabled(panel.id)}
             />

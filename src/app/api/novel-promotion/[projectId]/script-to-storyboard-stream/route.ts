@@ -13,6 +13,7 @@ export const POST = apiHandler(async (
   const { projectId } = await context.params
   const body = await request.json().catch(() => ({}))
   const episodeId = typeof body?.episodeId === 'string' ? body.episodeId.trim() : ''
+  const clipId = typeof body?.clipId === 'string' ? body.clipId.trim() : ''
 
   if (!episodeId) {
     throw new ApiError('INVALID_PARAMS')
@@ -37,7 +38,7 @@ export const POST = apiHandler(async (
       ...body,
       displayMode: 'detail',
     },
-    dedupeKey: `script_to_storyboard_run:${episodeId}`,
+    dedupeKey: clipId ? `script_to_storyboard_run:${episodeId}:${clipId}` : `script_to_storyboard_run:${episodeId}`,
     priority: 2,
   })
   if (asyncTaskResponse) return asyncTaskResponse

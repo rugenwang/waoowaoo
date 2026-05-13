@@ -27,9 +27,13 @@ interface UseWorkspaceStageRuntimeParams {
   }> | undefined
   handleUpdateEpisode: (key: string, value: unknown) => Promise<void>
   handleUpdateConfig: (key: string, value: unknown) => Promise<void>
-  runWithRebuildConfirm: (action: 'storyToScript' | 'scriptToStoryboard', operation: () => Promise<void>) => Promise<void>
+  runWithRebuildConfirm: (
+    action: 'storyToScript' | 'scriptToStoryboard',
+    operation: () => Promise<void>,
+    options?: { clipId?: string },
+  ) => Promise<void>
   runStoryToScriptFlow: () => Promise<void>
-  runScriptToStoryboardFlow: () => Promise<void>
+  runScriptToStoryboardFlow: (clipId?: string) => Promise<void>
   handleUpdateClip: (clipId: string, updates: Record<string, unknown>) => Promise<void>
   openAssetLibrary: (characterId?: string | null, refreshAssets?: boolean) => void
   handleStageChange: (stage: string) => void
@@ -109,7 +113,11 @@ export function useWorkspaceStageRuntime({
       return handleUpdateClip(clipId, data as Record<string, unknown>)
     },
     onOpenAssetLibrary: () => openAssetLibrary(),
-    onRunScriptToStoryboard: () => runWithRebuildConfirm('scriptToStoryboard', runScriptToStoryboardFlow),
+    onRunScriptToStoryboard: (clipId?: string) => runWithRebuildConfirm(
+      'scriptToStoryboard',
+      () => runScriptToStoryboardFlow(clipId),
+      clipId ? { clipId } : undefined,
+    ),
     onStageChange: handleStageChange,
     onGenerateVideo: handleGenerateVideo,
     onGenerateAllVideos: handleGenerateAllVideos,

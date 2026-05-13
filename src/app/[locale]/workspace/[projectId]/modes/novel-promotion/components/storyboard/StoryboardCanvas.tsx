@@ -57,6 +57,8 @@ interface StoryboardCanvasProps {
   onUploadFrameImage?: (frameId: string, file: File) => void | Promise<void>
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
+  onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
+  onDeleteFrame?: (panelId: string, frameId: string) => void | Promise<void>
   onOpenEditModal: (storyboardId: string, panelIndex: number) => void
   onOpenAIDataModal: (storyboardId: string, panelIndex: number) => void
   getPanelCandidates: (panel: NovelPromotionPanel) => { candidates: string[]; selectedIndex: number } | null
@@ -64,6 +66,7 @@ interface StoryboardCanvasProps {
   onConfirmPanelCandidate: (panelId: string, imageUrl: string) => Promise<void>
   onCancelPanelCandidate: (panelId: string) => void
   onInsertPanel: (storyboardId: string, insertAfterPanelId: string, userInput: string) => Promise<void>
+  onDuplicatePanel: (panelId: string) => Promise<void>
   onPanelVariant: (
     sourcePanelId: string,
     storyboardId: string,
@@ -119,6 +122,8 @@ export default function StoryboardCanvas({
   onUploadFrameImage,
   onRegenerateFrameImage,
   onUpdateFrameTime,
+  onUpdateFramePrompt,
+  onDeleteFrame,
   onOpenEditModal,
   onOpenAIDataModal,
   getPanelCandidates,
@@ -126,6 +131,7 @@ export default function StoryboardCanvas({
   onConfirmPanelCandidate,
   onCancelPanelCandidate,
   onInsertPanel,
+  onDuplicatePanel,
   onPanelVariant,
   addStoryboardGroup,
   addingStoryboardGroup,
@@ -196,6 +202,8 @@ export default function StoryboardCanvas({
               onUploadFrameImage={onUploadFrameImage}
               onRegenerateFrameImage={onRegenerateFrameImage}
               onUpdateFrameTime={onUpdateFrameTime}
+              onUpdateFramePrompt={onUpdateFramePrompt}
+              onDeleteFrame={onDeleteFrame}
               onOpenEditModal={(panelIndex) => onOpenEditModal(storyboard.id, panelIndex)}
               onOpenAIDataModal={(panelIndex) => onOpenAIDataModal(storyboard.id, panelIndex)}
               getPanelCandidates={getPanelCandidates}
@@ -205,6 +213,7 @@ export default function StoryboardCanvas({
               formatClipTitle={formatClipTitle}
               movingClipId={movingClipId}
               onInsertPanel={onInsertPanel}
+              onDuplicatePanel={onDuplicatePanel}
               insertingAfterPanelId={insertingAfterPanelId}
               projectId={projectId}
               episodeId={episodeId}

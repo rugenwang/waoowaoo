@@ -137,33 +137,33 @@ export function useRegenerateProjectPanelFrameImage(projectId: string) {
                 body: JSON.stringify({ panelId, frameId, count: 1 }),
             }, '重新生成关键帧失败')
         },
-        onMutate: ({ panelId }) => {
+        onMutate: ({ frameId }) => {
             upsertTaskTargetOverlay(queryClient, {
                 projectId,
-                targetType: 'NovelPromotionPanel',
-                targetId: panelId,
+                targetType: 'NovelPromotionPanelFrame',
+                targetId: frameId,
                 intent: 'regenerate',
             })
         },
-        onSuccess: (data, { panelId }) => {
+        onSuccess: (data, { frameId }) => {
             const result = data as { async?: boolean; taskId?: unknown; status?: unknown }
             const taskId = typeof result?.taskId === 'string' ? result.taskId.trim() : ''
             if (!result?.async || !taskId) return
             upsertTaskTargetOverlay(queryClient, {
                 projectId,
-                targetType: 'NovelPromotionPanel',
-                targetId: panelId,
+                targetType: 'NovelPromotionPanelFrame',
+                targetId: frameId,
                 phase: result.status === 'processing' ? 'processing' : 'queued',
                 runningTaskId: taskId,
                 runningTaskType: 'image_panel',
                 intent: 'regenerate',
             })
         },
-        onError: (_error, { panelId }) => {
+        onError: (_error, { frameId }) => {
             clearTaskTargetOverlay(queryClient, {
                 projectId,
-                targetType: 'NovelPromotionPanel',
-                targetId: panelId,
+                targetType: 'NovelPromotionPanelFrame',
+                targetId: frameId,
             })
         },
         onSettled: () => {
@@ -188,11 +188,88 @@ export function useUpdateProjectPanelFrameTime(projectId: string) {
                 panelId: string
                 frameIndex: number
                 frameTimeSec: number
+                imagePrompt: string | null
+                videoPrompt: string | null
             }>(`/api/novel-promotion/${projectId}/panel-frame`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ frameId, frameTimeSec }),
             }, '更新关键帧时间失败')
+        },
+        onSettled: async () => {
+            await invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+            await queryClient.invalidateQueries({ queryKey: ['episode-data', projectId], exact: false })
+        },
+    })
+}
+
+export function useUpdateProjectPanelFramePrompt(projectId: string) {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: async ({
+            frameId,
+            imagePrompt,
+        }: {
+            frameId: string
+            imagePrompt: string
+        }) => {
+            return await requestJsonWithError<{
+                success: boolean
+                frameId: string
+                panelId: string
+                frameIndex: number
+                frameTimeSec: number
+                imagePrompt: string | null
+                videoPrompt: string | null
+            }>(`/api/novel-promotion/${projectId}/panel-frame`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frameId, imagePrompt }),
+            }, '更新关键帧提示词失败')
+        },
+        onSettled: async () => {
+            await invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+            await queryClient.invalidateQueries({ queryKey: ['episode-data', projectId], exact: false })
+        },
+    })
+}
+
+export function useDeleteProjectPanelFrame(projectId: string) {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: async ({ frameId }: { frameId: string }) => {
+            return await requestJsonWithError<{
+                success: boolean
+                deletedFrameId: string
+                panelId: string
+                panelMode: 'single' | 'group'
+                imageUrl: string | null
+                groupDurationSec: number | null
+                groupVideoPrompt: string | null
+                groupPlanJson: string | null
+                frames: Array<{
+                    id: string
+                    panelId: string
+                    frameIndex: number
+                    frameTimeSec: number
+                    frameRole: string | null
+                    dependencyFrameIds: string | null
+                    imagePrompt: string | null
+                    videoPrompt: string | null
+                    promptJson: string | null
+                    referencePolicy: string | null
+                    imageUrl: string | null
+                    imageMediaId: string | null
+                    generationStatus: string | null
+                    errorMessage: string | null
+                    createdAt?: string
+                    updatedAt?: string
+                }>
+            }>(`/api/novel-promotion/${projectId}/panel-frame`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frameId }),
+            }, '删除关键帧失败')
         },
         onSettled: async () => {
             await invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
@@ -410,6 +487,26 @@ export function useInsertProjectPanel(projectId: string) {
         },
         onSettled: () => {
             invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+        },
+    })
+}
+
+/**
+ * 复制 panel 到下一分镜（同步）
+ */
+
+export function useDuplicateProjectPanel(projectId: string) {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: async (payload: { panelId: string }) => {
+            return await requestJsonWithError(`/api/novel-promotion/${projectId}/duplicate-panel`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            }, '复制分镜失败')
+        },
+        onSettled: async () => {
+            await invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
         },
     })
 }

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapabilityDropdown'
@@ -168,33 +169,81 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
           <>
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs font-medium text-[var(--glass-text-tertiary)]">{t('promptModal.promptLabel')}</span>
-              {!promptEditor.isEditing && (
-                <button onClick={promptEditor.handleStartEdit} className="text-[var(--glass-text-tertiary)] hover:text-[var(--glass-tone-info-fg)] transition-colors p-0.5">
-                  <AppIcon name="edit" className="w-3.5 h-3.5" />
-                </button>
-              )}
+              <button onClick={promptEditor.handleStartEdit} className="inline-flex items-center gap-1 text-[11px] text-[var(--glass-text-tertiary)] hover:text-[var(--glass-tone-info-fg)] transition-colors p-0.5">
+                <AppIcon name="edit" className="w-3.5 h-3.5" />
+                {t('panelCard.edit')}
+              </button>
             </div>
 
-            {promptEditor.isEditing ? (
-              <div className="relative mb-3">
-                <textarea
-                  value={promptEditor.editingPrompt}
-                  onChange={(event) => promptEditor.setEditingPrompt(event.target.value)}
-                  autoFocus
-                  className="w-full text-xs p-2 pr-16 border border-[var(--glass-stroke-focus)] rounded-lg bg-[var(--glass-bg-surface)] text-[var(--glass-text-secondary)] focus:outline-none focus:ring-1 focus:ring-[var(--glass-tone-info-fg)] resize-none"
-                  rows={3}
-                  placeholder={t('promptModal.placeholder')}
-                />
-                <div className="absolute right-1 top-1 flex flex-col gap-1">
-                  <button onClick={promptEditor.handleSave} disabled={promptEditor.isSavingPrompt} className="px-2 py-1 text-[10px] bg-[var(--glass-accent-from)] text-white rounded">{promptEditor.isSavingPrompt ? '...' : t('panelCard.save')}</button>
-                  <button onClick={promptEditor.handleCancelEdit} disabled={promptEditor.isSavingPrompt} className="px-2 py-1 text-[10px] bg-[var(--glass-bg-muted)] text-[var(--glass-text-secondary)] rounded">{t('panelCard.cancel')}</button>
+            <button
+              type="button"
+              onClick={promptEditor.handleStartEdit}
+              className="mb-3 block max-h-28 w-full overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-2 text-left text-xs leading-5 text-[var(--glass-text-secondary)] transition hover:border-[var(--glass-tone-info-fg)] hover:bg-[var(--glass-bg-surface)]"
+            >
+              {promptEditor.localPrompt || <span className="text-[var(--glass-text-tertiary)] italic">{t('panelCard.clickToEditPrompt')}</span>}
+            </button>
+
+            {promptEditor.isEditing && typeof document !== 'undefined' ? createPortal(
+              <div
+                className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+                onClick={promptEditor.isSavingPrompt ? undefined : promptEditor.handleCancelEdit}
+              >
+                <div
+                  className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] shadow-2xl"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between border-b border-[var(--glass-stroke-subtle)] px-5 py-4">
+                    <div>
+                      <div className="text-sm font-semibold text-[var(--glass-text-primary)]">
+                        {t('promptModal.title', { number: panelIndex + 1 })}
+                      </div>
+                      <div className="mt-1 text-xs text-[var(--glass-text-tertiary)]">
+                        {panel.textPanel?.shot_type || '-'}{panel.textPanel?.duration ? ` · ${panel.textPanel.duration}${t('promptModal.duration')}` : ''}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={promptEditor.isSavingPrompt}
+                      onClick={promptEditor.handleCancelEdit}
+                      className="rounded-full p-2 text-[var(--glass-text-tertiary)] transition hover:bg-[var(--glass-bg-muted)] hover:text-[var(--glass-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <AppIcon name="close" className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-5">
+                    <textarea
+                      value={promptEditor.editingPrompt}
+                      onChange={(event) => promptEditor.setEditingPrompt(event.target.value)}
+                      autoFocus
+                      className="min-h-[48vh] w-full resize-y rounded-lg border border-[var(--glass-stroke-focus)] bg-[var(--glass-bg-surface)] px-4 py-3 text-sm leading-6 text-[var(--glass-text-secondary)] outline-none focus:ring-2 focus:ring-[var(--glass-tone-info-fg)]"
+                      placeholder={t('promptModal.placeholder')}
+                    />
+                    <p className="mt-2 text-xs text-[var(--glass-text-tertiary)]">
+                      {t('promptModal.tip')}
+                    </p>
+                  </div>
+                  <div className="flex justify-end gap-3 border-t border-[var(--glass-stroke-subtle)] px-5 py-4">
+                    <button
+                      type="button"
+                      onClick={promptEditor.handleCancelEdit}
+                      disabled={promptEditor.isSavingPrompt}
+                      className="rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] px-4 py-2 text-sm text-[var(--glass-text-secondary)] transition hover:bg-[var(--glass-bg-surface)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {t('panelCard.cancel')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={promptEditor.handleSave}
+                      disabled={promptEditor.isSavingPrompt}
+                      className="rounded-lg bg-[var(--glass-accent-from)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[var(--glass-accent-to)] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {promptEditor.isSavingPrompt ? '...' : t('panelCard.save')}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div onClick={promptEditor.handleStartEdit} className="text-xs p-2 border border-[var(--glass-stroke-base)] rounded-lg bg-[var(--glass-bg-muted)] text-[var(--glass-text-secondary)] cursor-pointer">
-                {promptEditor.localPrompt || <span className="text-[var(--glass-text-tertiary)] italic">{t('panelCard.clickToEditPrompt')}</span>}
-              </div>
-            )}
+              </div>,
+              document.body,
+            ) : null}
 
             {showsFirstLastFrameActions ? (() => {
               const linkedNextPanel = layout.nextPanel!

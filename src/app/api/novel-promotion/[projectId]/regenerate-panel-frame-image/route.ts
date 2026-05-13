@@ -126,14 +126,22 @@ export const POST = apiHandler(async (
     ...(Object.keys(capabilityOptions).length > 0 ? { generationOptions: capabilityOptions } : {}),
   }
 
+  await prisma.novelPromotionPanelFrame.update({
+    where: { id: frame.id },
+    data: {
+      generationStatus: 'processing',
+      errorMessage: null,
+    },
+  })
+
   const result = await submitTask({
     userId: session.user.id,
     locale,
     requestId: getRequestId(request),
     projectId,
     type: TASK_TYPE.IMAGE_PANEL,
-    targetType: 'NovelPromotionPanel',
-    targetId: frame.panelId,
+    targetType: 'NovelPromotionPanelFrame',
+    targetId: frame.id,
     payload: withTaskUiPayload(billingPayload, {
       intent: 'regenerate',
       hasOutputAtStart: hasFrameImage(frame),

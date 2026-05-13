@@ -26,6 +26,7 @@ import {
   parseEffort,
   parseTemperature,
   parseVoiceLinesJson,
+  persistStoryboardsAndPanels,
   persistStoryboardOutputs,
   type JsonRecord,
 } from './script-to-storyboard-helpers'
@@ -118,14 +119,17 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
   if (retryStepKey && retryStepKey !== 'voice_analyze' && !retryTarget) {
     throw new Error(`unsupported retry step for script_to_storyboard: ${retryStepKey}`)
   }
-  const retryClipId = retryTarget?.clipId || null
-  const selectedClips = retryClipId
-    ? clips.filter((clip) => clip.id === retryClipId)
+  const explicitClipId = typeof payload.clipId === 'string' && payload.clipId.trim()
+    ? payload.clipId.trim()
+    : null
+  const selectedClipId = retryTarget?.clipId || explicitClipId
+  const selectedClips = selectedClipId
+    ? clips.filter((clip) => clip.id === selectedClipId)
     : clips
-  if (retryClipId && selectedClips.length === 0) {
-    throw new Error(`Retry clip not found: ${retryClipId}`)
+  if (selectedClipId && selectedClips.length === 0) {
+    throw new Error(`Clip not found: ${selectedClipId}`)
   }
-  const skipVoiceAnalyze = !!retryStepKey && retryStepKey !== 'voice_analyze'
+  const skipVoiceAnalyze = (!!retryStepKey && retryStepKey !== 'voice_analyze') || !!explicitClipId
 
   const model = await resolveAnalysisModel({
     userId: job.data.userId,
@@ -448,10 +452,9 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
       await assertRunActive('script_to_storyboard_persist')
 
       if (skipVoiceAnalyze) {
-        const persisted = await persistStoryboardOutputs({
+        const persisted = await persistStoryboardsAndPanels({
           episodeId,
           clipPanels: effectiveClipPanels,
-          voiceLineRows: null,
         })
         await reportTaskProgress(job, 96, {
           stage: 'script_to_storyboard_persist_done',
@@ -466,10 +469,11 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
         })
         return {
           episodeId,
-          storyboardCount: persisted.persistedStoryboards.length,
+          storyboardCount: persisted.length,
           panelCount: effectiveTotalPanelCount,
           voiceLineCount: 0,
           retryStepKey,
+          clipId: explicitClipId || undefined,
         }
       }
 

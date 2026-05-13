@@ -221,7 +221,7 @@ export function buildForcedStoryboardDurationInstruction(value: ScriptToStoryboa
       `Project duration target: try to organize complex or continuous action into storyboard groups close to ${value} seconds.`,
       `This is a soft target, not padding: if the source content is naturally shorter than ${value} seconds, keep it shorter.`,
       `In the first storyboard planning step, reduce the number of top-level panels by using panel_mode="group" when one continuous beat can fit within about ${value} seconds, and place visual changes as frames inside that group.`,
-      `Do not split the frames of one continuous group into separate top-level panels. A group is one top-level panel with 2-4 frames.`,
+      `Do not split the frames of one continuous group into separate top-level panels. A group is one top-level panel with 2-20 frames based on duration, action density, and transition/camera-movement density.`,
       `For each group, make duration and duration_sec close to ${value} when the content supports it, and make group_video_prompt timeline cover the full group duration with frames aligned to frame_time_sec.`,
     ].join('\n')
   }
@@ -230,7 +230,7 @@ export function buildForcedStoryboardDurationInstruction(value: ScriptToStoryboa
     `【项目级分镜组时长倾向】尽量把复杂动作、连续移动、转场或多阶段情绪组织成接近 ${value} 秒的分镜组。`,
     `这是软性目标，不是硬凑：如果原文内容自然不足 ${value} 秒，可以保持更短。`,
     `第一阶段分镜规划就必须执行该策略：能在约 ${value} 秒内连续表达的一组内容，优先输出 panel_mode="group"，减少顶层分镜数量，把变化点作为 frames 子帧。`,
-    `不要把同一个连续分镜组的子帧拆成多个顶层分镜；一个 group 就是一个顶层分镜，内部包含 2~4 个 frames。`,
+    `不要把同一个连续分镜组的子帧拆成多个顶层分镜；一个 group 就是一个顶层分镜，内部根据时长、动作密度、转场/运镜密度包含 2~20 个 frames。`,
     `group 的 duration/duration_sec 尽量接近 ${value} 秒，group_video_prompt 的分段时间轴必须覆盖整组时长，并与 frames.frame_time_sec 对齐。`,
   ].join('\n')
 }

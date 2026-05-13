@@ -342,13 +342,13 @@ export function useStoryboardImageGeneration({
               ...frame,
               generationStatus: state,
               errorMessage,
+              updatedAt: new Date().toISOString(),
             }
           })
           if (!frameChanged) return panel
           storyboardChanged = true
           return {
             ...panel,
-            imageTaskRunning: state === 'processing',
             frames: updatedFrames,
           }
         })
@@ -365,8 +365,8 @@ export function useStoryboardImageGeneration({
         group: 'storyboard',
         projectId,
         target: {
-          targetType: 'NovelPromotionPanel',
-          targetId: panelId,
+          targetType: 'NovelPromotionPanelFrame',
+          targetId: frameId,
           types: ['image_panel', 'panel_variant', 'modify_asset_image'],
         },
         uiKey: `panel-frame-${frameId}`,
@@ -389,15 +389,11 @@ export function useStoryboardImageGeneration({
       return null
     }
 
-    if (submittingPanelImageIds.has(panelId)) return null
-    setSubmittingPanelImageIds((previousIds) => new Set(previousIds).add(panelId))
     markPanelFrameGenerationState(panelId, frameId, 'processing')
 
-    let handoffToTaskState = false
     try {
       const result = await regeneratePanelFrameMutation.mutateAsync({ panelId, frameId }) as { async?: boolean; taskId?: string }
       if (result?.async) {
-        handoffToTaskState = true
         if (onSilentRefresh) await onSilentRefresh()
         refreshEpisode()
         refreshStoryboards()
@@ -415,14 +411,6 @@ export function useStoryboardImageGeneration({
         error instanceof Error ? error.message : String(error),
       )
       throw error
-    } finally {
-      if (!handoffToTaskState) {
-        setSubmittingPanelImageIds((previousIds) => {
-          const next = new Set(previousIds)
-          next.delete(panelId)
-          return next
-        })
-      }
     }
   }, [
     markPanelFrameGenerationState,
@@ -431,8 +419,6 @@ export function useStoryboardImageGeneration({
     refreshEpisode,
     refreshStoryboards,
     regeneratePanelFrameMutation,
-    setSubmittingPanelImageIds,
-    submittingPanelImageIds,
     taskQueue,
   ])
 

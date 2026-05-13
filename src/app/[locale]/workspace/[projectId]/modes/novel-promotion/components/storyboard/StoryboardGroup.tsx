@@ -58,6 +58,8 @@ export default function StoryboardGroup({
   onUploadFrameImage,
   onRegenerateFrameImage,
   onUpdateFrameTime,
+  onUpdateFramePrompt,
+  onDeleteFrame,
   onOpenEditModal,
   onOpenAIDataModal,
   getPanelCandidates,
@@ -67,6 +69,7 @@ export default function StoryboardGroup({
   formatClipTitle,
   movingClipId,
   onInsertPanel,
+  onDuplicatePanel,
   insertingAfterPanelId,
   projectId,
   episodeId,
@@ -232,6 +235,8 @@ export default function StoryboardGroup({
         onUploadFrameImage={onUploadFrameImage}
         onRegenerateFrameImage={onRegenerateFrameImage}
         onUpdateFrameTime={onUpdateFrameTime}
+        onUpdateFramePrompt={onUpdateFramePrompt}
+        onDeleteFrame={onDeleteFrame}
         onOpenEditModal={onOpenEditModal}
         onOpenAIDataModal={onOpenAIDataModal}
         onSelectPanelCandidateIndex={onSelectPanelCandidateIndex}
@@ -240,6 +245,7 @@ export default function StoryboardGroup({
         onClearPanelTaskError={clearPanelTaskError}
         onPreviewImage={onPreviewImage}
         onInsertAfter={handleOpenInsertModal}
+        onDuplicatePanel={onDuplicatePanel}
         onVariant={handleOpenVariantModal}
         isInsertDisabled={(panelId) =>
           isSubmittingStoryboardTextTask ||

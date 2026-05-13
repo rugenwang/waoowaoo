@@ -11,6 +11,7 @@ import { AppIcon } from '@/components/ui/icons'
 
 interface PanelActionButtonsProps {
     onInsertPanel: () => void
+    onDuplicatePanel?: () => void | Promise<void>
     onVariant: () => void
     disabled?: boolean
     hasImage: boolean // 原镜头是否有图片（没图片不能做变体）
@@ -18,6 +19,7 @@ interface PanelActionButtonsProps {
 
 export default function PanelActionButtons({
     onInsertPanel,
+    onDuplicatePanel,
     onVariant,
     disabled,
     hasImage
@@ -64,6 +66,32 @@ export default function PanelActionButtons({
                     {t('panelActions.insertPanel')}
                 </span>
             </button>
+
+            {/* 复制到下一分镜按钮 */}
+            {onDuplicatePanel ? (
+                <button
+                    onClick={() => void onDuplicatePanel()}
+                    disabled={disabled}
+                    className={`
+                        ${baseButtonClass}
+                        ${disabled ? disabledButtonClass : enabledButtonClass}
+                    `}
+                    title={t('panelActions.duplicateToNext')}
+                >
+                    <AppIcon name="copy" className="w-4 h-4" />
+
+                    <span className={`
+                        absolute -top-8 left-1/2 -translate-x-1/2
+                        px-2 py-1 text-xs text-white bg-[var(--glass-overlay)] rounded
+                        opacity-0 group-hover:opacity-100
+                        transition-opacity duration-200
+                        whitespace-nowrap pointer-events-none
+                        ${disabled ? 'hidden' : ''}
+                    `}>
+                        {t('panelActions.duplicatePanel')}
+                    </span>
+                </button>
+            ) : null}
 
             {/* 镜头变体按钮 */}
             <button

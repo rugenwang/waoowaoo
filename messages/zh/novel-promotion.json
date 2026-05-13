@@ -168,7 +168,8 @@
     },
     "scriptToStoryboard": {
       "title": "将重建分镜数据",
-      "message": "检测到当前剧集已有分镜数据（{storyboardCount} 个分镜，{panelCount} 个镜头面板）。继续执行将清空当前分镜并重新生成，是否继续？"
+      "message": "检测到当前剧集已有分镜数据（{storyboardCount} 个分镜，{panelCount} 个镜头面板）。继续执行将清空当前分镜并重新生成，是否继续？",
+      "clipMessage": "检测到当前片段已有分镜数据（{storyboardCount} 个分镜，{panelCount} 个镜头面板）。继续执行只会清空并重绘当前片段的分镜，不会影响其他片段，是否继续？"
     },
     "confirm": "继续并清空",
     "cancel": "取消"

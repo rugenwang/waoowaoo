@@ -168,7 +168,8 @@
     },
     "scriptToStoryboard": {
       "title": "Storyboard Data Will Be Rebuilt",
-      "message": "Existing storyboard data is detected for this episode ({storyboardCount} storyboards, {panelCount} panels). Continuing will clear current storyboards and regenerate them. Continue?"
+      "message": "Existing storyboard data is detected for this episode ({storyboardCount} storyboards, {panelCount} panels). Continuing will clear current storyboards and regenerate them. Continue?",
+      "clipMessage": "Existing storyboard data is detected for the current segment ({storyboardCount} storyboards, {panelCount} panels). Continuing will only clear and redraw this segment's storyboard, without affecting other segments. Continue?"
     },
     "confirm": "Continue and Clear",
     "cancel": "Cancel"

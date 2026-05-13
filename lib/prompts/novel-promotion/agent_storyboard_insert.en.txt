@@ -43,7 +43,9 @@ Rules:
 7. JSON only, no markdown.
 8. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.
 9. video_prompt MUST be Chinese and follow this format:
-   - First paragraph starts with 高清 4K or 4K and contains positive visual quality, scene lighting, character details, smooth motion, vivid expression, lip-sync with dialogue, no flicker / no face collapse / no limb deformity in Chinese wording, visual tone, and background music style.
-   - Then use segmented time ranges such as 00:00-00:03.
-   - Every segment must include these labels: 运镜：人物：动作：表情：台词：
+   - First paragraph starts with 高清4K, 高清 4K, or 4K and contains positive visual quality, scene lighting, character details, smooth motion, vivid expression, lip-sync with dialogue, no flicker / no face collapse / no limb deformity in Chinese wording, visual tone, and one background music type.
+   - Then use one-paragraph timeline ranges such as `00:00-00:04：镜头......；镜头......；【对话】...；背景音...`.
+   - Every segment must include natural camera movement, character placement, action, expression, and background sound.
+   - Include `【对话】` only when the segment has real dialogue. If there is no dialogue, omit the dialogue part entirely.
    - Use age+gender labels instead of character names inside video_prompt.
+   - Do NOT use circled-number list markers. Do NOT add primary/auxiliary camera-move labels. If there is no dialogue, omit the dialogue part entirely and do not write any no-dialogue placeholder.

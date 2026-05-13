@@ -381,6 +381,8 @@
     },
     "panelActions": {
         "insertPanel": "Insert Panel",
+        "duplicatePanel": "Duplicate Panel",
+        "duplicateToNext": "Duplicate to next panel",
         "panelVariant": "Panel Variant",
         "insertHere": "Insert panel here",
         "generateVariant": "Generate variant based on this panel",

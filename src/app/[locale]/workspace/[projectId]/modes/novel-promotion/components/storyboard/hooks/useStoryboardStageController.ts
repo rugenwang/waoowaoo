@@ -101,6 +101,7 @@ export function useStoryboardStageController({
     removeCharacterFromPanel,
     setPanelLocation,
     insertPanel,
+    duplicatePanel,
   } = panelOps
 
   const variantOps = usePanelVariant({
@@ -197,7 +198,7 @@ export function useStoryboardStageController({
     localStoryboards, setLocalStoryboards, sortedStoryboards, expandedClips, toggleExpandedClip,
     getClipInfo, getTextPanels, getPanelEditData, updatePanelEdit, formatClipTitle, totalPanels, storyboardStartIndex,
     savingPanels, deletingPanelIds, saveStateByPanel, hasUnsavedByPanel, submittingStoryboardTextIds, addingStoryboardGroup, movingClipId, insertingAfterPanelId,
-    savePanelWithData, addPanel, deletePanel, deleteStoryboard, regenerateStoryboardText, addStoryboardGroup, moveStoryboardGroup, insertPanel,
+    savePanelWithData, addPanel, deletePanel, deleteStoryboard, regenerateStoryboardText, addStoryboardGroup, moveStoryboardGroup, insertPanel, duplicatePanel,
     submittingVariantPanelId, generatePanelVariant,
     submittingStoryboardIds, submittingPanelImageIds, selectingCandidateIds,
     editingPanel, setEditingPanel, modifyingPanels, isDownloadingImages, previewImage, setPreviewImage,

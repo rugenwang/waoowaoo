@@ -221,7 +221,7 @@ export function useWorkspaceExecution({
     }
   }, [analysisModel, episodeId, finalizeStoryToScriptSuccess, novelText, onUpdateConfig, storyToScriptStream, t])
 
-  const runScriptToStoryboardFlow = useCallback(async () => {
+  const runScriptToStoryboardFlow = useCallback(async (clipId?: string) => {
     if (!episodeId) {
       alert(t('execution.selectEpisode'))
       return
@@ -233,6 +233,7 @@ export function useWorkspaceExecution({
       setTransitionProgress({ message: t('execution.scriptToStoryboardRunning'), step: 'streaming' })
       const runResult = await scriptToStoryboardStream.run({
         episodeId,
+        clipId,
         model: analysisModel || undefined,
         temperature: 0.7,
         reasoning: true,

@@ -194,35 +194,36 @@ function ConsoleOverlay(props: { defaultProjectId: string | null; onClose: () =>
   const dragStateRef = useRef<{
     active: boolean
     pointerId: number | null
-    startX: number
-    startY: number
+    startScreenX: number
+    startScreenY: number
     originLeft: number
     originTop: number
   }>({
     active: false,
     pointerId: null,
-    startX: 0,
-    startY: 0,
+    startScreenX: 0,
+    startScreenY: 0,
     originLeft: 0,
     originTop: 0,
   })
   const storageKey = 'waoowaoo.console.overlay.position.v1'
   const [panelPos, setPanelPos] = useState<{ left: number; top: number } | null>(null)
 
-  // 只在“初始化/窗口尺寸变化/重置”时做轻度夹取，避免面板完全跑出视口找不回来。
-  // 拖拽时不做限制，允许用户把面板移到任意位置（包括跨屏幕/跨浏览器可视区域）。
+  // 只在“初始化/窗口尺寸变化/重置”时做宽松夹取，避免面板完全跑丢。
+  // 拖拽时不做视口限制；使用 screen 坐标计算位移，鼠标跨屏时也能继续移动。
   function clampPositionForSafety(left: number, top: number): { left: number; top: number } {
-    const el = panelRef.current
     const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
     const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+    const sw = typeof window !== 'undefined' ? window.screen?.width || vw : vw
+    const sh = typeof window !== 'undefined' ? window.screen?.height || vh : vh
     // 保证至少露出一部分标题栏方便拖回来
     const minVisible = 96
-    const w = el ? el.getBoundingClientRect().width : Math.min(1200, vw - 24)
-    const h = el ? el.getBoundingClientRect().height : Math.min(720, vh - 80)
-    const minLeft = -w + minVisible
-    const maxLeft = vw - minVisible
-    const minTop = 0
-    const maxTop = vh - minVisible
+    const horizontalReach = Math.max(vw * 2, sw * 2, 2400)
+    const verticalReach = Math.max(vh * 2, sh * 2, 1200)
+    const minLeft = -horizontalReach
+    const maxLeft = vw + horizontalReach - minVisible
+    const minTop = -verticalReach
+    const maxTop = vh + verticalReach - minVisible
     return {
       left: Math.max(minLeft, Math.min(left, maxLeft)),
       top: Math.max(minTop, Math.min(top, maxTop)),
@@ -272,9 +273,12 @@ function ConsoleOverlay(props: { defaultProjectId: string | null; onClose: () =>
     const onMove = (e: PointerEvent) => {
       const st = dragStateRef.current
       if (!st.active || st.pointerId !== e.pointerId) return
-      const nextLeft = st.originLeft + (e.clientX - st.startX)
-      const nextTop = st.originTop + (e.clientY - st.startY)
-      setPanelPos({ left: nextLeft, top: nextTop })
+      const nextPos = {
+        left: st.originLeft + (e.screenX - st.startScreenX),
+        top: st.originTop + (e.screenY - st.startScreenY),
+      }
+      panelPosRef.current = nextPos
+      setPanelPos(nextPos)
     }
     const onUp = (e: PointerEvent) => {
       const st = dragStateRef.current
@@ -303,7 +307,6 @@ function ConsoleOverlay(props: { defaultProjectId: string | null; onClose: () =>
       window.removeEventListener('pointercancel', onUp)
       window.removeEventListener('blur', onBlur)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const onHeaderPointerDown = (e: React.PointerEvent) => {
@@ -312,7 +315,7 @@ function ConsoleOverlay(props: { defaultProjectId: string | null; onClose: () =>
     const targetEl = e.target as HTMLElement | null
     if (targetEl?.closest?.('button,a,input,textarea,select,[role="button"]')) return
     // 只响应主键拖拽
-    if (typeof (e as any).button === 'number' && (e as any).button !== 0) return
+    if (e.button !== 0) return
 
     e.preventDefault()
     const el = panelRef.current
@@ -322,8 +325,8 @@ function ConsoleOverlay(props: { defaultProjectId: string | null; onClose: () =>
     dragStateRef.current = {
       active: true,
       pointerId: e.pointerId,
-      startX: e.clientX,
-      startY: e.clientY,
+      startScreenX: e.screenX,
+      startScreenY: e.screenY,
       originLeft: rect.left,
       originTop: rect.top,
     }

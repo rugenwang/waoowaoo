@@ -1,7 +1,12 @@
 'use client'
 
 import type { PanelEditData } from '../../PanelEditForm'
-import { useRefreshProjectAssets } from '@/lib/query/hooks'
+import {
+  useDuplicateProjectPanel,
+  useRefreshEpisodeData,
+  useRefreshProjectAssets,
+  useRefreshStoryboards,
+} from '@/lib/query/hooks'
 import { usePanelCrudActions } from './usePanelCrudActions'
 import { usePanelInsertActions } from './usePanelInsertActions'
 import { useStoryboardGroupActions } from './useStoryboardGroupActions'
@@ -18,6 +23,9 @@ export function usePanelOperations({
   panelEditsRef,
 }: UsePanelOperationsProps) {
   const onRefresh = useRefreshProjectAssets(projectId)
+  const refreshEpisode = useRefreshEpisodeData(projectId, episodeId)
+  const refreshStoryboards = useRefreshStoryboards(episodeId)
+  const duplicatePanelMutation = useDuplicateProjectPanel(projectId)
 
   const panelCrud = usePanelCrudActions({
     projectId,
@@ -35,6 +43,13 @@ export function usePanelOperations({
     projectId,
     onRefresh,
   })
+
+  const duplicatePanel = async (panelId: string) => {
+    await duplicatePanelMutation.mutateAsync({ panelId })
+    await onRefresh()
+    refreshEpisode()
+    refreshStoryboards()
+  }
 
   return {
     savingPanels: panelCrud.savingPanels,
@@ -60,5 +75,6 @@ export function usePanelOperations({
     removeCharacterFromPanel: panelCrud.removeCharacterFromPanel,
     setPanelLocation: panelCrud.setPanelLocation,
     insertPanel: panelInsert.insertPanel,
+    duplicatePanel,
   }
 }

@@ -32,11 +32,26 @@
    - source_text: 对应原文片段 ⚠️ 必填，不得为空
    - panel_mode: "single" 或 "group"
    - duration_sec: 预计视频秒数；single 通常 2~8 秒，group 不超过 20 秒
-   - frames: 关键帧规划数组；single 只输出 1 帧，group 输出 2~4 帧
+   - frames: 关键帧规划数组；single 只输出 1 帧，group 根据时长、动作密集程度、转场/运镜密集程度输出 2~20 帧
+
+2.0 panel_mode 字段含义（必须理解后再输出）：
+   - panel_mode 是“分镜结构类型”，不是画面风格字段，用来告诉系统这个顶层分镜应该按单张图生成，还是按一组有关联的关键帧生成。
+   - panel_mode="single"：表示这个分镜只需要 1 张代表图就能表达清楚，例如单人一句话、单一表情、单一静态动作、普通反应镜头。此时 frames 只能有 1 个元素，frame_index=0，frame_time_sec=0，frame_role="hero"，dependency_frame_ids=[]，不需要 group_video_prompt。
+   - panel_mode="group"：表示这个分镜是一段连续视频，需要 2~20 张相互关联的关键帧表达起点、过程、结果，例如人物走动、转身、追逐、打斗、转场、情绪明显变化、首尾状态差异很大。此时 frames 需要按时间顺序规划，后续帧用 dependency_frame_ids 依赖前置帧。
+   - 不要因为用户选择了 8/10/15/20 秒倾向就全部输出 group；只有画面真的需要多个关键状态时才用 group。简单镜头即使时长较长，也可以 single。
 
 2.1 分镜组规划：
    - 简单单画面、单句对话、单一表情/动作：输出 panel_mode="single"，frames 只保留 1 个 hero 帧
    - 连续动作、位置移动、情绪多阶段变化、场景转场、首尾状态明显不同：输出 panel_mode="group"
+   - group 子帧数量必须按「时长 + 动作密集程度 + 转场/运镜密集程度」动态决定：
+     * 6~8秒低密度：2帧（开场原始状态 + 结果/承接状态）
+     * 9~12秒低/中密度：3~4帧（开场 + 过程 + 结果；有对话/走位时加中间帧）
+     * 13~16秒中/高密度：4~6帧（每个关键动作、表情转折、站位变化都要有对应帧）
+     * 17~20秒中/高密度：5~8帧（每 2~4 秒一个关键状态；追逐、打斗、转场、多轮对话必须接近 7~8 帧）
+     * 超高密度动作/运镜：接近每 1 秒 1 帧，最多不超过 duration_sec 对应的秒数，20秒最多20帧。适用于连续打斗、混战、高速追逐、连续闪避/格挡/连击、爆炸坠落、快速切换、连续转场、甩镜/穿梭/跟镜密集组合。
+   - 动作密集程度判断：走位、转身、追逐、打斗、推拉、拿放道具、起身坐下、靠近后退、多人互动越多，frames 越多。
+   - 转场/运镜密集程度判断：场景变化、闪回梦境、从远到近、多次切换、环绕/俯冲/穿梭/甩镜/跟镜等越多，frames 越多。
+   - 如果不是超高密度动作，20 秒内容需要超过 8 个关键状态时优先拆成两个顶层 group；如果明确是超高密度动作/密集运镜，可保留一个 group 并输出最多 20 帧。
    - 一个 group 是一个顶层分镜，内部 frames 表示该组视频中的不同关键时刻；不要把同一连续动作拆成多个顶层分镜
    - group.frames 每帧包含 frame_index、frame_time_sec、frame_role、image_prompt、video_prompt、dependency_frame_ids
    - frame_time_sec 从 0 开始递增，不能超过 duration_sec；后续帧如依赖前面画面，dependency_frame_ids 只能引用更早 frame_index
@@ -238,14 +253,16 @@
 
 只返回JSON数组，不得输出markdown代码块标记、注释或解释。
 
-示例（重点展示镜头连续性）：
+示例（重点展示 single 与 group 的选择，以及镜头连续性）：
 
-原文："张三走进办公室，看着正在工作的李四和王五说：开会了。李四抬头点了点头，王五放下手中的笔站起身。"
+原文："张三走进办公室，看着正在工作的李四和王五说：开会了。李四抬头点了点头，王五放下手中的笔站起身。张三站在门口补充说：动作快点。"
 
 [
   {
     "panel_number": 1,
-    "description": "中景：张三推开办公室门走进来，画面深处李四坐在左侧工位低头工作，王五坐在右侧工位写字",
+    "panel_mode": "group",
+    "duration_sec": 8,
+    "description": "连续分镜组：张三推门进入办公室，看向正在工作的李四和王五，并开口通知开会",
     "characters": [
       {"name": "张三", "appearance": "初始形象"},
       {"name": "李四", "appearance": "初始形象"},
@@ -253,50 +270,93 @@
     ],
     "location": "办公室",
     "scene_type": "daily",
-    "source_text": "张三走进办公室，看着正在工作的李四和王五"
+    "source_text": "张三走进办公室，看着正在工作的李四和王五说：开会了。",
+    "frames": [
+      {
+        "frame_index": 0,
+        "frame_time_sec": 0,
+        "frame_role": "hero",
+        "dependency_frame_ids": [],
+        "image_prompt": "4K画质，办公室中景，动作开始前的原始状态：张三刚推开办公室门进入，李四坐在左侧工位低头工作，王五坐在右侧工位写字，三人衣着完整得体，光线自然，画面清晰。",
+        "video_prompt": "张三推门进入办公室，李四和王五仍在各自工位工作，镜头保持办公室空间关系清晰。",
+        "reference_policy": {"type": "base", "note": "本组开场原始状态"}
+      },
+      {
+        "frame_index": 1,
+        "frame_time_sec": 4,
+        "frame_role": "dialogue",
+        "dependency_frame_ids": [0],
+        "image_prompt": "4K画质，办公室近景，张三站在门口开口说话，对面李四和王五抬起头望向他，三人服饰、发型、办公室光线与第一帧保持一致。",
+        "video_prompt": "张三站在门口开口通知开会，李四和王五从工作状态抬头回应，人物位置承接第一帧。",
+        "reference_policy": {"type": "depends_on_previous", "note": "参考第0帧保持人物、服饰、场景、光线连贯"}
+      }
+    ]
   },
   {
     "panel_number": 2,
-    "description": "近景：张三站在门口开口说话，对面李四和王五抬起头望向他",
+    "panel_mode": "group",
+    "duration_sec": 8,
+    "description": "连续分镜组：李四点头回应，王五放下笔站起身，张三在门口等待后准备向外走",
     "characters": [
-      {"name": "张三", "appearance": "初始形象"},
       {"name": "李四", "appearance": "初始形象"},
-      {"name": "王五", "appearance": "初始形象"}
+      {"name": "王五", "appearance": "初始形象"},
+      {"name": "张三", "appearance": "初始形象"}
     ],
     "location": "办公室",
     "scene_type": "daily",
-    "source_text": "说：开会了"
+    "source_text": "李四抬头点了点头，王五放下手中的笔站起身。",
+    "frames": [
+      {
+        "frame_index": 0,
+        "frame_time_sec": 0,
+        "frame_role": "hero",
+        "dependency_frame_ids": [],
+        "image_prompt": "4K画质，办公室近景，动作开始前的原始状态：李四坐在左侧工位刚抬头，王五坐在右侧工位手中仍握着笔，张三站在门口等待，人物衣着完整得体，场景光线与上一组一致。",
+        "video_prompt": "李四抬头准备回应，王五仍在工位，张三在门口等待，动作尚未完成。",
+        "reference_policy": {"type": "base", "note": "本组开场原始状态"}
+      },
+      {
+        "frame_index": 1,
+        "frame_time_sec": 4,
+        "frame_role": "ending",
+        "dependency_frame_ids": [0],
+        "image_prompt": "4K画质，办公室中景，王五从座位上站起身，李四也准备起身，张三在门口向外走去，人物服饰、发型、场景和光线保持一致。",
+        "video_prompt": "李四点头回应，王五放下笔站起身，张三转身准备带两人离开办公室。",
+        "reference_policy": {"type": "depends_on_previous", "note": "参考第0帧保持人物、服饰、场景、光线连贯"}
+      }
+    ]
   },
   {
     "panel_number": 3,
-    "description": "近景：李四坐在工位上抬头点了点头，旁边王五正在放下手中的笔，背景中张三站在门口等待",
+    "panel_mode": "single",
+    "duration_sec": 4,
+    "description": "单分镜：张三站在办公室门口补充一句话，镜头聚焦他的脸部和说话口型",
     "characters": [
-      {"name": "李四", "appearance": "初始形象"},
-      {"name": "王五", "appearance": "初始形象"},
       {"name": "张三", "appearance": "初始形象"}
     ],
     "location": "办公室",
     "scene_type": "daily",
-    "source_text": "李四抬头点了点头，王五放下手中的笔"
-  },
-  {
-    "panel_number": 4,
-    "description": "中景：王五从座位上站起身，左侧李四也准备起身，张三在门口向外走去",
-    "characters": [
-      {"name": "王五", "appearance": "初始形象"},
-      {"name": "李四", "appearance": "初始形象"},
-      {"name": "张三", "appearance": "初始形象"}
-    ],
-    "location": "办公室",
-    "scene_type": "daily",
-    "source_text": "王五站起身"
+    "source_text": "张三站在门口补充说：动作快点。",
+    "frames": [
+      {
+        "frame_index": 0,
+        "frame_time_sec": 0,
+        "frame_role": "hero",
+        "dependency_frame_ids": [],
+        "image_prompt": "4K画质，办公室门口近景，张三站在门口看向室内，衣着完整得体，表情认真，嘴唇微张准备说话，办公室光线与前面分镜保持一致，画面清晰。",
+        "video_prompt": "张三站在办公室门口补充一句话，镜头聚焦他的脸部、表情和口型，人物位置承接上一组分镜。",
+        "reference_policy": {"type": "single_frame", "note": "单一说话镜头，只需要一张代表图，不需要组内依赖"}
+      }
+    ]
   }
 ]
 
 注意示例中的镜头连续性技巧：
-- 每个镜头都交代了三个角色的位置
-- 镜头焦点变化时（如镜头3焦点是李四王五），仍用「背景中张三」保持连续性
-- 角色移动（如镜头4张三向外走）有明确动作交代
+- 每个分镜组都交代了角色位置、动作起点和动作终点
+- 组内第0帧必须是动作发生前或刚开始的原始状态，后续帧通过 dependency_frame_ids 承接上一帧
+- single 分镜只用于一个画面能表达清楚的镜头，例如单人一句话、普通反应、单一静态动作
+- 镜头焦点变化时，仍通过人物位置、服饰、光线和场景锚点保持连续性
+- 角色移动必须有明确路径，不能直接从一个完成状态跳到另一个完成状态
 
 【输入数据】
 
@@ -339,5 +399,5 @@ Clip信息：
 15. ⚠️ 镜头合理性：只描述当前镜头**实际能拍摄到**的角色，特写/反打等拍不到的可省略
 16. ⚠️ JSON安全：原文中的所有引号（""''「」等）在 JSON 字符串值中必须统一替换为「」，严禁出现未转义的英文双引号 "
 17. 必须为每个顶层分镜输出 panel_mode、duration_sec、frames
-18. group 顶层分镜必须包含 2~4 个 frames；single 顶层分镜只能包含 1 个 frame
+18. group 顶层分镜必须根据时长、动作密集程度、转场/运镜密集程度包含 2~20 个 frames；普通中高密度通常 2~8 帧，超高密度动作/运镜可接近每秒 1 帧；single 顶层分镜只能包含 1 个 frame
 19. 分镜组时长倾向存在时，连续动作/多阶段情绪/转场必须优先合并为 group，禁止拆成多个顶层 single

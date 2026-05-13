@@ -54,7 +54,7 @@ interface ScriptViewProps {
   onClipEdit?: (clipId: string) => void
   onClipUpdate?: (clipId: string, data: Partial<Clip>) => void
   onClipDelete?: (clipId: string) => void
-  onGenerateStoryboard?: () => void
+  onGenerateStoryboard?: (clipId?: string) => void
   isSubmittingStoryboardBuild?: boolean
   assetsLoading?: boolean
   onOpenAssetLibrary?: () => void
@@ -450,20 +450,29 @@ export default function ScriptView({
   const globalActiveChars = characters.filter((c) => globalCharIds.includes(c.id))
   const globalActiveLocations = locations.filter((l) => globalLocationIds.includes(l.id))
   const globalActiveProps = props.filter((prop) => globalPropIds.includes(prop.id))
+  const requiredCharsForGeneration = assetViewMode === 'all'
+    ? globalActiveChars
+    : characters.filter((char) => activeCharIds.includes(char.id))
+  const requiredLocationsForGeneration = assetViewMode === 'all'
+    ? globalActiveLocations
+    : locations.filter((loc) => activeLocationIds.includes(loc.id))
+  const requiredPropsForGeneration = assetViewMode === 'all'
+    ? globalActiveProps
+    : props.filter((prop) => activePropIds.includes(prop.id))
 
-  const charsWithoutImage = globalActiveChars.filter((char) => {
+  const charsWithoutImage = requiredCharsForGeneration.filter((char) => {
     const appearance = getPrimaryAppearance(char)
     const imageUrl = appearance?.imageUrl || appearance?.imageUrls?.[0]
     return !imageUrl
   })
 
-  const locationsWithoutImage = globalActiveLocations.filter((loc) => {
+  const locationsWithoutImage = requiredLocationsForGeneration.filter((loc) => {
     const image = (loc.selectedImageId
       ? loc.images?.find((img) => img.id === loc.selectedImageId)
       : undefined) || loc.images?.find((img) => img.isSelected) || loc.images?.find((img) => img.imageUrl)
     return !image?.imageUrl
   })
-  const propsWithoutImage = globalActiveProps.filter((prop) => {
+  const propsWithoutImage = requiredPropsForGeneration.filter((prop) => {
     const image = (prop.selectedImageId
       ? prop.images?.find((img) => img.id === prop.selectedImageId)
       : undefined) || prop.images?.find((img) => img.isSelected) || prop.images?.find((img) => img.imageUrl)
@@ -508,7 +517,10 @@ export default function ScriptView({
         globalLocationIds={globalLocationIds}
         globalPropIds={globalPropIds}
         missingAssetsCount={missingAssetsCount}
-        onGenerateStoryboard={onGenerateStoryboard}
+        onGenerateStoryboard={() => {
+          const targetClipId = assetViewMode === 'all' ? undefined : selectedClipId || undefined
+          onGenerateStoryboard?.(targetClipId)
+        }}
         isSubmittingStoryboardBuild={isSubmittingStoryboardBuild}
         getSelectedAppearances={(char) => getSelectedAppearances(char, selectedAppearanceKeys)}
         tScript={(key, values) => tScript(key, toTranslationValues(values))}
