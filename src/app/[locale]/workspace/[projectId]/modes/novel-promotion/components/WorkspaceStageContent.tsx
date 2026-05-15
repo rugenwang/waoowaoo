@@ -3,6 +3,7 @@
 import ConfigStage from './ConfigStage'
 import ScriptStage from './ScriptStage'
 import StoryboardStage from './StoryboardStage'
+import EditorStageRoute from './EditorStageRoute'
 import VideoStageRoute from './VideoStageRoute'
 import VoiceStageRoute from './VoiceStageRoute'
 
@@ -22,6 +23,8 @@ export default function WorkspaceStageContent({
       {currentStage === 'storyboard' && <StoryboardStage />}
 
       {currentStage === 'videos' && <VideoStageRoute />}
+
+      {currentStage === 'editor' && <EditorStageRoute />}
 
       {currentStage === 'voice' && <VoiceStageRoute />}
     </div>

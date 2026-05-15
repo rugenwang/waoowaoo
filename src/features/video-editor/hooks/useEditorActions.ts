@@ -17,8 +17,14 @@ interface PanelData {
     panelIndex?: number
     storyboardId: string
     videoUrl?: string
+    lipSyncVideoUrl?: string
+    imageUrl?: string
     description?: string
     duration?: number
+    groupDurationSec?: number | null
+    videoPrompt?: string | null
+    groupVideoPrompt?: string | null
+    panelMode?: string | null
 }
 
 /**
@@ -30,7 +36,7 @@ export function createProjectFromPanels(
     voiceLines?: Array<{ id: string; speaker: string; content: string; audioUrl?: string | null }>
 ): VideoEditorProject {
     // 过滤出有视频的面板
-    const videoPanels = panels.filter(p => p.videoUrl)
+    const videoPanels = panels.filter(p => p.lipSyncVideoUrl || p.videoUrl)
 
     // 创建视频片段
     const timeline: VideoClip[] = videoPanels.map((panel, index) => {
@@ -39,8 +45,8 @@ export function createProjectFromPanels(
 
         return {
             id: `clip_${panel.id || panel.storyboardId}_${panel.panelIndex ?? index}`,
-            src: panel.videoUrl!,
-            durationInFrames: Math.round((panel.duration || 3) * 30), // 默认 3 秒，30fps
+            src: (panel.lipSyncVideoUrl || panel.videoUrl)!,
+            durationInFrames: Math.max(1, Math.round((panel.groupDurationSec || panel.duration || 3) * 30)),
             attachment: {
                 audio: matchedVoice?.audioUrl ? {
                     src: matchedVoice.audioUrl,
@@ -59,7 +65,12 @@ export function createProjectFromPanels(
             metadata: {
                 panelId: panel.id || `${panel.storyboardId}-${panel.panelIndex ?? index}`,
                 storyboardId: panel.storyboardId,
-                description: panel.description || undefined
+                panelIndex: panel.panelIndex ?? index,
+                description: panel.description || undefined,
+                videoPrompt: panel.groupVideoPrompt || panel.videoPrompt || undefined,
+                promptField: panel.panelMode === 'group' ? 'groupVideoPrompt' : 'videoPrompt',
+                imageUrl: panel.imageUrl || undefined,
+                durationSeconds: panel.groupDurationSec || panel.duration || undefined,
             }
         }
     })
@@ -86,7 +97,7 @@ export function useEditorActions({ projectId, episodeId }: UseEditorActionsProps
         const response = await apiFetch(`/api/novel-promotion/${projectId}/editor`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectData: project })
+            body: JSON.stringify({ episodeId, projectData: project })
         })
 
         if (!response.ok) {
@@ -94,7 +105,7 @@ export function useEditorActions({ projectId, episodeId }: UseEditorActionsProps
         }
 
         return response.json()
-    }, [projectId])
+    }, [episodeId, projectId])
 
     /**
      * 加载项目

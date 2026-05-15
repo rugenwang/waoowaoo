@@ -82,7 +82,12 @@ export interface ClipTransition {
 export interface ClipMetadata {
     panelId: string
     storyboardId: string
+    panelIndex?: number
     description?: string
+    videoPrompt?: string
+    promptField?: 'videoPrompt' | 'groupVideoPrompt'
+    imageUrl?: string
+    durationSeconds?: number
 }
 
 /**
