@@ -112,6 +112,8 @@ const ClipRenderer: React.FC<ClipRendererProps> = ({
     void config
     const frame = useCurrentFrame()
     const clipDuration = clip.durationInFrames
+    const isMuted = Boolean(clip.playback?.muted)
+    const usesReversePreview = Boolean(clip.playback?.reverse && clip.playback.reversePreviewUrl)
 
     // 计算转场效果
     let opacity = 1
@@ -163,8 +165,10 @@ const ClipRenderer: React.FC<ClipRendererProps> = ({
         <AbsoluteFill style={{ opacity, transform }}>
             {/* 视频 */}
             <Video
-                src={clip.src}
-                startFrom={clip.trim?.from || 0}
+                src={usesReversePreview ? clip.playback!.reversePreviewUrl! : clip.src}
+                startFrom={usesReversePreview ? 0 : clip.trim?.from || 0}
+                volume={isMuted ? 0 : 1}
+                preload="auto"
                 style={{
                     width: '100%',
                     height: '100%',
@@ -176,7 +180,8 @@ const ClipRenderer: React.FC<ClipRendererProps> = ({
             {clip.attachment?.audio && (
                 <Audio
                     src={clip.attachment.audio.src}
-                    volume={clip.attachment.audio.volume}
+                    volume={isMuted ? 0 : clip.attachment.audio.volume}
+                    preload="auto"
                 />
             )}
 

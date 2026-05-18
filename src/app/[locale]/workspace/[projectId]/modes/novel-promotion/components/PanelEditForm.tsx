@@ -46,6 +46,8 @@ interface PanelEditFormProps {
   isRefiningStoryboardPrompt?: boolean
   refinedStoryboardPrompt?: string | null
   onClearRefinedStoryboardPrompt?: () => void
+  onRegenerateVideoPrompt?: () => void
+  isRegeneratingVideoPrompt?: boolean
 }
 
 export default function PanelEditForm({
@@ -62,7 +64,9 @@ export default function PanelEditForm({
   onRefineStoryboardPrompt,
   isRefiningStoryboardPrompt,
   refinedStoryboardPrompt,
-  onClearRefinedStoryboardPrompt
+  onClearRefinedStoryboardPrompt,
+  onRegenerateVideoPrompt,
+  isRegeneratingVideoPrompt,
 }: PanelEditFormProps) {
   return (
     <PanelEditFormV2
@@ -80,6 +84,8 @@ export default function PanelEditForm({
       isRefiningStoryboardPrompt={isRefiningStoryboardPrompt}
       refinedStoryboardPrompt={refinedStoryboardPrompt}
       onClearRefinedStoryboardPrompt={onClearRefinedStoryboardPrompt}
+      onRegenerateVideoPrompt={onRegenerateVideoPrompt}
+      isRegeneratingVideoPrompt={isRegeneratingVideoPrompt}
       uiMode="flow"
     />
   )

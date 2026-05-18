@@ -4,12 +4,13 @@ import { useLocale, useTranslations } from 'next-intl'
 import { useState, type ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
 import PanelEditForm, { PanelEditData } from '../PanelEditForm'
+import RegenerateVideoPromptModal from '../RegenerateVideoPromptModal'
 import ImageSection from './ImageSection'
 import PanelActionButtons from './PanelActionButtons'
 import { StoryboardPanel } from './hooks/useStoryboardState'
 import { GlassSurface } from '@/components/ui/primitives'
 import { AppIcon } from '@/components/ui/icons'
-import { useRefineProjectStoryboardPrompt } from '@/lib/query/hooks'
+import { useRefineProjectStoryboardPrompt, useRegenerateProjectVideoPrompt, useUpdateProjectPanelVideoPrompt } from '@/lib/query/hooks'
 import { shouldShowError } from '@/lib/error-utils'
 import { extractErrorMessage } from '@/lib/errors/extract'
 import type { NovelPromotionPanelFrame } from '@/types/project'
@@ -51,6 +52,7 @@ interface PanelCardProps {
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
   onDeleteFrame?: (panelId: string, frameId: string) => void | Promise<void>
+  onSplitFrame?: (frameId: string, placement: 'before' | 'after') => void | Promise<void>
   onOpenEditModal: () => void
   onOpenAIDataModal: () => void
   onSelectCandidateIndex: (panelId: string, index: number) => void
@@ -74,6 +76,7 @@ function PanelFrameGrid({
   onUpdateFrameTime,
   onUpdateFramePrompt,
   onDeleteFrame,
+  onSplitFrame,
 }: {
   panelId: string
   frames: NovelPromotionPanelFrame[]
@@ -83,12 +86,14 @@ function PanelFrameGrid({
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
   onDeleteFrame?: (panelId: string, frameId: string) => void | Promise<void>
+  onSplitFrame?: (frameId: string, placement: 'before' | 'after') => void | Promise<void>
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [frameTimeDrafts, setFrameTimeDrafts] = useState<Record<string, string>>({})
   const [framePromptDrafts, setFramePromptDrafts] = useState<Record<string, string>>({})
   const [savingFrameTimeIds, setSavingFrameTimeIds] = useState<Set<string>>(new Set())
   const [savingFramePromptIds, setSavingFramePromptIds] = useState<Set<string>>(new Set())
+  const [splitFrameTarget, setSplitFrameTarget] = useState<NovelPromotionPanelFrame | null>(null)
   if (frames.length <= 1) return null
 
   const parseDependencies = (raw: string | null | undefined): number[] => {
@@ -170,6 +175,26 @@ function PanelFrameGrid({
     void Promise.resolve(onDeleteFrame(panelId, frame.id)).catch((error: unknown) => {
       if (shouldShowError(error)) {
         alert(extractErrorMessage(error, '删除关键帧失败'))
+      }
+    })
+  }
+
+  const handleSplitFrame = (frame: NovelPromotionPanelFrame) => {
+    if (!onSplitFrame) return
+    if (frames.length <= 1) {
+      alert('只有多帧分镜组可以拆出单帧')
+      return
+    }
+    setSplitFrameTarget(frame)
+  }
+
+  const commitSplitFrame = (placement: 'before' | 'after') => {
+    if (!onSplitFrame || !splitFrameTarget) return
+    const targetFrame = splitFrameTarget
+    setSplitFrameTarget(null)
+    void Promise.resolve(onSplitFrame(targetFrame.id, placement)).catch((error: unknown) => {
+      if (shouldShowError(error)) {
+        alert(extractErrorMessage(error, '拆出关键帧失败'))
       }
     })
   }
@@ -426,6 +451,18 @@ function PanelFrameGrid({
                       <AppIcon name="trash" size={13} />
                     </button>
                   ) : null}
+                  {onSplitFrame ? (
+                    <button
+                      type="button"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/45 bg-sky-600/85 text-white shadow-sm backdrop-blur transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      title={`拆出 F${frame.frameIndex + 1} 为独立分镜`}
+                      aria-label={`拆出 F${frame.frameIndex + 1} 为独立分镜`}
+                      disabled={isFrameBusy || frames.length <= 1}
+                      onClick={() => handleSplitFrame(frame)}
+                    >
+                      <AppIcon name="externalLink" size={13} />
+                    </button>
+                  ) : null}
                 </div>
               </div>
               <div className="space-y-1.5 p-2">
@@ -513,6 +550,16 @@ function PanelFrameGrid({
                             删除
                           </button>
                         ) : null}
+                        {onSplitFrame ? (
+                          <button
+                            type="button"
+                            className="rounded-full border border-sky-300/50 px-2 py-0.5 text-sky-500 transition hover:bg-sky-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={(frame.generationStatus === 'processing' && !isStaleFrameProcessing(frame)) || frames.length <= 1}
+                            onClick={() => handleSplitFrame(frame)}
+                          >
+                            拆出
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="rounded-full border border-[var(--glass-stroke-subtle)] px-2 py-0.5 text-[var(--glass-text-secondary)] transition hover:border-[var(--glass-tone-info-fg)] hover:text-[var(--glass-tone-info-fg)]"
@@ -556,6 +603,48 @@ function PanelFrameGrid({
         </div>,
         document.body,
       ) : null}
+      {splitFrameTarget && typeof document !== 'undefined' ? createPortal(
+        <div
+          className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+          onClick={() => setSplitFrameTarget(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-1 text-base font-semibold text-[var(--glass-text-primary)]">
+              拆出 F{splitFrameTarget.frameIndex + 1} 为独立分镜
+            </div>
+            <p className="mb-4 text-sm leading-6 text-[var(--glass-text-secondary)]">
+              拆出后会继承这张关键帧的图片、提示词和估算时长，并成为普通分镜，可继续使用插入、复制、生成图等原有操作。
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                className="rounded-lg border border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-muted)] px-4 py-3 text-sm font-medium text-[var(--glass-text-primary)] transition hover:border-[var(--glass-tone-info-fg)] hover:text-[var(--glass-tone-info-fg)]"
+                onClick={() => commitSplitFrame('before')}
+              >
+                放到原组前面
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-[var(--glass-tone-info-fg)] px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
+                onClick={() => commitSplitFrame('after')}
+              >
+                放到原组后面
+              </button>
+            </div>
+            <button
+              type="button"
+              className="mt-3 w-full rounded-lg px-4 py-2 text-sm text-[var(--glass-text-tertiary)] transition hover:bg-[var(--glass-bg-muted)] hover:text-[var(--glass-text-primary)]"
+              onClick={() => setSplitFrameTarget(null)}
+            >
+              取消
+            </button>
+          </div>
+        </div>,
+        document.body,
+      ) : null}
     </div>
   )
 }
@@ -592,6 +681,7 @@ export default function PanelCard({
   onUpdateFrameTime,
   onUpdateFramePrompt,
   onDeleteFrame,
+  onSplitFrame,
   onOpenEditModal,
   onOpenAIDataModal,
   onSelectCandidateIndex,
@@ -608,9 +698,16 @@ export default function PanelCard({
   const t = useTranslations('storyboard')
   const locale = useLocale()
   const refineStoryboardPrompt = useRefineProjectStoryboardPrompt(projectId)
+  const regenerateVideoPrompt = useRegenerateProjectVideoPrompt(projectId)
+  const updatePanelVideoPrompt = useUpdateProjectPanelVideoPrompt(projectId)
   const [refinedStoryboardPrompt, setRefinedStoryboardPrompt] = useState<string | null>(null)
   const [isDuplicatingPanel, setIsDuplicatingPanel] = useState(false)
+  const [videoPromptModalOpen, setVideoPromptModalOpen] = useState(false)
+  const [videoPromptRequirement, setVideoPromptRequirement] = useState('')
+  const [videoPromptCandidate, setVideoPromptCandidate] = useState<string | null>(null)
   const panelFrames = Array.isArray(panel.frames) ? panel.frames : []
+  const displayDurationSec = panel.groupDurationSec ?? panelData.duration ?? panel.duration ?? null
+  const videoPromptField = panel.panelMode === 'group' ? 'groupVideoPrompt' : 'videoPrompt'
 
   const handleRefineStoryboardPrompt = async () => {
     try {
@@ -653,6 +750,53 @@ export default function PanelCard({
       .finally(() => setIsDuplicatingPanel(false))
   }
 
+  const currentVideoPrompt = videoPromptField === 'groupVideoPrompt'
+    ? panel.groupVideoPrompt || panelData.videoPrompt || ''
+    : panelData.videoPrompt || panel.video_prompt || ''
+
+  const handleGenerateVideoPromptCandidate = async () => {
+    try {
+      const result = await regenerateVideoPrompt.mutateAsync({
+        panelId: panel.id,
+        storyboardId,
+        panelIndex: panel.panelIndex,
+        field: videoPromptField,
+        additionalRequirement: videoPromptRequirement,
+        locale: locale === 'en' ? 'en' : 'zh',
+      })
+      const nextPrompt = result.prompt.trim()
+      if (!nextPrompt) throw new Error('视频提示词为空')
+      setVideoPromptCandidate(nextPrompt)
+    } catch (error: unknown) {
+      if (shouldShowError(error)) {
+        alert(extractErrorMessage(error, '重新生成视频提示词失败'))
+      }
+    }
+  }
+
+  const handleUseVideoPromptCandidate = async () => {
+    const nextPrompt = (videoPromptCandidate || '').trim()
+    if (!nextPrompt) return
+    try {
+      await updatePanelVideoPrompt.mutateAsync({
+        storyboardId,
+        panelIndex: panel.panelIndex,
+        value: nextPrompt,
+        field: videoPromptField,
+      })
+      if (videoPromptField === 'videoPrompt') {
+        onUpdate({ videoPrompt: nextPrompt })
+      }
+      setVideoPromptModalOpen(false)
+      setVideoPromptRequirement('')
+      setVideoPromptCandidate(null)
+    } catch (error: unknown) {
+      if (shouldShowError(error)) {
+        alert(extractErrorMessage(error, '保存视频提示词失败'))
+      }
+    }
+  }
+
   return (
     <GlassSurface
       variant="elevated"
@@ -678,6 +822,7 @@ export default function PanelCard({
           panelId={panel.id}
           imageUrl={imageUrl}
           globalPanelNumber={globalPanelNumber}
+          durationSec={displayDurationSec}
           shotType={panel.shot_type}
           videoRatio={videoRatio}
           isDeleting={isDeleting}
@@ -707,6 +852,7 @@ export default function PanelCard({
           onUpdateFrameTime={onUpdateFrameTime}
           onUpdateFramePrompt={onUpdateFramePrompt}
           onDeleteFrame={onDeleteFrame}
+          onSplitFrame={onSplitFrame}
         />
         {/* 插入分镜/镜头变体按钮 - 在图片区域右侧垂直居中 */}
         {(onInsertAfter || onDuplicatePanel || onVariant) && (
@@ -739,8 +885,27 @@ export default function PanelCard({
           isRefiningStoryboardPrompt={refineStoryboardPrompt.isPending}
           refinedStoryboardPrompt={refinedStoryboardPrompt}
           onClearRefinedStoryboardPrompt={() => setRefinedStoryboardPrompt(null)}
+          onRegenerateVideoPrompt={() => setVideoPromptModalOpen(true)}
+          isRegeneratingVideoPrompt={regenerateVideoPrompt.isPending || updatePanelVideoPrompt.isPending}
         />
       </div>
+      <RegenerateVideoPromptModal
+        open={videoPromptModalOpen}
+        title="重新生成视频提示词"
+        description={videoPromptField === 'groupVideoPrompt' ? '当前是分镜组，将重新生成整组视频提示词。可补充你想叠加的风格、音乐、运镜或台词要求。' : '将重新生成当前分镜的视频提示词。可补充你想叠加的风格、音乐、运镜或台词要求。'}
+        value={videoPromptRequirement}
+        currentPrompt={currentVideoPrompt}
+        candidatePrompt={videoPromptCandidate}
+        isSubmitting={regenerateVideoPrompt.isPending}
+        isSaving={updatePanelVideoPrompt.isPending}
+        onChange={setVideoPromptRequirement}
+        onClose={() => {
+          if (regenerateVideoPrompt.isPending || updatePanelVideoPrompt.isPending) return
+          setVideoPromptModalOpen(false)
+        }}
+        onGenerate={() => void handleGenerateVideoPromptCandidate()}
+        onUseCandidate={() => void handleUseVideoPromptCandidate()}
+      />
     </GlassSurface>
   )
 }

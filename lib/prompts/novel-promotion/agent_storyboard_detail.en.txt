@@ -58,25 +58,28 @@ video_prompt MUST be written in Chinese following this structure:
 
 Part 1 — Positive prompt + background music style (REQUIRED):
 Write one natural Chinese paragraph. Do NOT use a heading.
-Must include: 高清 4K or 4K, cinematic quality, scene and light, character details using age+gender, smooth camera movement, fluid character motion, vivid expression, lip-sync with dialogue, no flicker / no face collapse / no limb deformity in Chinese wording, visual tone/style, and background music style.
+Must include: 高清 4K or 4K, cinematic quality, scene and light, character details using age+gender, smooth camera movement, fluid character motion, vivid expression, no flicker / no face collapse / no limb deformity in Chinese wording, clear visual differences and directionality between multiple people in the same shot, visual tone/style, and background music style.
 Background music MUST be selected from this library: 紧张悬疑大片配乐、史诗恢弘交响乐、热血激昂战斗史诗、暗黑压抑氛围感配乐、悲壮苍凉电影原声、燃向高燃英雄主题曲、治愈温柔轻音乐、伤感催泪抒情纯音乐、宁静空灵古风禅意、神秘诡异悬疑氛围、低沉压抑阴暗曲风、轻快舒缓治愈小调、古风江湖侠义配乐、古风悲情婉转二胡、仙侠空灵仙乐、古装宫廷典雅乐、武侠对决紧张古风、烟雨江南温婉古风、硬核格斗打击乐、快节奏江湖对决 BGM、霸气出场气场音乐、急促鼓点战斗配乐、街头硬汉摇滚风、高级感氛围感纯音、低沉卡点节奏感音乐、温柔叙事旁白配乐、氛围感沉浸式背景音乐、极简冷淡风纯音乐、未来科技空灵电子乐、悬疑探案低沉音效、末日废土苍凉配乐、赛博朋克暗黑电音.
 Camera movement MUST be selected and expanded from this library: 推镜、拉镜、摇镜、移镜、跟镜、固定镜、俯拍、仰拍、平视、斜角拍、环绕镜、俯冲、升降镜、甩镜、变焦镜、旋转镜、穿梭镜、平稳手持、颠簸手持.
+Camera wording must use natural Chinese cinematic phrasing: combine perspective/shot size + movement + visual action, such as 平视中景固定镜, 越肩推镜，从人物肩后推进到对方正面, 轻微斜角近景，强化压迫感. Do NOT output stiff parameter-like phrases such as 镜头平视固定, 镜头越肩推进, 镜头斜角拍. Do NOT contradict movement in the same clause: a fixed shot cannot also push in; split it into sequential clauses if both are needed.
 
 Example:
-高清4K，电影级质感，现代书房场景，暖黄色台灯光影柔和，氛围安静治愈，年轻女子扎高马尾，穿白色衬衫，人物动作流畅不僵硬，表情神态生动，口型和台词同步，无画面闪烁、无脸部崩坏、无肢体畸形，色调温暖柔和，沉浸式都市短剧质感，背景音乐为治愈温柔轻音乐，贯穿整段视频。
+高清4K，电影级质感，现代书房场景，暖黄色台灯光影柔和，氛围安静治愈，年轻女子扎高马尾，穿白色衬衫，人物动作流畅不僵硬，表情神态生动，无画面闪烁、无脸部崩坏、无肢体畸形，多人物同镜时年龄段、性别、服饰、发型、身形、气质、站位和朝向清晰区分，互动动作写清画面左/右、前/后、近/远关系，色调温暖柔和，沉浸式都市短剧质感，背景音乐为治愈温柔轻音乐，贯穿整段视频。
 
 Part 2 — segmented timeline (REQUIRED):
-Use one-paragraph timeline segments such as `00:00-00:04：镜头......；镜头......；【对话】...；背景音...`.
-Every segment must include natural camera movement, character placement, action, expression, and background sound. Include dialogue only when the segment actually has dialogue.
+Use one-paragraph timeline segments such as `00:00-00:04：平视中景固定镜......；随后镜头缓慢推近......；【对话】...；背景音...`.
+Every segment must include natural camera movement, character placement, directionality, action, expression, and background sound. Include dialogue only when the segment actually has dialogue.
+For multi-character action, dialogue, eye contact, touch, chasing, blocking, or handing objects, explicitly write screen-left/screen-right, front/back, near/far, facing/with back to camera, and movement direction. Good Chinese examples: 画面左侧年轻女子转头对右侧年轻女子说; 后方年轻女子上前半步，轻拍前方年轻女子右肩.
 If there is no dialogue, omit the dialogue part entirely and do not write any no-dialogue placeholder.
-Dialogue must use age+gender speaker labels, emotion, voice texture, tone, expression, and lip-sync. Example: 年轻女子声音轻柔清亮，语气带着迟疑，口型同步地说：「我明白了」.
+Dialogue must use age+gender speaker labels, emotion, voice texture, tone, and expression. Example: 年轻女子声音轻柔清亮，语气带着迟疑地说：「我明白了」.
+Narration, inner monologue, and voiceover must use `【旁白】`, not `【对话】`.
 Do NOT use the old five-line field format `运镜：人物：动作：表情：台词：`.
 
 Example:
-00:00-00:03：镜头平视推镜，从书桌侧面缓缓推进到年轻女子身前；镜头轻微定格，聚焦她坐下并打开笔记本电脑的动作；表情特写，她嘴角轻轻上扬；【对话】年轻女子声音轻柔清亮，语气带着自我鼓励地说：「今天也要好好加油呀。」；背景音中键盘轻响与治愈温柔轻音乐同步响起。
+00:00-00:03：平视中景推镜，从书桌左侧缓缓推进到画面右侧年轻女子身前；近景固定镜，聚焦右侧年轻女子坐下并打开笔记本电脑的动作；表情特写切到她轻轻上扬的嘴角；【对话】画面右侧年轻女子声音轻柔清亮，语气带着自我鼓励地说：「今天也要好好加油呀。」；背景音中键盘轻响与治愈温柔轻音乐自然响起。
 
 Full video_prompt example (as a single JSON string, use \n for line breaks):
-"高清4K，电影级质感，现代书房场景，暖黄色台灯光影柔和，氛围安静治愈，年轻女子扎高马尾，穿白色衬衫，人物动作流畅不僵硬，表情神态生动，口型和台词同步，无画面闪烁、无脸部崩坏、无肢体畸形，色调温暖柔和，沉浸式都市短剧质感，背景音乐为治愈温柔轻音乐，贯穿整段视频。\n\n00:00-00:03：镜头平视推镜，从书桌侧面缓缓推进到年轻女子身前；镜头轻微定格，聚焦她坐下并打开笔记本电脑的动作；表情特写，她嘴角轻轻上扬；【对话】年轻女子声音轻柔清亮，语气带着自我鼓励地说：「今天也要好好加油呀。」；背景音中键盘轻响与治愈温柔轻音乐同步响起。"
+"高清4K，电影级质感，现代书房场景，暖黄色台灯光影柔和，氛围安静治愈，年轻女子扎高马尾，穿白色衬衫，人物动作流畅不僵硬，表情神态生动，无画面闪烁、无脸部崩坏、无肢体畸形，色调温暖柔和，沉浸式都市短剧质感，背景音乐为治愈温柔轻音乐，贯穿整段视频。\n\n00:00-00:03：平视中景推镜，从书桌左侧缓缓推进到画面右侧年轻女子身前；近景固定镜，聚焦右侧年轻女子坐下并打开笔记本电脑的动作；表情特写切到她轻轻上扬的嘴角；【对话】画面右侧年轻女子声音轻柔清亮，语气带着自我鼓励地说：「今天也要好好加油呀。」；背景音中键盘轻响与治愈温柔轻音乐自然响起。"
 
 Output schema example (field names must be preserved):
 [
@@ -99,18 +102,18 @@ Output schema example (field names must be preserved):
         "frame_role": "hero",
         "dependency_frame_ids": [],
         "image_prompt": "4K画质，现代书房场景，暖黄色台灯，年轻女子扎高马尾穿白色衬衫，坐在书桌前打开笔记本电脑，神情放松，平视中景，画面清晰无模糊。",
-        "video_prompt": "00:00-00:03：镜头平视推镜，从书桌侧面缓缓推进到年轻女子身前；镜头轻微定格，聚焦她坐下并打开笔记本电脑的动作；表情特写，她嘴角轻轻上扬；【对话】年轻女子声音轻柔清亮，语气带着自我鼓励地说：「今天也要好好加油呀。」；背景音中键盘轻响与治愈温柔轻音乐同步响起。",
+        "video_prompt": "00:00-00:03：平视中景推镜，从书桌左侧缓缓推进到画面右侧年轻女子身前；近景固定镜，聚焦右侧年轻女子坐下并打开笔记本电脑的动作；表情特写，她嘴角轻轻上扬；【对话】画面右侧年轻女子声音轻柔清亮，语气带着自我鼓励地说：「今天也要好好加油呀。」；背景音中键盘轻响与治愈温柔轻音乐自然响起。",
         "reference_policy": {"character_consistency": "保持发型、服饰、五官一致", "scene_consistency": "保持书房与暖黄色台灯光线一致"}
       }
     ],
-    "video_prompt": "高清4K，电影级质感，现代书房场景，暖黄色台灯光影柔和，氛围安静治愈，年轻女子扎高马尾，穿白色衬衫，人物动作流畅不僵硬，表情神态生动，口型和台词同步，无画面闪烁、无脸部崩坏、无肢体畸形，色调温暖柔和，沉浸式都市短剧质感，背景音乐为治愈温柔轻音乐，贯穿整段视频。\n\n00:00-00:03：镜头平视推镜，从书桌侧面缓缓推进到年轻女子身前；镜头轻微定格，聚焦她坐下并打开笔记本电脑的动作；表情特写，她嘴角轻轻上扬；【对话】年轻女子声音轻柔清亮，语气带着自我鼓励地说：「今天也要好好加油呀。」；背景音中键盘轻响与治愈温柔轻音乐同步响起。"
+    "video_prompt": "高清4K，电影级质感，现代书房场景，暖黄色台灯光影柔和，氛围安静治愈，年轻女子扎高马尾，穿白色衬衫，人物动作流畅不僵硬，表情神态生动，无画面闪烁、无脸部崩坏、无肢体畸形，色调温暖柔和，沉浸式都市短剧质感，背景音乐为治愈温柔轻音乐，贯穿整段视频。\n\n00:00-00:03：平视中景推镜，从书桌左侧缓缓推进到画面右侧年轻女子身前；近景固定镜，聚焦右侧年轻女子坐下并打开笔记本电脑的动作；表情特写，她嘴角轻轻上扬；【对话】画面右侧年轻女子声音轻柔清亮，语气带着自我鼓励地说：「今天也要好好加油呀。」；背景音中键盘轻响与治愈温柔轻音乐自然响起。"
   }
 ]
 
 Rules:
 1. Keep panel order unchanged.
 2. Keep source_text semantically aligned with input; do not rewrite story meaning.
-3. video_prompt MUST follow the Chinese cinematic short-drama format: first paragraph is positive prompt + one background music type from the library, followed by one-paragraph natural timeline ranges such as `00:00-00:04：镜头......；......；【对话】...`.
+3. video_prompt MUST follow the Chinese cinematic short-drama format: first paragraph is positive prompt + one background music type from the library, followed by one-paragraph natural timeline ranges such as `00:00-00:04：平视中景固定镜......；随后镜头缓慢推近......；【对话】...`.
 4. Use age+gender wording (e.g. 年轻女子, 中年男子) for character references in video_prompt — NO character names.
 5. Preserve every input `slot` when the character is stably positioned, and reflect it as a preferred anchor.
 6. `slot` is not an absolute boundary. If the shot is clearly about movement, entry/exit, path traversal, transition space, temporary space, empty space, imagination, dream, memory, or abstract/non-literal space, you may remove `slot` or keep it without forcing a rigid static match.
@@ -120,9 +123,13 @@ Rules:
 10. ⚠️ JSON SAFETY: All English double quotes inside video_prompt string values MUST use Chinese corner brackets「」instead. Use \n for line breaks within video_prompt strings. The video_prompt value must start with 高清4K, 高清 4K, or 4K, must include 背景音乐为, and must include at least one time range like 00:00-00:04.
 11. shot_type format: perspective + shot size (e.g. "平视中景", "仰拍全景").
 12. video_prompt must NOT contain English letters, pinyin, or abbreviations. All content must be Chinese.
-13. Every timeline segment must include natural camera movement, character placement, action, expression, and background sound. Include dialogue only when there is real dialogue. Do NOT use the old five-line labels `运镜：人物：动作：表情：台词：`.
-14. Dialogue must have speaker labels using age+gender, never character names, and must include emotion, voice texture, tone, expression, and lip-sync.
-14.1 Do NOT use circled-number list markers. Do NOT add primary/auxiliary camera-move labels. When there is no dialogue, omit the dialogue part entirely and do not write any no-dialogue placeholder.
+13. Every timeline segment must include natural camera movement, character placement, directionality, action, expression, and background sound. Include dialogue only when there is real dialogue. Do NOT use the old five-line labels `运镜：人物：动作：表情：台词：`.
+13.1 Camera movement wording must be natural Chinese cinematic language. Do NOT output stiff combinations such as 镜头平视固定, 镜头越肩推进, 镜头斜角拍; use 平视中景固定镜, 越肩推镜，从肩后推进到对方正面, 轻微斜角近景 instead. Do NOT combine fixed shot and push/pull/follow movement in the same clause.
+14. Dialogue must have speaker labels using age+gender, never character names, and must include emotion, voice texture, tone, and expression.
+14.1 Narration, inner monologue, and voiceover must use `【旁白】`, not `【对话】`.
+14.2 Multiple people in the same shot must have clearly different age range, gender, clothing, hairstyle, body shape, temperament, position, and facing direction; do not create people with identical appearance or face.
+14.2.1 Multi-character interactions must explicitly state directionality in Chinese: screen-left/screen-right, front/back, near/far, facing/back-facing, and movement direction. For example: 画面左侧年轻女子对右侧年轻女子说; 后方年轻女子上前半步，轻拍前方年轻女子右肩.
+14.3 Do NOT use circled-number list markers. Do NOT add primary/auxiliary camera-move labels. When there is no dialogue or narration, omit that part entirely and do not write any placeholder.
 15. duration range: 2-8 seconds, integer. Dialogue/micro-actions 3-7s, major actions 4-8s, close-ups 2-4s.
 16. For group panels, duration_sec must be <= 20 seconds and frames count must be 2-20 based on duration, action density, and transition/camera-movement density; ultra-high-density action/camera movement may approach 1 frame per second.
 17. For single panels, frames count must be exactly 1 and group_video_prompt must be omitted.

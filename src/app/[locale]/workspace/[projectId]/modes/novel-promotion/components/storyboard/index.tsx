@@ -72,6 +72,7 @@ export default function StoryboardStage({
     moveStoryboardGroup,
     insertPanel,
     duplicatePanel,
+    splitPanelFrame,
 
     submittingVariantPanelId,
     generatePanelVariant,
@@ -274,6 +275,7 @@ export default function StoryboardStage({
           onUpdateFrameTime={updatePanelFrameTime}
           onUpdateFramePrompt={updatePanelFramePrompt}
           onDeleteFrame={deletePanelFrame}
+          onSplitFrame={splitPanelFrame}
           onOpenEditModal={(storyboardId, panelIndex) => setEditingPanel({ storyboardId, panelIndex })}
           onOpenAIDataModal={(storyboardId, panelIndex) => setAIDataPanel({ storyboardId, panelIndex })}
           getPanelCandidates={getPanelCandidates}

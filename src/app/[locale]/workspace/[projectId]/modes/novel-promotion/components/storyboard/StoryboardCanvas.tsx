@@ -59,6 +59,7 @@ interface StoryboardCanvasProps {
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
   onDeleteFrame?: (panelId: string, frameId: string) => void | Promise<void>
+  onSplitFrame?: (frameId: string, placement: 'before' | 'after') => void | Promise<void>
   onOpenEditModal: (storyboardId: string, panelIndex: number) => void
   onOpenAIDataModal: (storyboardId: string, panelIndex: number) => void
   getPanelCandidates: (panel: NovelPromotionPanel) => { candidates: string[]; selectedIndex: number } | null
@@ -124,6 +125,7 @@ export default function StoryboardCanvas({
   onUpdateFrameTime,
   onUpdateFramePrompt,
   onDeleteFrame,
+  onSplitFrame,
   onOpenEditModal,
   onOpenAIDataModal,
   getPanelCandidates,
@@ -204,6 +206,7 @@ export default function StoryboardCanvas({
               onUpdateFrameTime={onUpdateFrameTime}
               onUpdateFramePrompt={onUpdateFramePrompt}
               onDeleteFrame={onDeleteFrame}
+              onSplitFrame={onSplitFrame}
               onOpenEditModal={(panelIndex) => onOpenEditModal(storyboard.id, panelIndex)}
               onOpenAIDataModal={(panelIndex) => onOpenAIDataModal(storyboard.id, panelIndex)}
               getPanelCandidates={getPanelCandidates}

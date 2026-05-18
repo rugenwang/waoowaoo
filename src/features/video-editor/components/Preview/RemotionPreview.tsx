@@ -1,8 +1,9 @@
 'use client'
 
-import React, { useMemo, useRef, useEffect } from 'react'
+import React, { useMemo, useRef, useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Player, PlayerRef } from '@remotion/player'
+import { prefetch } from 'remotion'
 import { AppIcon } from '@/components/ui/icons'
 import { VideoComposition } from '../../remotion/VideoComposition'
 import { VideoEditorProject } from '../../types/editor.types'
@@ -30,11 +31,73 @@ export const RemotionPreview: React.FC<RemotionPreviewProps> = ({
     const t = useTranslations('video')
     const playerRef = useRef<PlayerRef>(null)
     const lastSyncedFrame = useRef<number>(0)
+    const lastReportedFrame = useRef<number>(-1)
+    const lastReportedAt = useRef<number>(0)
+    const onFrameChangeRef = useRef(onFrameChange)
+    const playingRef = useRef(playing)
+    const currentFrameRef = useRef(currentFrame)
+    const externalSeekTargetRef = useRef<number | null>(null)
+    const previewContainerRef = useRef<HTMLDivElement | null>(null)
+    const [isFullscreen, setIsFullscreen] = useState(false)
 
     const totalDuration = useMemo(
         () => calculateTimelineDuration(project.timeline),
         [project.timeline]
     )
+    const playerInputProps = useMemo(() => ({
+        clips: project.timeline,
+        bgmTrack: project.bgmTrack,
+        config: project.config
+    }), [project.bgmTrack, project.config, project.timeline])
+    const preloadSources = useMemo(() => {
+        return Array.from(new Set(project.timeline.flatMap((clip) => [
+            clip.src,
+            clip.attachment?.audio?.src,
+        ]).filter((src): src is string => typeof src === 'string' && src.length > 0)))
+    }, [project.timeline])
+
+    useEffect(() => {
+        if (preloadSources.length === 0) return
+        const handles = preloadSources.map((src) => prefetch(src, { logLevel: 'warn' }))
+        handles.forEach((handle) => {
+            handle.waitUntilDone().catch(() => {
+                // 预加载失败不阻塞预览，播放器仍会按原始 URL 播放。
+            })
+        })
+        return () => {
+            handles.forEach((handle) => handle.free())
+        }
+    }, [preloadSources])
+
+    useEffect(() => {
+        onFrameChangeRef.current = onFrameChange
+    }, [onFrameChange])
+
+    useEffect(() => {
+        playingRef.current = playing
+    }, [playing])
+
+    useEffect(() => {
+        currentFrameRef.current = currentFrame
+    }, [currentFrame])
+
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullscreen(document.fullscreenElement === previewContainerRef.current)
+        }
+        document.addEventListener('fullscreenchange', handleFullscreenChange)
+        return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+    }, [])
+
+    const toggleFullscreen = async () => {
+        const container = previewContainerRef.current
+        if (!container) return
+        if (document.fullscreenElement === container) {
+            await document.exitFullscreen()
+            return
+        }
+        await container.requestFullscreen()
+    }
 
     // 当 currentFrame 从外部改变时，同步到 Player
     useEffect(() => {
@@ -43,8 +106,10 @@ export const RemotionPreview: React.FC<RemotionPreviewProps> = ({
 
         // 避免循环更新：只有当帧差距大于 1 时才 seek
         if (Math.abs(currentFrame - lastSyncedFrame.current) > 1) {
+            externalSeekTargetRef.current = currentFrame
             player.seekTo(currentFrame)
             lastSyncedFrame.current = currentFrame
+            lastReportedFrame.current = currentFrame
         }
     }, [currentFrame])
 
@@ -68,7 +133,27 @@ export const RemotionPreview: React.FC<RemotionPreviewProps> = ({
         const handleFrameUpdate = () => {
             const frame = player.getCurrentFrame()
             lastSyncedFrame.current = frame
-            onFrameChange?.(frame)
+
+            const externalSeekTarget = externalSeekTargetRef.current
+            if (externalSeekTarget !== null && Math.abs(frame - externalSeekTarget) <= 1) {
+                externalSeekTargetRef.current = null
+                return
+            }
+
+            // 暂停或拖动时间轴时，currentFrame 已由时间轴自身更新。
+            // 此时如果再接收 Player 的 frameupdate，容易形成 seek -> frameupdate -> setState -> seek 的循环。
+            if (!playingRef.current) return
+
+            const now = performance.now()
+            const shouldReport =
+                Math.abs(frame - lastReportedFrame.current) >= 4
+                || now - lastReportedAt.current >= 120
+
+            if (!shouldReport) return
+            if (Math.abs(frame - currentFrameRef.current) < 1) return
+            lastReportedFrame.current = frame
+            lastReportedAt.current = now
+            onFrameChangeRef.current?.(frame)
         }
 
         // Remotion Player 触发 timeupdate 事件
@@ -77,7 +162,7 @@ export const RemotionPreview: React.FC<RemotionPreviewProps> = ({
         return () => {
             player.removeEventListener('frameupdate', handleFrameUpdate)
         }
-    }, [onFrameChange])
+    }, [])
 
     // 监听 Player 播放状态变化
     useEffect(() => {
@@ -125,34 +210,63 @@ export const RemotionPreview: React.FC<RemotionPreviewProps> = ({
     }
 
     return (
-        <div style={{
-            width: '100%',
-            aspectRatio: `${project.config.width} / ${project.config.height}`,
-            maxHeight: '100%',
-            background: 'var(--glass-overlay-strong)',
-            borderRadius: '8px',
-            overflow: 'hidden'
-        }}>
+        <div
+            ref={previewContainerRef}
+            style={{
+                position: 'relative',
+                width: '100%',
+                aspectRatio: isFullscreen ? undefined : `${project.config.width} / ${project.config.height}`,
+                height: isFullscreen ? '100vh' : undefined,
+                maxHeight: isFullscreen ? '100vh' : '100%',
+                background: 'var(--glass-overlay-strong)',
+                borderRadius: isFullscreen ? 0 : '8px',
+                overflow: 'hidden',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+            }}
+        >
             <Player
                 ref={playerRef}
                 component={VideoComposition}
-                inputProps={{
-                    clips: project.timeline,
-                    bgmTrack: project.bgmTrack,
-                    config: project.config
-                }}
+                inputProps={playerInputProps}
                 durationInFrames={Math.max(1, totalDuration)}
                 fps={project.config.fps}
                 compositionWidth={project.config.width}
                 compositionHeight={project.config.height}
                 style={{
                     width: '100%',
-                    height: '100%'
+                    height: '100%',
+                    maxWidth: isFullscreen ? '100vw' : undefined,
+                    maxHeight: isFullscreen ? '100vh' : undefined,
                 }}
                 controls={false}  // 使用自定义控制
                 loop={false}
                 clickToPlay={false}  // 禁用点击播放，由外部控制
             />
+            <button
+                type="button"
+                onClick={() => { void toggleFullscreen() }}
+                title={isFullscreen ? '退出全屏' : '全屏播放'}
+                style={{
+                    position: 'absolute',
+                    right: 12,
+                    bottom: 12,
+                    width: 38,
+                    height: 38,
+                    borderRadius: 999,
+                    border: '1px solid rgba(255,255,255,0.28)',
+                    background: 'rgba(0,0,0,0.58)',
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.22)',
+                }}
+            >
+                <AppIcon name={isFullscreen ? 'minimize' : 'maximize'} className="h-4 w-4" />
+            </button>
         </div>
     )
 }

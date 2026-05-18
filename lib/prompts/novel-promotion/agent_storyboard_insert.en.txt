@@ -43,9 +43,12 @@ Rules:
 7. JSON only, no markdown.
 8. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.
 9. video_prompt MUST be Chinese and follow this format:
-   - First paragraph starts with 高清4K, 高清 4K, or 4K and contains positive visual quality, scene lighting, character details, smooth motion, vivid expression, lip-sync with dialogue, no flicker / no face collapse / no limb deformity in Chinese wording, visual tone, and one background music type.
-   - Then use one-paragraph timeline ranges such as `00:00-00:04：镜头......；镜头......；【对话】...；背景音...`.
-   - Every segment must include natural camera movement, character placement, action, expression, and background sound.
-   - Include `【对话】` only when the segment has real dialogue. If there is no dialogue, omit the dialogue part entirely.
+   - First paragraph starts with 高清4K, 高清 4K, or 4K and contains positive visual quality, scene lighting, character details, smooth motion, vivid expression, no flicker / no face collapse / no limb deformity in Chinese wording, clear visual differences and directionality between multiple people in the same shot, visual tone, and one background music type.
+   - Then use one-paragraph timeline ranges such as `00:00-00:04：平视中景固定镜......；越肩推镜，从人物肩后推进到对方正面......；【对话】...；背景音...`.
+   - Every segment must include natural camera movement, character placement, directionality, action, expression, and background sound. Camera wording must combine perspective/shot size + movement + visual action, such as 平视中景固定镜, 平视中景推镜，从侧面缓缓推进到人物身前, 越肩推镜，从人物肩后推进到对方正面, 轻微斜角近景，强化压迫感.
+   - For multi-character action, dialogue, eye contact, touch, chasing, blocking, or handing objects, explicitly write screen-left/screen-right, front/back, near/far, facing/back-facing, and movement direction in Chinese. Good examples: 画面左侧年轻女子对右侧年轻女子说; 后方年轻女子上前半步，轻拍前方年轻女子右肩.
+   - Do NOT output stiff parameter-like phrases such as 镜头平视固定, 镜头越肩推进, 镜头斜角拍. Do NOT combine a fixed shot and a moving shot in the same clause; split them into sequential clauses if both are needed.
+   - Include `【对话】` only when the segment has real character dialogue. Narration, inner monologue, and voiceover must use `【旁白】`, not `【对话】`. If there is no dialogue or narration, omit that part entirely.
    - Use age+gender labels instead of character names inside video_prompt.
-   - Do NOT use circled-number list markers. Do NOT add primary/auxiliary camera-move labels. If there is no dialogue, omit the dialogue part entirely and do not write any no-dialogue placeholder.
+   - Multiple people in the same shot must have clearly different age range, gender, clothing, hairstyle, body shape, temperament, position, and facing direction; do not create people with identical appearance or face.
+   - Do NOT use circled-number list markers. Do NOT add primary/auxiliary camera-move labels. If there is no dialogue or narration, omit that part entirely and do not write any placeholder.

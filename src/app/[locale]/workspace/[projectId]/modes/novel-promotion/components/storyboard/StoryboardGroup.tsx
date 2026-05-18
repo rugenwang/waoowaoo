@@ -60,6 +60,7 @@ export default function StoryboardGroup({
   onUpdateFrameTime,
   onUpdateFramePrompt,
   onDeleteFrame,
+  onSplitFrame,
   onOpenEditModal,
   onOpenAIDataModal,
   getPanelCandidates,
@@ -237,6 +238,7 @@ export default function StoryboardGroup({
         onUpdateFrameTime={onUpdateFrameTime}
         onUpdateFramePrompt={onUpdateFramePrompt}
         onDeleteFrame={onDeleteFrame}
+        onSplitFrame={onSplitFrame}
         onOpenEditModal={onOpenEditModal}
         onOpenAIDataModal={onOpenAIDataModal}
         onSelectPanelCandidateIndex={onSelectPanelCandidateIndex}

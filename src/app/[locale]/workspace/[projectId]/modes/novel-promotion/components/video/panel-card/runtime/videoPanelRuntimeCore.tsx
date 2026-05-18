@@ -36,6 +36,7 @@ export function useVideoPanelActions({
   flMissingCapabilityFields,
   flCustomPrompt,
   defaultFlPrompt,
+  promptField,
   localPrompt,
   isSavingPrompt,
   onUpdateLocalPrompt,
@@ -146,6 +147,7 @@ export function useVideoPanelActions({
       flMissingCapabilityFields,
       flCustomPrompt,
       defaultFlPrompt,
+      promptField,
       videoRatio,
     },
     actions: {

@@ -6,6 +6,7 @@ import {
   useRefreshEpisodeData,
   useRefreshProjectAssets,
   useRefreshStoryboards,
+  useSplitProjectPanelFrame,
 } from '@/lib/query/hooks'
 import { usePanelCrudActions } from './usePanelCrudActions'
 import { usePanelInsertActions } from './usePanelInsertActions'
@@ -26,6 +27,7 @@ export function usePanelOperations({
   const refreshEpisode = useRefreshEpisodeData(projectId, episodeId)
   const refreshStoryboards = useRefreshStoryboards(episodeId)
   const duplicatePanelMutation = useDuplicateProjectPanel(projectId)
+  const splitPanelFrameMutation = useSplitProjectPanelFrame(projectId)
 
   const panelCrud = usePanelCrudActions({
     projectId,
@@ -46,6 +48,13 @@ export function usePanelOperations({
 
   const duplicatePanel = async (panelId: string) => {
     await duplicatePanelMutation.mutateAsync({ panelId })
+    await onRefresh()
+    refreshEpisode()
+    refreshStoryboards()
+  }
+
+  const splitPanelFrame = async (frameId: string, placement: 'before' | 'after') => {
+    await splitPanelFrameMutation.mutateAsync({ frameId, placement })
     await onRefresh()
     refreshEpisode()
     refreshStoryboards()
@@ -76,5 +85,6 @@ export function usePanelOperations({
     setPanelLocation: panelCrud.setPanelLocation,
     insertPanel: panelInsert.insertPanel,
     duplicatePanel,
+    splitPanelFrame,
   }
 }

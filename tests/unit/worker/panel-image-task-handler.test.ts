@@ -43,7 +43,7 @@ const sharedMock = vi.hoisted(() => ({
 }))
 
 const outboundMock = vi.hoisted(() => ({
-  normalizeReferenceImagesForGeneration: vi.fn(async () => ['normalized-ref-1']),
+  normalizeReferenceImagesForGeneration: vi.fn(async (..._args: unknown[]) => ['normalized-ref-1']),
 }))
 
 const promptMock = vi.hoisted(() => ({
@@ -82,6 +82,7 @@ vi.mock('@/lib/prompt-i18n', () => ({
 }))
 
 import {
+  buildStoryboardHardConstraints,
   buildPanelStructuredPrompt,
   handlePanelImageTask,
 } from '@/lib/workers/handlers/panel-image-task-handler'
@@ -154,7 +155,7 @@ describe('worker panel-image-task-handler behavior', () => {
       expect.anything(),
       expect.objectContaining({
         modelId: 'storyboard-model-1',
-        prompt: 'panel-image-prompt',
+        prompt: expect.stringContaining('panel-image-prompt'),
         allowTaskExternalIdResume: false,
         options: expect.objectContaining({
           referenceImages: ['normalized-ref-1'],
@@ -180,6 +181,24 @@ describe('worker panel-image-task-handler behavior', () => {
         candidateImages: JSON.stringify(['cos/panel-candidate-1.png', 'cos/panel-candidate-2.png']),
       },
     })
+  })
+
+  it('first generation -> appends same-face constraint to storyboard image prompt', async () => {
+    const job = buildJob({ candidateCount: 1 })
+    await handlePanelImageTask(job)
+
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.stringContaining('多人或一群人的场景'),
+      }),
+    )
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.stringContaining('同一张脸'),
+      }),
+    )
   })
 
   it('regeneration branch -> keeps old image in previousImageUrl and stores candidates only', async () => {
@@ -288,6 +307,7 @@ describe('worker panel-image-task-handler behavior', () => {
       panelId: 'panel-1',
       candidateCount: 2,
       imageUrl: 'cos/frame-1.png',
+      panelImageUrl: 'cos/frame-1.png',
     })
     expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledTimes(2)
     expect(prismaMock.novelPromotionPanel.update).toHaveBeenNthCalledWith(1, {
@@ -366,7 +386,8 @@ describe('worker panel-image-task-handler behavior', () => {
     expect(result).toEqual({
       panelId: 'panel-1',
       candidateCount: 1,
-      imageUrl: 'cos/frame-1-old.png',
+      imageUrl: 'cos/frame-2-new.png',
+      panelImageUrl: 'cos/frame-1-old.png',
       frameId: 'frame-2',
       frameIndex: 1,
     })
@@ -442,6 +463,113 @@ describe('worker panel-image-task-handler behavior', () => {
       targetFrameId: 'frame-2',
     }))).rejects.toThrow('请先生成关联帧 F1，再重新生成 F2')
     expect(utilsMock.resolveImageSourceFromGeneration).not.toHaveBeenCalled()
+  })
+
+  it('target frame regeneration -> uses only direct linked frame references plus panel asset references', async () => {
+    utilsMock.resolveImageSourceFromGeneration.mockReset()
+    utilsMock.uploadImageSourceToCos.mockReset()
+    utilsMock.toSignedUrlIfCos.mockClear()
+    prismaMock.novelPromotionPanel.update.mockClear()
+    prismaMock.novelPromotionPanelFrame.update.mockClear()
+    outboundMock.normalizeReferenceImagesForGeneration.mockImplementation(async (...args: unknown[]) => {
+      const refs = Array.isArray(args[0]) ? args[0] as string[] : []
+      return refs.map((ref) => `normalized:${ref}`)
+    })
+
+    prismaMock.novelPromotionPanel.findUnique.mockResolvedValueOnce({
+      id: 'panel-1',
+      storyboardId: 'storyboard-1',
+      panelIndex: 0,
+      shotType: 'medium',
+      cameraMove: 'push-in',
+      description: 'group scene',
+      imagePrompt: null,
+      videoPrompt: 'group motion',
+      groupVideoPrompt: 'group video prompt',
+      location: 'Old Town',
+      characters: '[]',
+      srtSegment: null,
+      photographyRules: null,
+      actingNotes: null,
+      sketchImageUrl: null,
+      imageUrl: 'cos/frame-1-old.png',
+      panelMode: 'group',
+      frames: [
+        {
+          id: 'frame-1',
+          frameIndex: 0,
+          frameTimeSec: 0,
+          frameRole: 'base',
+          dependencyFrameIds: null,
+          imagePrompt: 'frame 1 prompt',
+          videoPrompt: null,
+          imageUrl: 'cos/frame-1-old.png',
+        },
+        {
+          id: 'frame-2',
+          frameIndex: 1,
+          frameTimeSec: 4,
+          frameRole: 'continuity',
+          dependencyFrameIds: '[0]',
+          imagePrompt: 'frame 2 prompt',
+          videoPrompt: null,
+          imageUrl: 'cos/frame-2-old.png',
+        },
+        {
+          id: 'frame-3',
+          frameIndex: 2,
+          frameTimeSec: 8,
+          frameRole: 'continuity',
+          dependencyFrameIds: '[1]',
+          imagePrompt: 'frame 3 prompt',
+          videoPrompt: null,
+          imageUrl: 'cos/frame-3-old.png',
+        },
+      ],
+    })
+
+    utilsMock.resolveImageSourceFromGeneration.mockResolvedValueOnce('generated-frame-source-3')
+    utilsMock.uploadImageSourceToCos.mockResolvedValueOnce('cos/frame-3-new.png')
+
+    await handlePanelImageTask(buildJob({
+      candidateCount: 1,
+      targetFrameId: 'frame-3',
+    }))
+
+    expect(utilsMock.toSignedUrlIfCos).toHaveBeenCalledTimes(1)
+    expect(utilsMock.toSignedUrlIfCos).toHaveBeenCalledWith('cos/frame-2-old.png', 3600)
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.stringContaining('同一张脸'),
+        options: expect.objectContaining({
+          referenceImages: [
+            'normalized:signed:cos/frame-2-old.png',
+            'normalized:https://signed.example/ref-1.png',
+          ],
+        }),
+      }),
+    )
+  })
+
+  it('hard constraints explicitly forbid same faces in multi-person shots', () => {
+    const zh = buildStoryboardHardConstraints({
+      locale: 'zh',
+      aspectRatio: '16:9',
+      styleText: '写实短剧风格',
+      referenceImagesCount: 1,
+    })
+    const en = buildStoryboardHardConstraints({
+      locale: 'en',
+      aspectRatio: '16:9',
+      styleText: 'realistic drama',
+      referenceImagesCount: 1,
+    })
+
+    expect(zh).toContain('多人或一群人的场景')
+    expect(zh).toContain('同一张脸')
+    expect(en).toContain('multi-person or crowd scenes')
+    expect(en).toContain('same face')
   })
 
   it('structured prompt for local image generation does not pass video timeline as image prompt', () => {

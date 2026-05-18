@@ -352,6 +352,46 @@ function normalizeFallbackCameraMove(value: unknown): string {
   return text
 }
 
+function buildNaturalFallbackCameraPhrase(cameraMove: string): string {
+  switch (cameraMove) {
+    case '固定镜':
+      return '平视中景固定镜，稳定呈现画面内人物与场景关系'
+    case '俯冲':
+      return '远景俯冲镜头，从高处缓缓压向人物所在空间'
+    case '升降镜':
+      return '中景升降镜头，顺着人物动作自然起落'
+    case '环绕镜':
+      return '中景环绕镜头，围绕人物站位与情绪关系缓慢移动'
+    case '摇镜':
+      return '中景摇镜，从环境细节自然摇向人物方向'
+    case '跟镜':
+      return '平稳跟镜，跟随人物行动节奏向前移动'
+    case '拉镜':
+      return '中景拉镜，从人物身前缓缓拉开交代环境'
+    case '移镜':
+      return '平移镜头，沿人物行动方向横向移动'
+    case '俯拍':
+      return '轻微俯拍中景，呈现人物与环境的空间关系'
+    case '仰拍':
+      return '轻微仰拍近景，强化人物气场和压迫感'
+    default:
+      return `平视中景${cameraMove}，围绕画面内人物与场景关系自然展开`
+  }
+}
+
+function formatFallbackSpeech(sourceText: unknown): string {
+  const text = typeof sourceText === 'string' ? sourceText.trim() : ''
+  if (!text) return ''
+
+  const normalized = text.replace(/["“”]/g, '「')
+  const looksLikeDialogue = /[：:]\s*「|[：:]\s*[^。！？!?]{1,40}[。！？!?]?/.test(text)
+  if (looksLikeDialogue) {
+    return `；【对话】角色声音自然清晰，语气贴合当前情绪，表情随剧情变化地说：「${normalized}」`
+  }
+
+  return `；【旁白】旁白声音自然清晰，语气贴合当前情绪，低声叙述：「${normalized}」`
+}
+
 function buildFallbackGroupVideoPrompt(panels: StoryboardPanel[], durationSec: number): string {
   const segmentDuration = durationSec / Math.max(1, panels.length)
   const music = selectFallbackMusic(panels[0]?.scene_type)
@@ -359,15 +399,14 @@ function buildFallbackGroupVideoPrompt(panels: StoryboardPanel[], durationSec: n
     const start = Math.round(segmentDuration * index)
     const end = index === panels.length - 1 ? durationSec : Math.max(start + 1, Math.round(segmentDuration * (index + 1)))
     const mainMove = normalizeFallbackCameraMove(panel.camera_move)
+    const cameraPhrase = buildNaturalFallbackCameraPhrase(mainMove)
     const actionText = panel.description || panel.source_text || '承接上一画面继续行动'
-    const dialogueText = panel.source_text
-      ? `；【对话】画面内人物声音自然清晰，语气贴合当前情绪，口型与台词同步，低声说：「${String(panel.source_text).replace(/["“”]/g, '「')}」`
-      : ''
-    return `${formatTimecode(start)}-${formatTimecode(end)}：镜头缓慢${mainMove}，围绕画面内人物与场景关系展开，人物站位清晰，动作承接上一段，${actionText}；镜头轻微定格，聚焦关键道具、手部动作或环境细节，强化画面质感与剧情信息；表情特写，捕捉人物眼神、眉眼、嘴角和呼吸变化，神态自然连贯${dialogueText}；背景音中环境声与${music}同步铺开。`
+    const dialogueText = formatFallbackSpeech(panel.source_text)
+    return `${formatTimecode(start)}-${formatTimecode(end)}：${cameraPhrase}，人物站位清晰，动作承接上一段，${actionText}；近景固定镜，聚焦关键道具、手部动作或环境细节，强化画面质感与剧情信息；表情特写，捕捉人物眼神、眉眼、嘴角和呼吸变化，神态自然连贯${dialogueText}；背景音中环境声与${music}同步铺开。`
   }).join('\n')
 
   return [
-    `高清4K，电影级质感，画面稳定清晰，光影自然，人物建模精致，动作流畅不僵硬，表情生动，口型和台词同步，无画面闪烁、无脸部崩坏、无肢体畸形，背景音乐为${music}，贯穿整段视频。`,
+    `高清4K，电影级质感，画面稳定清晰，光影自然，人物建模精致，多人物同镜时年龄段、性别、服饰、发型、身形、气质和站位清晰区分，镜头中不要出现形象、相貌一样的人，动作流畅不僵硬，表情生动，无画面闪烁、无脸部崩坏、无肢体畸形，背景音乐为${music}，贯穿整段视频。`,
     timeline,
   ].join('\n')
 }

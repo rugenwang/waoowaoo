@@ -13,9 +13,19 @@ import { resolveStorageKeyFromMediaValue } from '@/lib/media/service'
 interface EditorClip {
   id?: string
   src?: string
+  durationInFrames?: number
+  trim?: {
+    from?: number
+    to?: number
+  }
+  playback?: {
+    reverse?: boolean
+    muted?: boolean
+  }
 }
 
 interface EditorProjectData {
+  config?: { fps?: number }
   timeline?: EditorClip[]
 }
 
@@ -46,6 +56,10 @@ function runFfmpeg(args: string[], cwd: string): Promise<void> {
   })
 }
 
+function frameToSeconds(frame: number, fps: number): string {
+  return Math.max(0, frame / Math.max(1, fps)).toFixed(3)
+}
+
 export const POST = apiHandler(async (
   request: NextRequest,
   context: { params: Promise<{ projectId: string }> },
@@ -71,17 +85,50 @@ export const POST = apiHandler(async (
   })
   if (!episode) throw new ApiError('NOT_FOUND')
 
+  const fps = projectData?.config?.fps || 30
   const workDir = path.join(os.tmpdir(), `waoo-editor-${randomUUID()}`)
   await mkdir(workDir, { recursive: true })
 
   try {
     const inputLines: string[] = []
     for (let index = 0; index < clips.length; index += 1) {
-      const fileName = `${String(index + 1).padStart(4, '0')}.mp4`
-      const filePath = path.join(workDir, fileName)
-      const buffer = await downloadVideoBuffer(clips[index].src)
-      await writeFile(filePath, buffer)
-      inputLines.push(`file '${fileName.replace(/'/g, "'\\''")}'`)
+      const sourceName = `${String(index + 1).padStart(4, '0')}_source.mp4`
+      const sourcePath = path.join(workDir, sourceName)
+      const outputName = `${String(index + 1).padStart(4, '0')}.mp4`
+      const outputPath = path.join(workDir, outputName)
+      const clip = clips[index]
+      const buffer = await downloadVideoBuffer(clip.src)
+      await writeFile(sourcePath, buffer)
+
+      const trimFrom = typeof clip.trim?.from === 'number' ? Math.max(0, Math.round(clip.trim.from)) : 0
+      const trimTo = typeof clip.trim?.to === 'number' ? Math.max(trimFrom + 1, Math.round(clip.trim.to)) : 0
+      const durationFrames = trimTo > trimFrom
+        ? trimTo - trimFrom
+        : Math.max(1, Math.round(clip.durationInFrames || fps * 3))
+
+      if (trimFrom > 0 || trimTo > 0 || clip.playback?.reverse || clip.playback?.muted) {
+        const filterArgs: string[] = []
+        if (clip.playback?.reverse) {
+          filterArgs.push('-vf', 'reverse')
+          if (!clip.playback?.muted) {
+            filterArgs.push('-af', 'areverse')
+          }
+        }
+        await runFfmpeg([
+          '-y',
+          '-ss', frameToSeconds(trimFrom, fps),
+          '-i', sourcePath,
+          '-t', frameToSeconds(durationFrames, fps),
+          ...filterArgs,
+          '-c:v', 'libx264',
+          ...(clip.playback?.muted ? ['-an'] : ['-c:a', 'aac']),
+          '-movflags', '+faststart',
+          outputPath,
+        ], workDir)
+      } else {
+        await writeFile(outputPath, buffer)
+      }
+      inputLines.push(`file '${outputName.replace(/'/g, "'\\''")}'`)
     }
 
     const listPath = path.join(workDir, 'concat.txt')

@@ -10,6 +10,14 @@ interface EditorClip {
   id?: string
   src?: string
   durationInFrames?: number
+  trim?: {
+    from?: number
+    to?: number
+  }
+  playback?: {
+    reverse?: boolean
+    muted?: boolean
+  }
   metadata?: {
     description?: string
     panelId?: string
@@ -69,6 +77,8 @@ export const POST = apiHandler(async (
   let cursorFrame = 0
   const manifestClips = clips.map((clip, index) => {
     const durationInFrames = Math.max(1, Math.round(clip.durationInFrames || fps * 3))
+    const trimFrom = typeof clip.trim?.from === 'number' ? Math.max(0, Math.round(clip.trim.from)) : 0
+    const trimTo = typeof clip.trim?.to === 'number' ? Math.max(trimFrom + 1, Math.round(clip.trim.to)) : trimFrom + durationInFrames
     const fileName = `${String(index + 1).padStart(3, '0')}_${safeFilePart(clip.metadata?.description || 'clip')}.mp4`
     const item = {
       id: clip.id || `clip_${index + 1}`,
@@ -78,6 +88,12 @@ export const POST = apiHandler(async (
       durationInFrames,
       startSec: Number((cursorFrame / fps).toFixed(3)),
       durationSec: Number((durationInFrames / fps).toFixed(3)),
+      sourceStartFrame: trimFrom,
+      sourceEndFrame: trimTo,
+      sourceStartSec: Number((trimFrom / fps).toFixed(3)),
+      sourceEndSec: Number((trimTo / fps).toFixed(3)),
+      reverse: Boolean(clip.playback?.reverse),
+      muted: Boolean(clip.playback?.muted),
       metadata: clip.metadata || {},
     }
     cursorFrame += durationInFrames

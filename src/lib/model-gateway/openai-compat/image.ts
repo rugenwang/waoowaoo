@@ -295,6 +295,63 @@ function summarizeEmptyImageResponse(response: unknown): string {
   }
 }
 
+function appendMultipartValue(formData: FormData, key: string, value: unknown) {
+  if (value === undefined || value === null) return
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    formData.append(key, String(value))
+  }
+}
+
+async function requestEeeApiImageEdit(params: {
+  endpoint: string
+  apiKey: string
+  model: string
+  prompt: string
+  referenceImages: string[]
+  responseFormat: OpenAIImageResponseFormat
+  n?: number
+  outputFormat?: OpenAIImageOutputFormat
+  quality?: OpenAIImageGenerateQuality
+  size?: string
+  extraBody?: Record<string, unknown>
+}): Promise<unknown> {
+  const formData = new FormData()
+  formData.append('model', params.model)
+  formData.append('prompt', params.prompt)
+  formData.append('response_format', params.responseFormat)
+  appendMultipartValue(formData, 'n', params.n)
+  appendMultipartValue(formData, 'output_format', params.outputFormat)
+  appendMultipartValue(formData, 'quality', params.quality)
+  appendMultipartValue(formData, 'size', params.size)
+  for (const [key, value] of Object.entries(params.extraBody || {})) {
+    appendMultipartValue(formData, key, value)
+  }
+
+  const files = await Promise.all(params.referenceImages.map((image, index) => toUploadFile(image, index)))
+  for (const file of files) {
+    formData.append('image', file, file.name)
+  }
+
+  const response = await fetch(params.endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${params.apiKey}`,
+    },
+    body: formData,
+  })
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(`OPENAI_COMPAT_IMAGE_REQUEST_FAILED: ${response.status} ${text.slice(0, 500)}`)
+  }
+
+  try {
+    return await response.json()
+  } catch (error) {
+    throw new Error(`OPENAI_COMPAT_IMAGE_RESPONSE_INVALID: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 export async function generateImageViaOpenAICompat(request: OpenAICompatImageRequest): Promise<GenerateResult> {
   const {
     userId,
@@ -412,17 +469,31 @@ export async function generateImageViaOpenAICompat(request: OpenAICompatImageReq
 
   try {
     if (referenceImages.length > 0) {
-      const response = await client.images.edit({
-        model: normalizedModelId,
-        prompt,
-        image: await Promise.all(referenceImages.map((image, index) => toUploadFile(image, index))),
-        response_format: responseFormat,
-        ...(typeof n === 'number' ? { n } : {}),
-        ...(outputFormat ? { output_format: outputFormat } : {}),
-        ...(quality ? { quality } : {}),
-        ...(size ? { size } : {}),
-        ...(extraBody ? { extra_body: extraBody } : {}),
-      } as unknown as Parameters<typeof client.images.edit>[0])
+      const response = isEeeApiProvider(providerId)
+        ? await requestEeeApiImageEdit({
+          endpoint,
+          apiKey: config.apiKey,
+          model: normalizedModelId,
+          prompt,
+          referenceImages,
+          responseFormat,
+          ...(typeof n === 'number' ? { n } : {}),
+          ...(outputFormat ? { outputFormat } : {}),
+          ...(quality ? { quality } : {}),
+          ...(size ? { size } : {}),
+          ...(extraBody ? { extraBody } : {}),
+        })
+        : await client.images.edit({
+          model: normalizedModelId,
+          prompt,
+          image: await Promise.all(referenceImages.map((image, index) => toUploadFile(image, index))),
+          response_format: responseFormat,
+          ...(typeof n === 'number' ? { n } : {}),
+          ...(outputFormat ? { output_format: outputFormat } : {}),
+          ...(quality ? { quality } : {}),
+          ...(size ? { size } : {}),
+          ...(extraBody ? { extra_body: extraBody } : {}),
+        } as unknown as Parameters<typeof client.images.edit>[0])
 
       await publishDebug({
         kind: 'provider_response',

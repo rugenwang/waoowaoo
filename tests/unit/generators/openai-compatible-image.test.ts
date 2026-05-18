@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const openAIState = vi.hoisted(() => ({
   generate: vi.fn(),
   edit: vi.fn(),
-  toFile: vi.fn(async () => ({ name: 'mock-file' })),
+  toFile: vi.fn(async (..._args: unknown[]) => ({ name: 'mock-file' })),
 }))
 
 const getProviderConfigMock = vi.hoisted(() => vi.fn(async () => ({
@@ -33,6 +33,7 @@ vi.mock('@/lib/image-cache', () => ({
 }))
 
 import { OpenAICompatibleImageGenerator } from '@/lib/generators/image/openai-compatible'
+import { EeeApiImageGenerator } from '@/lib/generators/image/eeeapi'
 
 describe('OpenAICompatibleImageGenerator', () => {
   beforeEach(() => {
@@ -104,6 +105,57 @@ describe('OpenAICompatibleImageGenerator', () => {
       quality: 'medium',
     })
     expect(Array.isArray((call[0] as { image?: unknown }).image)).toBe(true)
+  })
+
+  it('posts eeeapi image edits as multipart with repeated image fields', async () => {
+    getProviderConfigMock.mockResolvedValueOnce({
+      id: 'eeeapi',
+      apiKey: 'eee-key',
+      baseUrl: 'https://api.img.dengche.cc/v1',
+    })
+    openAIState.toFile.mockImplementation(async (...args: unknown[]) => {
+      const name = typeof args[1] === 'string' ? args[1] : 'reference.png'
+      const options = args[2] && typeof args[2] === 'object' ? args[2] as FilePropertyBag : undefined
+      return new File(['image-bytes'], name, { type: options?.type || 'image/png' })
+    })
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ data: [{ b64_json: 'ZWRpdA==' }] }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const generator = new EeeApiImageGenerator('gpt-image-2', 'eeeapi')
+    const result = await generator.generate({
+      userId: 'user-1',
+      prompt: 'edit with refs',
+      referenceImages: [
+        'data:image/png;base64,QQ==',
+        'data:image/png;base64,Qg==',
+      ],
+      options: {
+        size: '1024x1024',
+        responseFormat: 'b64_json',
+      },
+    })
+
+    expect(result.success).toBe(true)
+    expect(openAIState.edit).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.img.dengche.cc/v1/images/edits',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer eee-key',
+        },
+      }),
+    )
+    const [, requestInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    const formData = requestInit.body as FormData
+    expect(formData.get('prompt')).toBe('edit with refs')
+    expect(formData.get('model')).toBe('gpt-image-2')
+    expect(formData.get('size')).toBe('1024x1024')
+    expect(formData.getAll('image')).toHaveLength(2)
+    expect(formData.getAll('image[]')).toHaveLength(0)
   })
 
   it('fails explicitly on unsupported option values', async () => {

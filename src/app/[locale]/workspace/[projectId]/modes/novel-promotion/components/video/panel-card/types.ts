@@ -33,6 +33,7 @@ export interface VideoPanelCardShellProps {
   flMissingCapabilityFields: string[]
   flCustomPrompt: string
   defaultFlPrompt: string
+  promptField: 'videoPrompt' | 'groupVideoPrompt' | 'firstLastFramePrompt'
   localPrompt: string
   isSavingPrompt: boolean
   onUpdateLocalPrompt: (value: string) => void

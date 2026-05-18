@@ -1,6 +1,8 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
+import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { PanelEditData } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/PanelEditForm'
 import {
   GlassChip,
@@ -26,8 +28,18 @@ export interface PanelEditFormV2Props {
   isRefiningStoryboardPrompt?: boolean
   refinedStoryboardPrompt?: string | null
   onClearRefinedStoryboardPrompt?: () => void
+  onRegenerateVideoPrompt?: () => void
+  isRegeneratingVideoPrompt?: boolean
   uiMode?: UiPatternMode
 }
+
+type LargeTextEditorState = {
+  field: 'description' | 'videoPrompt'
+  title: string
+  subtitle?: string
+  value: string
+  placeholder: string
+} | null
 
 export default function PanelEditFormV2({
   panelData,
@@ -44,9 +56,12 @@ export default function PanelEditFormV2({
   isRefiningStoryboardPrompt = false,
   refinedStoryboardPrompt = null,
   onClearRefinedStoryboardPrompt,
+  onRegenerateVideoPrompt,
+  isRegeneratingVideoPrompt = false,
   uiMode = 'flow'
 }: PanelEditFormV2Props) {
   const t = useTranslations('storyboard')
+  const [largeTextEditor, setLargeTextEditor] = useState<LargeTextEditorState>(null)
   const handleCopyRefinedPrompt = async () => {
     const value = (refinedStoryboardPrompt || '').trim()
     if (!value) return
@@ -55,6 +70,28 @@ export default function PanelEditFormV2({
     } catch {
       // Clipboard can be unavailable in insecure contexts; selection fallback is intentionally omitted.
     }
+  }
+
+  const openLargeTextEditor = (field: 'description' | 'videoPrompt') => {
+    setLargeTextEditor({
+      field,
+      title: field === 'description' ? t('panel.sceneDescription') : t('panel.videoPrompt'),
+      subtitle: field === 'description' ? t('panel.sceneDescriptionPlaceholder') : t('panel.videoPromptHint'),
+      value: field === 'description' ? panelData.description || '' : panelData.videoPrompt || '',
+      placeholder: field === 'description' ? t('panel.sceneDescriptionPlaceholder') : t('panel.videoPromptPlaceholder'),
+    })
+  }
+
+  const closeLargeTextEditor = () => setLargeTextEditor(null)
+
+  const saveLargeTextEditor = () => {
+    if (!largeTextEditor) return
+    if (largeTextEditor.field === 'description') {
+      onUpdate({ description: largeTextEditor.value })
+    } else {
+      onUpdate({ videoPrompt: largeTextEditor.value })
+    }
+    setLargeTextEditor(null)
   }
 
   return (
@@ -111,22 +148,35 @@ export default function PanelEditFormV2({
 
       <GlassField
         label={t('panel.sceneDescription')}
-        actions={onRefineStoryboardPrompt ? (
-          <button
-            type="button"
-            onClick={onRefineStoryboardPrompt}
-            disabled={isRefiningStoryboardPrompt}
-            className="inline-flex h-8 w-8 items-center justify-center text-[var(--glass-text-secondary)] hover:text-[var(--glass-tone-info-fg)] disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
-            aria-label={t('panel.refineStoryboardPrompt')}
-            title={t('panel.refineStoryboardPrompt')}
-          >
-            {isRefiningStoryboardPrompt ? (
-              <AppIcon name="refresh" className="h-4 w-4 animate-spin" />
-            ) : (
-              <AppIcon name="sparklesAlt" className="h-4 w-4" />
-            )}
-          </button>
-        ) : null}
+        actions={(
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => openLargeTextEditor('description')}
+              className="inline-flex h-8 w-8 items-center justify-center text-[var(--glass-text-secondary)] transition-colors hover:text-[var(--glass-tone-info-fg)]"
+              aria-label="放大编辑画面描述"
+              title="放大编辑画面描述"
+            >
+              <AppIcon name="maximize" className="h-4 w-4" />
+            </button>
+            {onRefineStoryboardPrompt ? (
+              <button
+                type="button"
+                onClick={onRefineStoryboardPrompt}
+                disabled={isRefiningStoryboardPrompt}
+                className="inline-flex h-8 w-8 items-center justify-center text-[var(--glass-text-secondary)] hover:text-[var(--glass-tone-info-fg)] disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+                aria-label={t('panel.refineStoryboardPrompt')}
+                title={t('panel.refineStoryboardPrompt')}
+              >
+                {isRefiningStoryboardPrompt ? (
+                  <AppIcon name="refresh" className="h-4 w-4 animate-spin" />
+                ) : (
+                  <AppIcon name="sparklesAlt" className="h-4 w-4" />
+                )}
+              </button>
+            ) : null}
+          </div>
+        )}
       >
         <GlassTextarea
           density="compact"
@@ -171,7 +221,39 @@ export default function PanelEditFormV2({
         ) : null}
       </GlassField>
 
-      <GlassField label={t('panel.videoPrompt')} hint={t('panel.videoPromptHint')}>
+      <GlassField
+        label={t('panel.videoPrompt')}
+        hint={t('panel.videoPromptHint')}
+        actions={(
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => openLargeTextEditor('videoPrompt')}
+              className="inline-flex h-8 w-8 items-center justify-center text-[var(--glass-text-secondary)] transition-colors hover:text-[var(--glass-tone-info-fg)]"
+              aria-label="放大编辑视频提示词"
+              title="放大编辑视频提示词"
+            >
+              <AppIcon name="maximize" className="h-4 w-4" />
+            </button>
+            {onRegenerateVideoPrompt ? (
+              <button
+                type="button"
+                onClick={onRegenerateVideoPrompt}
+                disabled={isRegeneratingVideoPrompt}
+                className="inline-flex h-8 w-8 items-center justify-center text-[var(--glass-text-secondary)] transition-colors hover:text-[var(--glass-tone-info-fg)] disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="重新生成视频提示词"
+                title="重新生成视频提示词"
+              >
+                {isRegeneratingVideoPrompt ? (
+                  <AppIcon name="refresh" className="h-4 w-4 animate-spin" />
+                ) : (
+                  <AppIcon name="sparklesAlt" className="h-4 w-4" />
+                )}
+              </button>
+            ) : null}
+          </div>
+        )}
+      >
         <GlassTextarea
           density="compact"
           rows={2}
@@ -232,6 +314,63 @@ export default function PanelEditFormV2({
           )}
         </GlassField>
       </div>
+      {largeTextEditor && typeof document !== 'undefined' ? createPortal(
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={closeLargeTextEditor}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--glass-stroke-subtle)] px-5 py-4">
+              <div>
+                <div className="text-sm font-semibold text-[var(--glass-text-primary)]">{largeTextEditor.title}</div>
+                {largeTextEditor.subtitle ? (
+                  <div className="mt-1 text-xs text-[var(--glass-text-tertiary)]">{largeTextEditor.subtitle}</div>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={closeLargeTextEditor}
+                className="rounded-full p-2 text-[var(--glass-text-tertiary)] transition hover:bg-[var(--glass-bg-muted)] hover:text-[var(--glass-text-primary)]"
+                aria-label={t('common.cancel')}
+              >
+                <AppIcon name="close" className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5">
+              <textarea
+                value={largeTextEditor.value}
+                onChange={(event) => setLargeTextEditor((previous) => previous ? { ...previous, value: event.target.value } : previous)}
+                autoFocus
+                className="min-h-[48vh] w-full resize-y rounded-lg border border-[var(--glass-stroke-focus)] bg-[var(--glass-bg-surface)] px-4 py-3 text-sm leading-6 text-[var(--glass-text-secondary)] outline-none focus:ring-2 focus:ring-[var(--glass-tone-info-fg)]"
+                placeholder={largeTextEditor.placeholder}
+              />
+              <p className="mt-2 text-xs text-[var(--glass-text-tertiary)]">
+                点击保存后会回写到当前分镜字段，外层仍按原有自动保存逻辑保存。
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-[var(--glass-stroke-subtle)] px-5 py-4">
+              <button
+                type="button"
+                onClick={closeLargeTextEditor}
+                className="rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] px-4 py-2 text-sm text-[var(--glass-text-secondary)] transition hover:bg-[var(--glass-bg-surface)]"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={saveLargeTextEditor}
+                className="rounded-lg bg-[var(--glass-accent-from)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[var(--glass-accent-to)]"
+              >
+                {t('common.save')}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      ) : null}
     </div>
   )
 }

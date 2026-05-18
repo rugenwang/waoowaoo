@@ -63,11 +63,12 @@ function resolveVideoDims(options: LocalVideoOptions): { width?: number; height?
   // 默认与 ai-gen_backend 保持一致
   if (!resolution) return { width: 704, height: 480 }
 
+  const explicitSize = parseSize(resolution)
+  if (explicitSize) return explicitSize
+
   const isVertical = ratio === '9:16'
   const mapping: Record<string, { w: number; h: number }> = {
     '480p': { w: 704, h: 480 },
-    '1024x576': { w: 1024, h: 576 },
-    '1280x704': { w: 1280, h: 704 },
     '720p': { w: 1280, h: 720 },
     '1080p': { w: 1920, h: 1080 },
   }

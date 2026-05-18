@@ -36,6 +36,7 @@ export interface VideoClip {
     id: string
     src: string                    // COS URL
     durationInFrames: number       // 播放时长
+    originalDurationInFrames?: number // 原始素材总帧数，用于裁剪还原
 
     // 素材内裁剪 (可选)
     trim?: {
@@ -48,6 +49,9 @@ export interface VideoClip {
 
     // 转场 (与下一个片段的过渡)
     transition?: ClipTransition
+
+    // 片段播放处理
+    playback?: ClipPlayback
 
     // AI 元数据 (用于回溯)
     metadata: ClipMetadata
@@ -74,6 +78,15 @@ export interface ClipAttachment {
 export interface ClipTransition {
     type: 'none' | 'dissolve' | 'fade' | 'slide'
     durationInFrames: number
+}
+
+/**
+ * 片段播放处理
+ */
+export interface ClipPlayback {
+    reverse?: boolean
+    muted?: boolean
+    reversePreviewUrl?: string
 }
 
 /**

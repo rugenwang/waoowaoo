@@ -278,6 +278,29 @@ export function useDeleteProjectPanelFrame(projectId: string) {
     })
 }
 
+export function useSplitProjectPanelFrame(projectId: string) {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: async (payload: { frameId: string; placement: 'before' | 'after' }) => {
+            return await requestJsonWithError<{
+                success: boolean
+                panelId: string
+                sourcePanelId: string
+                placement: 'before' | 'after'
+            }>(`/api/novel-promotion/${projectId}/split-panel-frame`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            }, '拆出关键帧失败')
+        },
+        onSettled: async () => {
+            await invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+            await invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            await queryClient.invalidateQueries({ queryKey: ['episode-data', projectId], exact: false })
+        },
+    })
+}
+
 /**
  * 修改镜头图片（storyboard）
  */

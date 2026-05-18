@@ -73,6 +73,34 @@ export function useRefineProjectStoryboardPrompt(projectId: string) {
     })
 }
 
+export function useRegenerateProjectVideoPrompt(projectId: string) {
+    return useMutation({
+        mutationFn: async (payload: {
+            panelId?: string
+            storyboardId?: string
+            panelIndex?: number
+            field?: 'videoPrompt' | 'groupVideoPrompt' | 'firstLastFramePrompt'
+            additionalRequirement?: string
+            locale?: 'zh' | 'en'
+        }) => await requestJsonWithError<{
+            success: boolean
+            prompt: string
+            field: 'videoPrompt' | 'groupVideoPrompt' | 'firstLastFramePrompt'
+            panelId: string
+            storyboardId: string
+            panelIndex: number
+        }>(
+            `/api/novel-promotion/${projectId}/regenerate-video-prompt`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            },
+            '重新生成视频提示词失败',
+        ),
+    })
+}
+
 /**
  * 设计音色（项目）
  */

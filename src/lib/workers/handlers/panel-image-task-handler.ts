@@ -344,13 +344,9 @@ function buildFrameReferencePlan(params: {
   frame: PanelFrameForGeneration
   generatedByFrameIndex: Map<number, string>
 }) {
-  const dependencyIndexes = parseDependencyFrameIds(params.frame.dependencyFrameIds)
+  const dependencyIndexes = uniqueNumbers(parseDependencyFrameIds(params.frame.dependencyFrameIds))
   const frameReferenceIndexes = params.frame.frameIndex > 0
-    ? uniqueNumbers([
-      0,
-      ...dependencyIndexes,
-      Math.max(0, params.frame.frameIndex - 1),
-    ])
+    ? (dependencyIndexes.length > 0 ? dependencyIndexes : [Math.max(0, params.frame.frameIndex - 1)])
     : dependencyIndexes
   const urls = frameReferenceIndexes
     .map((frameIndex) => params.generatedByFrameIndex.get(frameIndex))
@@ -378,18 +374,18 @@ function buildPanelFramePrompt(params: {
   const zhReferenceRule = params.frame.frameIndex > 0
     ? [
       params.frameReferenceImageCount > 0
-        ? `参考帧规则：参考图前 ${params.frameReferenceImageCount} 张是本分镜组已生成关键帧，${referenceLabels ? `包含 ${referenceLabels}；` : ''}其中 F1 是整组基础帧。`
-        : '参考帧规则：这是基础帧之后的关键帧，必须承接 F1 基础帧的角色、服饰、场景、光线和构图逻辑。',
-      '请根据基础帧、已生成关联帧和本帧剧本描述，生成顺滑过渡到当前秒点的画面；保留身份和服装一致，但不要原样复制基础帧姿势、表情、站位或构图。',
+        ? `参考帧规则：参考图前 ${params.frameReferenceImageCount} 张是本分镜组已生成的直接关联关键帧${referenceLabels ? `（${referenceLabels}）` : ''}。`
+        : '参考帧规则：这是基础帧之后的关键帧，必须承接直接相邻剧情的角色、服饰、场景、光线和构图逻辑。',
+      '请根据直接关联帧和本帧剧本描述，生成顺滑过渡到当前秒点的画面；保留身份和服装一致，但不要原样复制参考帧姿势、表情、站位或构图。',
       '本帧只表现当前秒点的关键状态，要有明确变化，例如动作进展、人物位置、手部/道具状态、视线、表情或场景转化。'
     ].join('\n')
     : ''
   const enReferenceRule = params.frame.frameIndex > 0
     ? [
       params.frameReferenceImageCount > 0
-        ? `Reference-frame rule: the first ${params.frameReferenceImageCount} reference image(s) are already generated keyframes from this storyboard group, ${referenceLabels ? `including ${referenceLabels}; ` : ''}F1 is the base opening frame.`
-        : 'Reference-frame rule: this is after the base frame; preserve F1 identity, outfit, scene, light, and composition logic.',
-      'Use the base frame, linked frames, and this frame script description to create a smooth current-frame image. Keep identity/outfit consistent, but do not copy the base-frame pose, expression, position, or composition exactly.',
+        ? `Reference-frame rule: the first ${params.frameReferenceImageCount} reference image(s) are directly linked generated keyframes from this storyboard group${referenceLabels ? ` (${referenceLabels})` : ''}.`
+        : 'Reference-frame rule: this is after the base frame; preserve continuity from the directly adjacent story beat.',
+      'Use the directly linked frame(s) and this frame script description to create a smooth current-frame image. Keep identity/outfit consistent, but do not copy the reference-frame pose, expression, position, or composition exactly.',
       'Show only the current second state with a clear change: action progress, body position, hand/prop state, gaze, expression, or scene transition.'
     ].join('\n')
     : ''
@@ -436,7 +432,7 @@ export function buildStoryboardHardConstraints(params: {
       'ABSOLUTE CONSTRAINTS (must follow):',
       '- No text in image (no subtitles/labels/numbers/watermarks/symbols).',
       '- Output exactly ONE frame (no collage / no multi-panel).',
-      '- Do NOT include duplicated identical characters (no clones of the same person with identical appearance in the same frame).',
+      '- In multi-person or crowd scenes, every visible person must have a distinct face. Do NOT generate multiple people with the same face, cloned facial features, or repeated identity in the same shot.',
       '- Characters must be fully and properly clothed, consistent with their reference outfit; no shirtless, semi-nude, exposed torso, revealing outfit, missing clothing, or torn-clothing exposure.',
       ratio ? `- Aspect ratio must be EXACT: ${ratio}.` : null,
       hasRefs ? '- Match reference images for identity, outfit, style, and scene continuity; do NOT copy pose/composition exactly, and do NOT draw any text from references.' : null,
@@ -448,7 +444,7 @@ export function buildStoryboardHardConstraints(params: {
     '【强制规则 - 必须遵守】',
     '- 画面中绝对禁止出现任何文字（字幕/标签/编号/水印/符号）。',
     '- 只生成一张镜头画面（禁止拼图/多镜头/多格）。',
-    '- 禁止在同一个镜头中出现“形象完全一样的人”（禁止克隆同一人物外貌/服装/发型完全一致的多个个体）。',
+    '- 多人或一群人的场景里，每个可见人物必须是不同的脸；禁止在同一个镜头中出现同一张脸、重复五官模板、克隆脸或看起来像同一个人的多个个体。',
     '- 人物必须衣着完整、服饰得体，并与角色参考图/设定服装一致；禁止半裸、裸露上身、暴露服装、缺少衣服、衣物破损导致裸露。',
     ratio ? `- 画面比例必须严格为：${ratio}` : null,
     hasRefs ? '- 有参考图时：外貌、服饰、画风、场景连续性需与参考图一致；禁止原样复制参考图姿势/构图；参考图上的文字标签仅供识别，禁止画入图中。' : null,
@@ -644,19 +640,12 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     locale: job.data.locale === 'en' ? 'en' : 'zh',
   })
 
-  // 在启用“精炼 / 使用画面描述”时，把关键的限制性规则追加在提示词末尾，
-  // 防止模型乱加文字/拼图/比例跑偏。该规则应对任意模型均适用。
-  const shouldAppendHardConstraints =
-    modelConfig.localStoryboardPromptRefineEnabled === true
-    || modelConfig.localStoryboardUsePanelDescriptionEnabled === true
-  const hardConstraints = shouldAppendHardConstraints
-    ? buildStoryboardHardConstraints({
-      locale: job.data.locale,
-      aspectRatio,
-      styleText: artStyle || '',
-      referenceImagesCount: normalizedRefs.length,
-    })
-    : ''
+  const hardConstraints = buildStoryboardHardConstraints({
+    locale: job.data.locale,
+    aspectRatio,
+    styleText: artStyle || '',
+    referenceImagesCount: normalizedRefs.length,
+  })
 
   const sortedFrames = Array.isArray(panel.frames)
     ? [...panel.frames].sort((left, right) => left.frameIndex - right.frameIndex)

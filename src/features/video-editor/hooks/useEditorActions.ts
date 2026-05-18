@@ -43,10 +43,13 @@ export function createProjectFromPanels(
         // 查找匹配的配音（简单匹配：按索引）
         const matchedVoice = voiceLines?.[index]
 
+        const durationInFrames = Math.max(1, Math.round((panel.groupDurationSec || panel.duration || 3) * 30))
+
         return {
             id: `clip_${panel.id || panel.storyboardId}_${panel.panelIndex ?? index}`,
             src: (panel.lipSyncVideoUrl || panel.videoUrl)!,
-            durationInFrames: Math.max(1, Math.round((panel.groupDurationSec || panel.duration || 3) * 30)),
+            durationInFrames,
+            originalDurationInFrames: durationInFrames,
             attachment: {
                 audio: matchedVoice?.audioUrl ? {
                     src: matchedVoice.audioUrl,
@@ -58,10 +61,7 @@ export function createProjectFromPanels(
                     style: 'default' as const
                 } : undefined
             },
-            transition: index < videoPanels.length - 1 ? {
-                type: 'dissolve' as const,
-                durationInFrames: 15 // 0.5s @ 30fps
-            } : undefined,
+            transition: undefined,
             metadata: {
                 panelId: panel.id || `${panel.storyboardId}-${panel.panelIndex ?? index}`,
                 storyboardId: panel.storyboardId,

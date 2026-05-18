@@ -7,7 +7,7 @@ import { AppIcon } from '@/components/ui/icons'
 import { useEditorState } from '../hooks/useEditorState'
 import { createProjectFromPanels, useEditorActions } from '../hooks/useEditorActions'
 import type { VideoEditorProject } from '../types/editor.types'
-import { calculateTimelineDuration, framesToTime } from '../utils/time-utils'
+import { calculateTimelineDuration, computeClipPositions, framesToTime } from '../utils/time-utils'
 import { RemotionPreview } from './Preview'
 import { Timeline } from './Timeline'
 import { TransitionPicker, TransitionType } from './TransitionPicker'
@@ -80,9 +80,13 @@ export function VideoEditorStage({
         project,
         timelineState,
         isDirty,
+        canUndo,
+        canRedo,
         removeClip,
         updateClip,
         reorderClips,
+        splitClipAtFrame,
+        restoreClipTrim,
         play,
         pause,
         seek,
@@ -90,6 +94,8 @@ export function VideoEditorStage({
         setZoom,
         markSaved,
         setProject,
+        undo,
+        redo,
     } = useEditorState({ episodeId, initialProject })
 
     const { saveProject } = useEditorActions({ projectId, episodeId })
@@ -98,11 +104,31 @@ export function VideoEditorStage({
     const [isExporting, setIsExporting] = useState(false)
     const [isLibraryOpen, setIsLibraryOpen] = useState(false)
     const [toneMode, setToneMode] = useState<EditorToneMode>('soft')
+    const [reversePreviewGeneratingClipId, setReversePreviewGeneratingClipId] = useState<string | null>(null)
 
     const totalDuration = calculateTimelineDuration(project.timeline)
     const totalTime = framesToTime(totalDuration, project.config.fps)
     const currentTime = framesToTime(timelineState.currentFrame, project.config.fps)
     const selectedClip = project.timeline.find(c => c.id === timelineState.selectedClipId)
+    const computedClips = useMemo(() => computeClipPositions(project.timeline), [project.timeline])
+    const selectedComputedClip = computedClips.find((clip) => clip.id === timelineState.selectedClipId)
+    const selectedClipLocalFrame = selectedComputedClip
+        ? Math.max(0, Math.min(selectedComputedClip.durationInFrames, timelineState.currentFrame - selectedComputedClip.startFrame))
+        : 0
+    const minSplitFrames = Math.max(6, Math.round(project.config.fps * 0.2))
+    const canSplitSelectedClip = Boolean(
+        selectedClip
+        && selectedComputedClip
+        && selectedClipLocalFrame >= minSplitFrames
+        && selectedComputedClip.durationInFrames - selectedClipLocalFrame >= minSplitFrames
+    )
+    const isSelectedClipTrimmed = Boolean(
+        selectedClip?.trim
+        && (
+            selectedClip.trim.from > 0
+            || selectedClip.trim.to < (selectedClip.originalDurationInFrames || selectedClip.durationInFrames)
+        )
+    )
     const generatedSourceCount = useMemo(
         () => sourcePanels.filter((panel) => panel.lipSyncVideoUrl || panel.videoUrl).length,
         [sourcePanels],
@@ -170,6 +196,104 @@ export function VideoEditorStage({
             bgmTrack: previous.bgmTrack,
         }))
         setStatusMessage(`已按成片顺序生成 ${nextProject.timeline.length} 个片段`)
+    }
+
+    const handleClearAllTransitions = () => {
+        setProject((previous) => ({
+            ...previous,
+            timeline: previous.timeline.map((clip) => ({
+                ...clip,
+                transition: undefined,
+            })),
+        }))
+        setStatusMessage('已取消当前时间线全部转场')
+    }
+
+    const handleSplitSelectedClip = () => {
+        if (!selectedClip || !selectedComputedClip || !canSplitSelectedClip) {
+            setStatusMessage('请选择片段中间位置再分割，切点不能太靠近片段开头或结尾')
+            return
+        }
+        const nextClipId = splitClipAtFrame(selectedClip.id, selectedClipLocalFrame, minSplitFrames)
+        if (nextClipId) selectClip(nextClipId)
+        setStatusMessage('已按当前播放头分割片段，可继续撤销还原')
+    }
+
+    const handleRestoreSelectedClip = () => {
+        if (!selectedClip) return
+        restoreClipTrim(selectedClip.id)
+        setStatusMessage('已还原当前片段为原始完整素材，可继续撤销')
+    }
+
+    const handleToggleReverseSelectedClip = async () => {
+        if (!selectedClip) return
+        const reverse = !selectedClip.playback?.reverse
+        if (!reverse) {
+            updateClip(selectedClip.id, {
+                playback: {
+                    ...selectedClip.playback,
+                    reverse: false,
+                },
+            })
+            setStatusMessage('已取消当前片段倒放')
+            return
+        }
+
+        updateClip(selectedClip.id, {
+            playback: {
+                ...selectedClip.playback,
+                reverse: true,
+            },
+        })
+        setStatusMessage('已设置当前片段倒放，正在生成快版倒放预览...')
+
+        if (selectedClip.playback?.reversePreviewUrl) return
+
+        setReversePreviewGeneratingClipId(selectedClip.id)
+        try {
+            const response = await fetch(`/api/novel-promotion/${projectId}/editor/reverse-preview`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    src: selectedClip.src,
+                    fps: project.config.fps,
+                    durationInFrames: selectedClip.durationInFrames,
+                    trim: selectedClip.trim,
+                }),
+            })
+            if (!response.ok) {
+                const text = await response.text().catch(() => '')
+                throw new Error(text || '倒放预览生成失败')
+            }
+            const data = await response.json() as { url?: string }
+            if (data.url) {
+                updateClip(selectedClip.id, {
+                    playback: {
+                        ...selectedClip.playback,
+                        reverse: true,
+                        reversePreviewUrl: data.url,
+                    },
+                })
+                setStatusMessage('倒放预览已生成，当前片段可直接预览倒放效果')
+            }
+        } catch (error) {
+            _ulogError('Reverse preview failed:', error)
+            setStatusMessage(error instanceof Error ? error.message : '倒放预览生成失败，最终导出仍会倒放')
+        } finally {
+            setReversePreviewGeneratingClipId(null)
+        }
+    }
+
+    const handleToggleMuteSelectedClip = () => {
+        if (!selectedClip) return
+        const muted = !selectedClip.playback?.muted
+        updateClip(selectedClip.id, {
+            playback: {
+                ...selectedClip.playback,
+                muted,
+            },
+        })
+        setStatusMessage(muted ? '已静音当前片段' : '已取消当前片段静音')
     }
 
     const handleSavePrompt = async () => {
@@ -295,6 +419,26 @@ export function VideoEditorStage({
                     {currentTime} / {totalTime}
                 </span>
 
+                <button
+                    type="button"
+                    onClick={undo}
+                    disabled={!canUndo}
+                    className="glass-btn-base glass-btn-secondary px-3 py-2 disabled:opacity-50"
+                    title="撤销上一步剪辑操作"
+                >
+                    撤销
+                </button>
+
+                <button
+                    type="button"
+                    onClick={redo}
+                    disabled={!canRedo}
+                    className="glass-btn-base glass-btn-secondary px-3 py-2 disabled:opacity-50"
+                    title="重做撤销的剪辑操作"
+                >
+                    重做
+                </button>
+
                 <div
                     style={{
                         display: 'flex',
@@ -344,6 +488,15 @@ export function VideoEditorStage({
                     className="glass-btn-base glass-btn-secondary px-4 py-2"
                 >
                     同步成片片段 {generatedSourceCount}
+                </button>
+
+                <button
+                    type="button"
+                    onClick={handleClearAllTransitions}
+                    disabled={project.timeline.length === 0}
+                    className="glass-btn-base glass-btn-secondary px-4 py-2 disabled:opacity-50"
+                >
+                    取消全部转场
                 </button>
 
                 <button
@@ -483,6 +636,9 @@ export function VideoEditorStage({
                         <button
                             onClick={() => timelineState.playing ? pause() : play()}
                             style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                                 background: 'var(--glass-accent-from)',
                                 border: 'none',
                                 color: 'var(--glass-text-on-accent)',
@@ -490,7 +646,8 @@ export function VideoEditorStage({
                                 width: '40px',
                                 height: '40px',
                                 borderRadius: '50%',
-                                fontSize: '18px'
+                                padding: 0,
+                                lineHeight: 1,
                             }}
                         >
                             {timelineState.playing
@@ -527,6 +684,57 @@ export function VideoEditorStage({
                                 <p style={{ margin: '0 0 8px 0' }}>
                                     <span style={{ color: 'var(--glass-text-secondary)' }}>{t('editor.right.durationLabel')}</span> {framesToTime(selectedClip.durationInFrames, project.config.fps)}
                                 </p>
+                                <p style={{ margin: '0 0 8px 0' }}>
+                                    <span style={{ color: 'var(--glass-text-secondary)' }}>素材范围：</span>{' '}
+                                    {framesToTime(selectedClip.trim?.from || 0, project.config.fps)} - {framesToTime(selectedClip.trim?.to || selectedClip.originalDurationInFrames || selectedClip.durationInFrames, project.config.fps)}
+                                </p>
+                                <p style={{ margin: '0 0 8px 0' }}>
+                                    <span style={{ color: 'var(--glass-text-secondary)' }}>当前切点：</span>{' '}
+                                    {framesToTime(selectedClipLocalFrame, project.config.fps)}
+                                </p>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                <button
+                                    type="button"
+                                    onClick={handleSplitSelectedClip}
+                                    disabled={!canSplitSelectedClip}
+                                    className="glass-btn-base glass-btn-tone-info px-3 py-2 text-xs disabled:opacity-50"
+                                    title="在当前播放头位置分割选中片段"
+                                >
+                                    分割片段
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleRestoreSelectedClip}
+                                    disabled={!isSelectedClipTrimmed}
+                                    className="glass-btn-base glass-btn-secondary px-3 py-2 text-xs disabled:opacity-50"
+                                    title="还原当前片段为完整原素材"
+                                >
+                                    还原片段
+                                </button>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                <button
+                                    type="button"
+                                    onClick={() => { void handleToggleReverseSelectedClip() }}
+                                    disabled={reversePreviewGeneratingClipId === selectedClip.id}
+                                    className={`glass-btn-base px-3 py-2 text-xs disabled:opacity-50 ${selectedClip.playback?.reverse ? 'glass-btn-tone-warning' : 'glass-btn-secondary'}`}
+                                    title="让当前片段倒过来播放"
+                                >
+                                    {reversePreviewGeneratingClipId === selectedClip.id
+                                        ? '生成预览...'
+                                        : selectedClip.playback?.reverse ? '取消倒放' : '倒放片段'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleToggleMuteSelectedClip}
+                                    className={`glass-btn-base px-3 py-2 text-xs ${selectedClip.playback?.muted ? 'glass-btn-tone-warning' : 'glass-btn-secondary'}`}
+                                    title="静音当前片段的视频原声和附属音频"
+                                >
+                                    {selectedClip.playback?.muted ? '取消静音' : '静音片段'}
+                                </button>
                             </div>
 
                             <div>

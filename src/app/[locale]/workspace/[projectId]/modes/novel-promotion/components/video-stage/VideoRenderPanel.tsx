@@ -203,6 +203,7 @@ export default function VideoRenderPanel({
                 flMissingCapabilityFields={flMissingCapabilityFields}
                 flCustomPrompt={flCustomPrompts.get(panelKey) || panel.firstLastFramePrompt || ''}
                 defaultFlPrompt={defaultFlPrompt}
+                promptField={promptField}
                 localPrompt={localPrompt}
                 isSavingPrompt={isSavingPrompt}
                 onUpdateLocalPrompt={(value) => {

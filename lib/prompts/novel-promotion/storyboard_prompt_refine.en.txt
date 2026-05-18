@@ -9,7 +9,7 @@ CONTENT RULES:
 - If `video_prompt` contains timeline ranges, camera movement, dialogue, or background music, extract exactly one drawable still moment. Do NOT merge multiple time segments or sequential actions into one image.
 - If this is a group first frame or frame_time_sec=0, output the original state before the video action starts, not the completed result of later actions.
 - Characters must be fully and properly clothed, consistent with character settings/reference images. Do not output shirtless, semi-nude, exposed torso, revealing outfit, missing clothing, or torn-clothing exposure.
-- Do NOT include camera movement instructions, timeline markers, subtitles/dialogue text, background music, lip-sync, or video quality phrases such as no flicker / no face collapse / no limb deformity.
+- Do NOT include camera movement instructions, timeline markers, subtitles/dialogue text, background music, or video quality phrases such as no flicker / no face collapse / no limb deformity.
 - The output must describe one instantaneous pose, one expression, one composition, and one lighting setup.
 - Ignore workflow/process/rule lists unless they affect the image (e.g. no text in image, aspect ratio, character positions).
 - If reference_images_count > 0: explicitly say "match the reference images" (appearance/style/composition).

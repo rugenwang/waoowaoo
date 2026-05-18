@@ -39,6 +39,7 @@ interface StoryboardPanelListProps {
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
   onDeleteFrame?: (panelId: string, frameId: string) => void | Promise<void>
+  onSplitFrame?: (frameId: string, placement: 'before' | 'after') => void | Promise<void>
   onOpenEditModal: (panelIndex: number) => void
   onOpenAIDataModal: (panelIndex: number) => void
   onSelectPanelCandidateIndex: (panelId: string, index: number) => void
@@ -82,6 +83,7 @@ export default function StoryboardPanelList({
   onUpdateFrameTime,
   onUpdateFramePrompt,
   onDeleteFrame,
+  onSplitFrame,
   onOpenEditModal,
   onOpenAIDataModal,
   onSelectPanelCandidateIndex,
@@ -169,6 +171,7 @@ export default function StoryboardPanelList({
               onUpdateFrameTime={onUpdateFrameTime}
               onUpdateFramePrompt={onUpdateFramePrompt}
               onDeleteFrame={onDeleteFrame}
+              onSplitFrame={onSplitFrame}
               onOpenEditModal={() => onOpenEditModal(index)}
               onOpenAIDataModal={() => onOpenAIDataModal(index)}
               onSelectCandidateIndex={onSelectPanelCandidateIndex}

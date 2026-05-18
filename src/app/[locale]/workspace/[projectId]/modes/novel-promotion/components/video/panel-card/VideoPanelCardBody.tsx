@@ -1,11 +1,15 @@
 import React, { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
+import RegenerateVideoPromptModal from '../../RegenerateVideoPromptModal'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapabilityDropdown'
 import { AppIcon } from '@/components/ui/icons'
 import type { VideoPanelRuntime } from './hooks/useVideoPanelActions'
 import { useUpdateProjectPanelDuration } from '@/lib/query/mutations/useVideoMutations'
+import { useRegenerateProjectVideoPrompt } from '@/lib/query/hooks'
+import { shouldShowError } from '@/lib/error-utils'
+import { extractErrorMessage } from '@/lib/errors/extract'
 
 interface VideoPanelCardBodyProps {
   runtime: VideoPanelRuntime
@@ -29,9 +33,13 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
   } = runtime
 
   const updateDurationMutation = useUpdateProjectPanelDuration(runtime.layout.projectId)
+  const regenerateVideoPrompt = useRegenerateProjectVideoPrompt(runtime.layout.projectId)
   const currentDuration = panel.textPanel?.duration
   const [isEditingDuration, setIsEditingDuration] = useState(false)
   const [editingDuration, setEditingDuration] = useState<string>('')
+  const [promptModalOpen, setPromptModalOpen] = useState(false)
+  const [promptRequirement, setPromptRequirement] = useState('')
+  const [promptCandidate, setPromptCandidate] = useState<string | null>(null)
   const durationSuffix = useMemo(() => t('promptModal.duration'), [t])
   const inheritedFirstLastGenerationOptions = useMemo(
     () => {
@@ -100,6 +108,42 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
   const showsOutgoingLinkBadge = layout.isLinked && !!layout.nextPanel
   const showsPromptEditor = !layout.isLastFrame || layout.isLinked
   const showsFirstLastFrameActions = layout.isLinked && !!layout.nextPanel
+  const handleGenerateVideoPromptCandidate = async () => {
+    try {
+      const result = await regenerateVideoPrompt.mutateAsync({
+        panelId: panel.panelId,
+        storyboardId: panel.storyboardId,
+        panelIndex: panel.panelIndex,
+        field: layout.promptField,
+        additionalRequirement: promptRequirement,
+      })
+      const nextPrompt = result.prompt.trim()
+      if (!nextPrompt) throw new Error('视频提示词为空')
+      setPromptCandidate(nextPrompt)
+    } catch (error: unknown) {
+      if (shouldShowError(error)) {
+        alert(extractErrorMessage(error, '重新生成视频提示词失败'))
+      }
+    }
+  }
+
+  const handleUseVideoPromptCandidate = async () => {
+    const nextPrompt = (promptCandidate || '').trim()
+    if (!nextPrompt) return
+    try {
+      await promptEditor.savePromptValue(nextPrompt)
+      if (layout.promptField === 'firstLastFramePrompt') {
+        actions.onFlCustomPromptChange(panelKey, nextPrompt)
+      }
+      setPromptRequirement('')
+      setPromptCandidate(null)
+      setPromptModalOpen(false)
+    } catch (error: unknown) {
+      if (shouldShowError(error)) {
+        alert(extractErrorMessage(error, '保存视频提示词失败'))
+      }
+    }
+  }
 
   return (
     <div className="p-4 space-y-2">
@@ -169,10 +213,21 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
           <>
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs font-medium text-[var(--glass-text-tertiary)]">{t('promptModal.promptLabel')}</span>
-              <button onClick={promptEditor.handleStartEdit} className="inline-flex items-center gap-1 text-[11px] text-[var(--glass-text-tertiary)] hover:text-[var(--glass-tone-info-fg)] transition-colors p-0.5">
-                <AppIcon name="edit" className="w-3.5 h-3.5" />
-                {t('panelCard.edit')}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPromptModalOpen(true)}
+                  disabled={regenerateVideoPrompt.isPending || promptEditor.isSavingPrompt}
+                  className="inline-flex items-center gap-1 p-0.5 text-[11px] text-[var(--glass-text-tertiary)] transition-colors hover:text-[var(--glass-tone-info-fg)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <AppIcon name={regenerateVideoPrompt.isPending ? 'refresh' : 'sparklesAlt'} className={`h-3.5 w-3.5 ${regenerateVideoPrompt.isPending ? 'animate-spin' : ''}`} />
+                  重生成
+                </button>
+                <button onClick={promptEditor.handleStartEdit} className="inline-flex items-center gap-1 text-[11px] text-[var(--glass-text-tertiary)] hover:text-[var(--glass-tone-info-fg)] transition-colors p-0.5">
+                  <AppIcon name="edit" className="w-3.5 h-3.5" />
+                  {t('panelCard.edit')}
+                </button>
+              </div>
             </div>
 
             <button
@@ -441,6 +496,23 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
           </>
         )}
       </div>
+      <RegenerateVideoPromptModal
+        open={promptModalOpen}
+        title="重新生成视频提示词"
+              description="会沿用当前成片视频提示词格式要求，可补充本次想叠加的音乐、运镜、台词或动作要求。"
+              value={promptRequirement}
+              currentPrompt={promptEditor.localPrompt}
+              candidatePrompt={promptCandidate}
+              isSubmitting={regenerateVideoPrompt.isPending}
+              isSaving={promptEditor.isSavingPrompt}
+              onChange={setPromptRequirement}
+              onClose={() => {
+                if (regenerateVideoPrompt.isPending || promptEditor.isSavingPrompt) return
+                setPromptModalOpen(false)
+              }}
+              onGenerate={() => void handleGenerateVideoPromptCandidate()}
+              onUseCandidate={() => void handleUseVideoPromptCandidate()}
+            />
     </div>
   )
 }

@@ -25,6 +25,13 @@ export function usePanelPromptEditor({
     await onSavePrompt(editingPrompt)
   }, [editingPrompt, onSavePrompt, onUpdateLocalPrompt])
 
+  const savePromptValue = useCallback(async (value: string) => {
+    onUpdateLocalPrompt(value)
+    setEditingPrompt(value)
+    setIsEditing(false)
+    await onSavePrompt(value)
+  }, [onSavePrompt, onUpdateLocalPrompt])
+
   const handleCancelEdit = useCallback(() => {
     setEditingPrompt(localPrompt)
     setIsEditing(false)
@@ -36,6 +43,7 @@ export function usePanelPromptEditor({
     setEditingPrompt,
     handleStartEdit,
     handleSave,
+    savePromptValue,
     handleCancelEdit,
   }
 }
