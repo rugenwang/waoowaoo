@@ -134,23 +134,35 @@ export const POST = apiHandler(async (
     },
   })
 
-  const result = await submitTask({
-    userId: session.user.id,
-    locale,
-    requestId: getRequestId(request),
-    projectId,
-    type: TASK_TYPE.IMAGE_PANEL,
-    targetType: 'NovelPromotionPanelFrame',
-    targetId: frame.id,
-    payload: withTaskUiPayload(billingPayload, {
-      intent: 'regenerate',
-      hasOutputAtStart: hasFrameImage(frame),
-      targetFrameId: frame.id,
-      targetFrameIndex: frame.frameIndex,
-    }),
-    dedupeKey: `image_panel_frame:${frame.id}`,
-    billingInfo: buildDefaultTaskBillingInfo(TASK_TYPE.IMAGE_PANEL, billingPayload),
-  })
+  let result: Awaited<ReturnType<typeof submitTask>>
+  try {
+    result = await submitTask({
+      userId: session.user.id,
+      locale,
+      requestId: getRequestId(request),
+      projectId,
+      type: TASK_TYPE.IMAGE_PANEL,
+      targetType: 'NovelPromotionPanelFrame',
+      targetId: frame.id,
+      payload: withTaskUiPayload(billingPayload, {
+        intent: 'regenerate',
+        hasOutputAtStart: hasFrameImage(frame),
+        targetFrameId: frame.id,
+        targetFrameIndex: frame.frameIndex,
+      }),
+      dedupeKey: `image_panel_frame:${frame.id}`,
+      billingInfo: buildDefaultTaskBillingInfo(TASK_TYPE.IMAGE_PANEL, billingPayload),
+    })
+  } catch (error) {
+    await prisma.novelPromotionPanelFrame.update({
+      where: { id: frame.id },
+      data: {
+        generationStatus: 'failed',
+        errorMessage: error instanceof Error ? error.message : String(error),
+      },
+    })
+    throw error
+  }
 
   return NextResponse.json(result)
 })

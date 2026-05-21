@@ -16,6 +16,7 @@ Rules:
 3. Output in English only.
 4. No expression, action, background, or props.
 5. No skin color, eye color, or lip color.
+6. Do not include distinctive detachable props or carried/worn item assets: backpack, bag, watch, ring, bracelet, weapon, phone, book, umbrella, cup, camera, key, suitcase, magical item, token, handheld item, or carried item. These belong to prop assets, not character appearance.
 
 Output format:
 Return JSON only. ⚠️ JSON SAFETY: All quotation marks MUST be converted to corner brackets「」in JSON string values:

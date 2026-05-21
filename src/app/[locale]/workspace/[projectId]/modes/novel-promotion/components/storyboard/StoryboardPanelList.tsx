@@ -6,6 +6,7 @@ import { StoryboardPanel } from './hooks/useStoryboardState'
 import { PanelEditData } from '../PanelEditForm'
 import { ASPECT_RATIO_CONFIGS } from '@/lib/constants'
 import PanelCard from './PanelCard'
+import type { PreviousPanelImageOption } from './PanelCard'
 import type { PanelSaveState } from './hooks/usePanelCrudActions'
 import { useTaskQueue } from '@/lib/task-queue'
 
@@ -29,12 +30,16 @@ interface StoryboardPanelListProps {
   onPanelDelete: (panelId: string) => void
   onOpenCharacterPicker: (panelId: string) => void
   onOpenLocationPicker: (panelId: string) => void
+  onOpenPropPicker: (panelId: string) => void
   onRemoveCharacter: (panel: StoryboardPanel, index: number) => void
   onRemoveLocation: (panel: StoryboardPanel) => void
+  onRemoveProp: (panel: StoryboardPanel, index: number) => void
   onRetryPanelSave: (panelId: string) => void
   onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean) => void
   onUploadImage?: (panelId: string, file: File) => void | Promise<void>
+  onUploadImageFromSource?: (panelId: string, sourceImageUrl: string) => void | Promise<void>
   onUploadFrameImage?: (frameId: string, file: File) => void | Promise<void>
+  onUploadFrameImageFromSource?: (frameId: string, sourceImageUrl: string) => void | Promise<void>
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
@@ -51,6 +56,7 @@ interface StoryboardPanelListProps {
   onDuplicatePanel: (panelId: string) => Promise<void>
   onVariant: (panelIndex: number) => void
   isInsertDisabled: (panelId: string) => boolean
+  previousPanelImageOptionsByPanelId?: Record<string, PreviousPanelImageOption[]>
 }
 
 export default function StoryboardPanelList({
@@ -73,12 +79,16 @@ export default function StoryboardPanelList({
   onPanelDelete,
   onOpenCharacterPicker,
   onOpenLocationPicker,
+  onOpenPropPicker,
   onRemoveCharacter,
   onRemoveLocation,
+  onRemoveProp,
   onRetryPanelSave,
   onRegeneratePanelImage,
   onUploadImage,
+  onUploadImageFromSource,
   onUploadFrameImage,
+  onUploadFrameImageFromSource,
   onRegenerateFrameImage,
   onUpdateFrameTime,
   onUpdateFramePrompt,
@@ -95,6 +105,7 @@ export default function StoryboardPanelList({
   onDuplicatePanel,
   onVariant,
   isInsertDisabled,
+  previousPanelImageOptionsByPanelId,
 }: StoryboardPanelListProps) {
   const taskQueue = useTaskQueue()
   const queuedPanelIds = useMemo(() => {
@@ -161,12 +172,16 @@ export default function StoryboardPanelList({
               onDelete={() => onPanelDelete(panel.id)}
               onOpenCharacterPicker={() => onOpenCharacterPicker(panel.id)}
               onOpenLocationPicker={() => onOpenLocationPicker(panel.id)}
+              onOpenPropPicker={() => onOpenPropPicker(panel.id)}
               onRetrySave={() => onRetryPanelSave(panel.id)}
               onRemoveCharacter={(characterIndex) => onRemoveCharacter(panel, characterIndex)}
               onRemoveLocation={() => onRemoveLocation(panel)}
+              onRemoveProp={(propIndex) => onRemoveProp(panel, propIndex)}
               onRegeneratePanelImage={onRegeneratePanelImage}
               onUploadImage={onUploadImage}
+              onUploadImageFromSource={onUploadImageFromSource}
               onUploadFrameImage={onUploadFrameImage}
+              onUploadFrameImageFromSource={onUploadFrameImageFromSource}
               onRegenerateFrameImage={onRegenerateFrameImage}
               onUpdateFrameTime={onUpdateFrameTime}
               onUpdateFramePrompt={onUpdateFramePrompt}
@@ -183,6 +198,7 @@ export default function StoryboardPanelList({
               onDuplicatePanel={() => onDuplicatePanel(panel.id)}
               onVariant={() => onVariant(index)}
               isInsertDisabled={isInsertDisabled(panel.id)}
+              previousPanelImageOptions={previousPanelImageOptionsByPanelId?.[panel.id] || []}
             />
           </div>
         )

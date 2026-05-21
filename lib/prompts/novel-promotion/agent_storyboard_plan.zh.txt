@@ -26,8 +26,9 @@
 2. 每个分镜必须包含：
   - panel_number: 分镜序号（1, 2, 3...）
   - description: 画面描述（人物动作、场景元素、构图要点）
-   - characters: [{name: "角色名", appearance: "形象名", slot: "场景固定位置描述"}]
-   - location: 场景名称（从资产库选择）
+	   - characters: [{name: "角色名", appearance: "形象名", slot: "场景固定位置描述"}]
+	   - props: 本分镜可见或被互动的道具资产名称数组；必须从道具资产中选择，没有则 []
+	   - location: 场景名称（从资产库选择）
    - scene_type: daily/emotion/action/epic/suspense
    - source_text: 对应原文片段 ⚠️ 必填，不得为空
    - panel_mode: "single" 或 "group"
@@ -53,9 +54,22 @@
    - 转场/运镜密集程度判断：场景变化、闪回梦境、从远到近、多次切换、环绕/俯冲/穿梭/甩镜/跟镜等越多，frames 越多。
    - 如果不是超高密度动作，20 秒内容需要超过 8 个关键状态时优先拆成两个顶层 group；如果明确是超高密度动作/密集运镜，可保留一个 group 并输出最多 20 帧。
    - 一个 group 是一个顶层分镜，内部 frames 表示该组视频中的不同关键时刻；不要把同一连续动作拆成多个顶层分镜
-   - group.frames 每帧包含 frame_index、frame_time_sec、frame_role、image_prompt、video_prompt、dependency_frame_ids
-   - frame_time_sec 从 0 开始递增，不能超过 duration_sec；后续帧如依赖前面画面，dependency_frame_ids 只能引用更早 frame_index
-   - 第一帧是这组视频的原始状态/开场状态，不要写成事件已经发生完后的结果
+	   - group.frames 每帧包含 frame_index、frame_time_sec、frame_role、image_prompt、video_prompt、dependency_frame_ids
+	   - frame_time_sec 从 0 开始递增，不能超过 duration_sec；后续帧如依赖前面画面，dependency_frame_ids 只能引用更早 frame_index；若本顶层分镜第一帧需要承接上一顶层分镜尾帧，可在 frame_index=0 的 dependency_frame_ids 中写入 "FP"，表示参考上一分镜尾帧
+	   - 第一帧是这组视频的原始状态/开场状态，不要写成事件已经发生完后的结果
+
+2.2 道具资产关联规则：
+   - props 必须记录本分镜画面里可见、被手持、被背负、被递交、被争夺、被打开/关闭、被使用或有剧情识别价值的道具资产。
+   - 道具只能从 props_description/道具资产库中选择名称；不要凭空新增不存在的道具名。
+   - 背包、包、手表、戒指、手链、手机、书、伞、杯子、相机、钥匙、行李箱、武器、法器、信物、文件夹等有明显特征的物品，必须作为 props 输出，不要揉进角色外貌描述。
+   - 如果 source_text 中出现了物品互动，即使人物描述里没有写，也要在对应分镜 props 中关联该道具。
+   - 没有任何可见/互动道具时输出 props: []。
+
+2.3 跨分镜尾帧参考 FP 规则：
+   - FP 只允许出现在每个顶层分镜的第一帧 frame_index=0 的 dependency_frame_ids 中。
+   - 当当前分镜需要承接上一分镜最后状态（同一人物位置、姿态、道具状态、场景光线或动作连续）时，由你决定加入 "FP"。
+   - 加入 "FP" 后，reference_policy 必须说明“参考上一分镜尾帧，保持人物/服装/场景/道具状态连贯，但不要复制构图”。
+   - 如果当前分镜是全新场景、时间跳跃、梦境/闪回或不需要承接上一镜，则不要使用 FP。
 
 3. source_text 规则（极其重要）：
    ⚠️ 每个分镜都必须包含，不得为null或空字符串

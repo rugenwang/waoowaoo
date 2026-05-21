@@ -9,7 +9,7 @@ import { useStoryboardAiDataRuntime } from './useStoryboardAiDataRuntime'
 
 interface AssetPickerPanelRef {
   panelId: string
-  type: 'character' | 'location'
+  type: 'character' | 'location' | 'prop'
 }
 
 interface AIDataPanelRef {
@@ -45,6 +45,7 @@ interface UseStoryboardModalRuntimeParams {
   handleEditSubmit: (prompt: string, images: string[], assets: SelectedAsset[]) => Promise<void>
   handleAddCharacter: (characterName: string, appearance: string) => void
   handleSetLocation: (locationName: string) => void
+  handleAddProp: (propName: string) => void
   updatePhotographyPlanMutation: PhotographyPlanMutation
   updatePanelActingNotesMutation: ActingNotesMutation
 }
@@ -91,6 +92,7 @@ export function useStoryboardModalRuntime({
   handleEditSubmit,
   handleAddCharacter,
   handleSetLocation,
+  handleAddProp,
   updatePhotographyPlanMutation,
   updatePanelActingNotesMutation,
 }: UseStoryboardModalRuntimeParams) {
@@ -137,7 +139,9 @@ export function useStoryboardModalRuntime({
     closeAssetPicker: () => setAssetPickerPanel(null),
     handleAddCharacter,
     handleSetLocation,
+    handleAddProp,
     hasCharacterPicker: assetPickerPanel?.type === 'character',
     hasLocationPicker: assetPickerPanel?.type === 'location',
+    hasPropPicker: assetPickerPanel?.type === 'prop',
   }
 }

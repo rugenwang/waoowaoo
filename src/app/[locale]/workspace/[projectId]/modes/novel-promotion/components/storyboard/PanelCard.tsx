@@ -11,13 +11,21 @@ import { StoryboardPanel } from './hooks/useStoryboardState'
 import { GlassSurface } from '@/components/ui/primitives'
 import { AppIcon } from '@/components/ui/icons'
 import { useRefineProjectStoryboardPrompt, useRegenerateProjectVideoPrompt, useUpdateProjectPanelVideoPrompt } from '@/lib/query/hooks'
+import { useTaskTargetStateMap } from '@/lib/query/hooks/useTaskTargetStateMap'
 import { shouldShowError } from '@/lib/error-utils'
 import { extractErrorMessage } from '@/lib/errors/extract'
+import { toDisplayImageUrl } from '@/lib/media/image-url'
 import type { NovelPromotionPanelFrame } from '@/types/project'
 
 interface PanelCandidateData {
   candidates: string[]
   selectedIndex: number
+}
+
+export interface PreviousPanelImageOption {
+  id: string
+  label: string
+  imageUrl: string
 }
 
 interface PanelCardProps {
@@ -42,12 +50,16 @@ interface PanelCardProps {
   onDelete: () => void
   onOpenCharacterPicker: () => void
   onOpenLocationPicker: () => void
+  onOpenPropPicker: () => void
   onRetrySave?: () => void
   onRemoveCharacter: (index: number) => void
   onRemoveLocation: () => void
+  onRemoveProp: (index: number) => void
   onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean) => void
   onUploadImage?: (panelId: string, file: File) => void | Promise<void>
+  onUploadImageFromSource?: (panelId: string, sourceImageUrl: string) => void | Promise<void>
   onUploadFrameImage?: (frameId: string, file: File) => void | Promise<void>
+  onUploadFrameImageFromSource?: (frameId: string, sourceImageUrl: string) => void | Promise<void>
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
@@ -65,23 +77,30 @@ interface PanelCardProps {
   onDuplicatePanel?: () => void | Promise<void> // 复制到下一分镜
   onVariant?: () => void  // 生成镜头变体
   isInsertDisabled?: boolean  // 插入按钮是否禁用
+  previousPanelImageOptions?: PreviousPanelImageOption[]
 }
 
 function PanelFrameGrid({
+  projectId,
   panelId,
   frames,
+  videoRatio,
   onPreviewImage,
   onUploadFrameImage,
+  onPickPreviousImage,
   onRegenerateFrameImage,
   onUpdateFrameTime,
   onUpdateFramePrompt,
   onDeleteFrame,
   onSplitFrame,
 }: {
+  projectId: string
   panelId: string
   frames: NovelPromotionPanelFrame[]
+  videoRatio: string
   onPreviewImage?: (url: string) => void
   onUploadFrameImage?: (frameId: string, file: File) => void | Promise<void>
+  onPickPreviousImage?: (frame: NovelPromotionPanelFrame) => void
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
@@ -94,28 +113,53 @@ function PanelFrameGrid({
   const [savingFrameTimeIds, setSavingFrameTimeIds] = useState<Set<string>>(new Set())
   const [savingFramePromptIds, setSavingFramePromptIds] = useState<Set<string>>(new Set())
   const [splitFrameTarget, setSplitFrameTarget] = useState<NovelPromotionPanelFrame | null>(null)
+  const frameTaskStateMap = useTaskTargetStateMap(
+    projectId,
+    frames.map((frame) => ({
+      targetType: 'NovelPromotionPanelFrame',
+      targetId: frame.id,
+      types: ['image_panel'],
+    })),
+    { enabled: frames.length > 1, staleTime: 2000 },
+  )
   if (frames.length <= 1) return null
+  const [ratioWidth, ratioHeight] = videoRatio.split(':').map((value) => Number(value))
+  const isVerticalRatio = Number.isFinite(ratioWidth) && Number.isFinite(ratioHeight) && ratioHeight > ratioWidth
+  const frameAspectRatio = Number.isFinite(ratioWidth) && Number.isFinite(ratioHeight) && ratioWidth > 0 && ratioHeight > 0
+    ? `${ratioWidth} / ${ratioHeight}`
+    : '16 / 9'
 
-  const parseDependencies = (raw: string | null | undefined): number[] => {
-    if (!raw) return []
+  const parseDependencies = (raw: string | null | undefined): { frameIndexes: number[]; previousTail: boolean } => {
+    if (!raw) return { frameIndexes: [], previousTail: false }
     try {
       const parsed = JSON.parse(raw)
-      if (!Array.isArray(parsed)) return []
-      return parsed
-        .map((item) => {
-          const value = typeof item === 'number' ? item : typeof item === 'string' ? Number(item) : NaN
-          return Number.isFinite(value) ? Math.floor(value) : null
-        })
-        .filter((item): item is number => item !== null && item >= 0)
+      if (!Array.isArray(parsed)) return { frameIndexes: [], previousTail: false }
+      const frameIndexes: number[] = []
+      let previousTail = false
+      for (const item of parsed) {
+        if (typeof item === 'string' && item.trim().toUpperCase() === 'FP') {
+          previousTail = true
+          continue
+        }
+        const value = typeof item === 'number' ? item : typeof item === 'string' ? Number(item) : NaN
+        if (Number.isFinite(value) && value >= 0) {
+          frameIndexes.push(Math.floor(value))
+        }
+      }
+      return { frameIndexes, previousTail }
     } catch {
-      return []
+      return { frameIndexes: [], previousTail: false }
     }
   }
 
   const getRelationText = (frame: NovelPromotionPanelFrame) => {
-    const dependencyIndexes = parseDependencies(frame.dependencyFrameIds)
-    if (dependencyIndexes.length > 0) {
-      return `参考 ${dependencyIndexes.map((index) => `F${index + 1}`).join('、')}`
+    const dependencyPlan = parseDependencies(frame.dependencyFrameIds)
+    const labels = [
+      dependencyPlan.previousTail ? 'FP' : '',
+      ...dependencyPlan.frameIndexes.map((index) => `F${index + 1}`),
+    ].filter(Boolean)
+    if (labels.length > 0) {
+      return `参考 ${labels.join('、')}`
     }
     return frame.frameIndex === 0 ? '基础帧' : `承接 F${frame.frameIndex}`
   }
@@ -144,14 +188,33 @@ function PanelFrameGrid({
 
   const isStaleFrameProcessing = (frame: NovelPromotionPanelFrame) => {
     if (frame.generationStatus !== 'processing') return false
+    const taskPhase = frameTaskStateMap.getState('NovelPromotionPanelFrame', frame.id)?.phase || null
+    if (taskPhase === 'completed' || taskPhase === 'failed') return true
     const updatedAt = frame.updatedAt ? new Date(frame.updatedAt).getTime() : 0
     if (!Number.isFinite(updatedAt) || updatedAt <= 0) return false
+    if (taskPhase === 'idle' && frameTaskStateMap.isFetched) {
+      return Date.now() - updatedAt > 30 * 1000
+    }
     return Date.now() - updatedAt > 5 * 60 * 1000
+  }
+
+  const isFrameGenerationBusy = (frame: NovelPromotionPanelFrame) => {
+    if (frame.generationStatus !== 'processing') return false
+    const taskPhase = frameTaskStateMap.getState('NovelPromotionPanelFrame', frame.id)?.phase || null
+    if (taskPhase === 'queued' || taskPhase === 'processing') return true
+    if (taskPhase === 'completed' || taskPhase === 'failed') return false
+    const updatedAt = frame.updatedAt ? new Date(frame.updatedAt).getTime() : 0
+    if (!Number.isFinite(updatedAt) || updatedAt <= 0) return true
+    if (taskPhase === 'idle' && frameTaskStateMap.isFetched) {
+      return Date.now() - updatedAt <= 30 * 1000
+    }
+    return Date.now() - updatedAt <= 30 * 1000
   }
 
   const handleRegenerateFrame = (frame: NovelPromotionPanelFrame) => {
     if (!onRegenerateFrameImage) return
-    const missingDependencyIndexes = parseDependencies(frame.dependencyFrameIds)
+    const dependencyPlan = parseDependencies(frame.dependencyFrameIds)
+    const missingDependencyIndexes = dependencyPlan.frameIndexes
       .filter((dependencyIndex) => !hasFrameImage(frames.find((item) => item.frameIndex === dependencyIndex)))
     if (missingDependencyIndexes.length > 0) {
       alert(`请先生成关联帧 ${missingDependencyIndexes.map((index) => `F${index + 1}`).join('、')}，再重新生成 F${frame.frameIndex + 1}`)
@@ -365,26 +428,27 @@ function PanelFrameGrid({
           </div>
         ))}
       </div>
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+      <div className={`${isVerticalRatio ? 'flex gap-2 overflow-x-auto pb-1' : 'grid grid-cols-2 gap-2.5 sm:grid-cols-3'}`}>
         {frames.map((frame) => {
           const imageUrl = frame.imageUrl || ''
           const relationText = getRelationText(frame)
           const isFrameStaleProcessing = isStaleFrameProcessing(frame)
-          const isFrameBusy = frame.generationStatus === 'processing' && !isFrameStaleProcessing
+          const isFrameBusy = isFrameGenerationBusy(frame) && !isFrameStaleProcessing
           return (
             <div
               key={frame.id}
-              className="group/frame overflow-hidden rounded-[var(--glass-radius-md)] border border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-surface-strong)] text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[var(--glass-tone-info-fg)] hover:shadow-md"
+              className={`group/frame overflow-hidden rounded-[var(--glass-radius-md)] border border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-surface-strong)] text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[var(--glass-tone-info-fg)] hover:shadow-md ${isVerticalRatio ? 'w-[118px] shrink-0' : ''}`}
               title={frame.imagePrompt || frame.videoPrompt || undefined}
             >
-              <div className="relative aspect-video bg-[var(--glass-bg-muted)]">
+              <div className={`relative bg-[var(--glass-bg-muted)] ${isVerticalRatio ? 'w-full overflow-hidden rounded-t-[var(--glass-radius-md)]' : 'aspect-video'}`} style={isVerticalRatio ? { aspectRatio: frameAspectRatio } : undefined}>
                 <button
                   type="button"
-                  className="absolute inset-0 h-full w-full text-left"
+                  className={`group absolute inset-0 h-full w-full text-left ${imageUrl && onPreviewImage ? 'cursor-zoom-in' : 'cursor-default'}`}
                   onClick={() => {
                     if (imageUrl) onPreviewImage?.(imageUrl)
                   }}
                   aria-label={`预览关键帧 F${frame.frameIndex + 1}`}
+                  title={imageUrl && onPreviewImage ? `点击放大 F${frame.frameIndex + 1}` : undefined}
                 >
                   {imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -411,26 +475,26 @@ function PanelFrameGrid({
                     {frame.frameTimeSec}s
                   </div>
                 </div>
-                <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-90 transition sm:opacity-0 sm:group-hover/frame:opacity-100">
+                <div className={`absolute flex max-w-[calc(100%-12px)] flex-wrap items-center justify-end gap-1 opacity-90 transition sm:opacity-0 sm:group-hover/frame:opacity-100 ${isVerticalRatio ? 'bottom-1.5 right-1.5' : 'bottom-2 right-2'}`}>
                   {onRegenerateFrameImage ? (
                     <button
                       type="button"
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/45 bg-black/55 text-white shadow-sm backdrop-blur transition hover:bg-black/70 disabled:cursor-not-allowed disabled:opacity-60"
-                      title={`重新生成 F${frame.frameIndex + 1}${parseDependencies(frame.dependencyFrameIds).length > 0 ? '，会参考已生成的关联帧' : ''}`}
+                      className={`${isVerticalRatio ? 'h-6 w-6' : 'h-7 w-7'} inline-flex items-center justify-center rounded-full border border-white/45 bg-black/55 text-white shadow-sm backdrop-blur transition hover:bg-black/70 disabled:cursor-not-allowed disabled:opacity-60`}
+                      title={`重新生成 F${frame.frameIndex + 1}${getRelationText(frame).startsWith('参考') ? `，会${getRelationText(frame)}` : ''}`}
                       aria-label={`重新生成 F${frame.frameIndex + 1}`}
                       disabled={isFrameBusy}
                       onClick={() => handleRegenerateFrame(frame)}
                     >
-                      <AppIcon name="refresh" size={13} className={isFrameBusy ? 'animate-spin' : undefined} />
+                      <AppIcon name="refresh" size={isVerticalRatio ? 12 : 13} className={isFrameBusy ? 'animate-spin' : undefined} />
                     </button>
                   ) : null}
                   {onUploadFrameImage ? (
                     <label
-                      className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-white/45 bg-black/55 text-white shadow-sm backdrop-blur transition hover:bg-black/70"
+                      className={`${isVerticalRatio ? 'h-6 w-6' : 'h-7 w-7'} inline-flex cursor-pointer items-center justify-center rounded-full border border-white/45 bg-black/55 text-white shadow-sm backdrop-blur transition hover:bg-black/70`}
                       title={`上传替换 F${frame.frameIndex + 1}`}
                       aria-label={`上传替换 F${frame.frameIndex + 1}`}
                     >
-                      <AppIcon name="upload" size={13} />
+                      <AppIcon name="upload" size={isVerticalRatio ? 12 : 13} />
                       <input
                         type="file"
                         accept="image/*"
@@ -439,44 +503,56 @@ function PanelFrameGrid({
                       />
                     </label>
                   ) : null}
+                  {onPickPreviousImage ? (
+                    <button
+                      type="button"
+                      className={`${isVerticalRatio ? 'h-6 w-6' : 'h-7 w-7'} inline-flex items-center justify-center rounded-full border border-white/45 bg-emerald-600/85 text-white shadow-sm backdrop-blur transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60`}
+                      title={`从上一大分镜选择图片替换 F${frame.frameIndex + 1}`}
+                      aria-label={`从上一大分镜选择图片替换 F${frame.frameIndex + 1}`}
+                      disabled={isFrameBusy}
+                      onClick={() => onPickPreviousImage(frame)}
+                    >
+                      <AppIcon name="imagePreview" size={isVerticalRatio ? 12 : 13} />
+                    </button>
+                  ) : null}
                   {onDeleteFrame ? (
                     <button
                       type="button"
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/45 bg-red-600/80 text-white shadow-sm backdrop-blur transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      className={`${isVerticalRatio ? 'h-6 w-6' : 'h-7 w-7'} inline-flex items-center justify-center rounded-full border border-white/45 bg-red-600/80 text-white shadow-sm backdrop-blur transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60`}
                       title={`删除 F${frame.frameIndex + 1}`}
                       aria-label={`删除 F${frame.frameIndex + 1}`}
                       disabled={isFrameBusy || frames.length <= 1}
                       onClick={() => handleDeleteFrame(frame)}
                     >
-                      <AppIcon name="trash" size={13} />
+                      <AppIcon name="trash" size={isVerticalRatio ? 12 : 13} />
                     </button>
                   ) : null}
                   {onSplitFrame ? (
                     <button
                       type="button"
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/45 bg-sky-600/85 text-white shadow-sm backdrop-blur transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      className={`${isVerticalRatio ? 'h-6 w-6' : 'h-7 w-7'} inline-flex items-center justify-center rounded-full border border-white/45 bg-sky-600/85 text-white shadow-sm backdrop-blur transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60`}
                       title={`拆出 F${frame.frameIndex + 1} 为独立分镜`}
                       aria-label={`拆出 F${frame.frameIndex + 1} 为独立分镜`}
                       disabled={isFrameBusy || frames.length <= 1}
                       onClick={() => handleSplitFrame(frame)}
                     >
-                      <AppIcon name="externalLink" size={13} />
+                      <AppIcon name="externalLink" size={isVerticalRatio ? 12 : 13} />
                     </button>
                   ) : null}
                 </div>
               </div>
-              <div className="space-y-1.5 p-2">
+              <div className={isVerticalRatio ? 'space-y-1 p-1.5' : 'space-y-1.5 p-2'}>
                 <div className="flex items-center justify-between gap-2">
                   <div className="truncate text-[11px] font-medium text-[var(--glass-text-secondary)]">
                     {frame.frameRole || '关键状态'}
                   </div>
                   {renderFrameTimeControl(frame, true)}
                 </div>
-                <div className="inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--glass-stroke-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--glass-text-secondary)]">
+                <div className="inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--glass-stroke-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--glass-text-secondary)]" title={relationText}>
                   <AppIcon name="link" size={10} className="shrink-0" />
-                  {relationText}
+                  <span className="min-w-0 truncate">{relationText}</span>
                 </div>
-                <div className="flex items-start gap-1.5">
+                <div className={`items-start gap-1.5 ${isVerticalRatio ? 'hidden' : 'flex'}`}>
                   <div className="max-h-20 flex-1 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-4 text-[var(--glass-text-tertiary)]">
                     {getFramePrompt(frame) || '暂无提示词'}
                   </div>
@@ -522,8 +598,10 @@ function PanelFrameGrid({
                   <div key={frame.id} className="overflow-hidden rounded-lg border border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-surface-strong)]">
                     <button
                       type="button"
-                      className="relative block aspect-video w-full bg-[var(--glass-bg-muted)]"
+                      className={`group/expanded-frame relative mx-auto block w-full bg-[var(--glass-bg-muted)] ${frame.imageUrl && onPreviewImage ? 'cursor-zoom-in' : 'cursor-default'} ${isVerticalRatio ? 'max-w-[260px]' : ''}`}
+                      style={{ aspectRatio: frameAspectRatio }}
                       onClick={() => frame.imageUrl && onPreviewImage?.(frame.imageUrl)}
+                      title={frame.imageUrl && onPreviewImage ? `点击放大 F${frame.frameIndex + 1}` : undefined}
                     >
                       {frame.imageUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -544,7 +622,7 @@ function PanelFrameGrid({
                           <button
                             type="button"
                             className="rounded-full border border-red-300/40 px-2 py-0.5 text-red-500 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                            disabled={(frame.generationStatus === 'processing' && !isStaleFrameProcessing(frame)) || frames.length <= 1}
+                            disabled={(isFrameGenerationBusy(frame) && !isStaleFrameProcessing(frame)) || frames.length <= 1}
                             onClick={() => handleDeleteFrame(frame)}
                           >
                             删除
@@ -554,7 +632,7 @@ function PanelFrameGrid({
                           <button
                             type="button"
                             className="rounded-full border border-sky-300/50 px-2 py-0.5 text-sky-500 transition hover:bg-sky-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                            disabled={(frame.generationStatus === 'processing' && !isStaleFrameProcessing(frame)) || frames.length <= 1}
+                            disabled={(isFrameGenerationBusy(frame) && !isStaleFrameProcessing(frame)) || frames.length <= 1}
                             onClick={() => handleSplitFrame(frame)}
                           >
                             拆出
@@ -671,12 +749,16 @@ export default function PanelCard({
   onDelete,
   onOpenCharacterPicker,
   onOpenLocationPicker,
+  onOpenPropPicker,
   onRetrySave,
   onRemoveCharacter,
   onRemoveLocation,
+  onRemoveProp,
   onRegeneratePanelImage,
   onUploadImage,
+  onUploadImageFromSource,
   onUploadFrameImage,
+  onUploadFrameImageFromSource,
   onRegenerateFrameImage,
   onUpdateFrameTime,
   onUpdateFramePrompt,
@@ -693,7 +775,8 @@ export default function PanelCard({
   onInsertAfter,
   onDuplicatePanel,
   onVariant,
-  isInsertDisabled
+  isInsertDisabled,
+  previousPanelImageOptions = [],
 }: PanelCardProps) {
   const t = useTranslations('storyboard')
   const locale = useLocale()
@@ -705,6 +788,11 @@ export default function PanelCard({
   const [videoPromptModalOpen, setVideoPromptModalOpen] = useState(false)
   const [videoPromptRequirement, setVideoPromptRequirement] = useState('')
   const [videoPromptCandidate, setVideoPromptCandidate] = useState<string | null>(null)
+  const [previousImagePickerTarget, setPreviousImagePickerTarget] = useState<
+    | { type: 'panel' }
+    | { type: 'frame'; frameId: string; label: string }
+    | null
+  >(null)
   const panelFrames = Array.isArray(panel.frames) ? panel.frames : []
   const displayDurationSec = panel.groupDurationSec ?? panelData.duration ?? panel.duration ?? null
   const videoPromptField = panel.panelMode === 'group' ? 'groupVideoPrompt' : 'videoPrompt'
@@ -719,9 +807,14 @@ export default function PanelCard({
           shotType: panelData.shotType,
           cameraMove: panelData.cameraMove,
           description: panelData.description,
-          videoPrompt: panelData.videoPrompt,
+          imagePrompt: null,
+          videoPrompt: currentVideoPrompt || null,
           location: panelData.location,
           characters: panelData.characters,
+          props: panelData.props,
+          sourceText: null,
+          photographyRules: panelData.photographyRules || null,
+          actingNotes: panelData.actingNotes || null,
         },
       })
       const nextPrompt = (result.prompt || result.refinedPrompt || '').trim()
@@ -750,8 +843,25 @@ export default function PanelCard({
       .finally(() => setIsDuplicatingPanel(false))
   }
 
+  const handleUsePreviousPanelImage = async (option: PreviousPanelImageOption) => {
+    try {
+      if (previousImagePickerTarget?.type === 'frame') {
+        if (!onUploadFrameImageFromSource) return
+        await Promise.resolve(onUploadFrameImageFromSource(previousImagePickerTarget.frameId, option.imageUrl))
+      } else {
+        if (!onUploadImageFromSource) return
+        await Promise.resolve(onUploadImageFromSource(panel.id, option.imageUrl))
+      }
+      setPreviousImagePickerTarget(null)
+    } catch (error: unknown) {
+      if (shouldShowError(error)) {
+        alert(extractErrorMessage(error, '替换图片失败'))
+      }
+    }
+  }
+
   const currentVideoPrompt = videoPromptField === 'groupVideoPrompt'
-    ? panel.groupVideoPrompt || panelData.videoPrompt || ''
+    ? panelData.groupVideoPrompt || panel.groupVideoPrompt || panelData.videoPrompt || ''
     : panelData.videoPrompt || panel.video_prompt || ''
 
   const handleGenerateVideoPromptCandidate = async () => {
@@ -786,6 +896,8 @@ export default function PanelCard({
       })
       if (videoPromptField === 'videoPrompt') {
         onUpdate({ videoPrompt: nextPrompt })
+      } else if (videoPromptField === 'groupVideoPrompt') {
+        onUpdate({ groupVideoPrompt: nextPrompt })
       }
       setVideoPromptModalOpen(false)
       setVideoPromptRequirement('')
@@ -834,6 +946,11 @@ export default function PanelCard({
           previousImageUrl={previousImageUrl}
           onRegeneratePanelImage={onRegeneratePanelImage}
           onUploadImage={onUploadImage}
+          onUsePreviousImage={
+            onUploadImageFromSource && previousPanelImageOptions.length > 0
+              ? () => setPreviousImagePickerTarget({ type: 'panel' })
+              : undefined
+          }
           onOpenEditModal={onOpenEditModal}
           onOpenAIDataModal={onOpenAIDataModal}
           onSelectCandidateIndex={onSelectCandidateIndex}
@@ -844,10 +961,21 @@ export default function PanelCard({
           onPreviewImage={onPreviewImage}
         />
         <PanelFrameGrid
+          projectId={projectId}
           panelId={panel.id}
           frames={panelFrames}
+          videoRatio={videoRatio}
           onPreviewImage={onPreviewImage}
           onUploadFrameImage={onUploadFrameImage}
+          onPickPreviousImage={
+            onUploadFrameImageFromSource && previousPanelImageOptions.length > 0
+              ? (frame) => setPreviousImagePickerTarget({
+                type: 'frame',
+                frameId: frame.id,
+                label: `F${frame.frameIndex + 1}`,
+              })
+              : undefined
+          }
           onRegenerateFrameImage={onRegenerateFrameImage}
           onUpdateFrameTime={onUpdateFrameTime}
           onUpdateFramePrompt={onUpdateFramePrompt}
@@ -879,8 +1007,11 @@ export default function PanelCard({
           onUpdate={onUpdate}
           onOpenCharacterPicker={onOpenCharacterPicker}
           onOpenLocationPicker={onOpenLocationPicker}
+          onOpenPropPicker={onOpenPropPicker}
           onRemoveCharacter={onRemoveCharacter}
           onRemoveLocation={onRemoveLocation}
+          onRemoveProp={onRemoveProp}
+          videoPromptField={videoPromptField}
           onRefineStoryboardPrompt={handleRefineStoryboardPrompt}
           isRefiningStoryboardPrompt={refineStoryboardPrompt.isPending}
           refinedStoryboardPrompt={refinedStoryboardPrompt}
@@ -906,6 +1037,57 @@ export default function PanelCard({
         onGenerate={() => void handleGenerateVideoPromptCandidate()}
         onUseCandidate={() => void handleUseVideoPromptCandidate()}
       />
+      {previousImagePickerTarget && previousPanelImageOptions.length > 0 && typeof document !== 'undefined' ? createPortal(
+        <div
+          className="fixed inset-0 z-[10002] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => setPreviousImagePickerTarget(null)}
+        >
+          <div
+            className="w-full max-w-3xl overflow-hidden rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--glass-stroke-subtle)] px-4 py-3">
+              <div>
+                <div className="text-sm font-semibold text-[var(--glass-text-primary)]">
+                  选择上一大分镜图片
+                </div>
+                <div className="text-xs text-[var(--glass-text-tertiary)]">
+                  将替换当前{previousImagePickerTarget.type === 'frame' ? `关键帧 ${previousImagePickerTarget.label}` : '分镜主图'}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="rounded-full p-2 text-[var(--glass-text-tertiary)] hover:bg-[var(--glass-bg-muted)] hover:text-[var(--glass-text-primary)]"
+                onClick={() => setPreviousImagePickerTarget(null)}
+              >
+                <AppIcon name="close" size={18} />
+              </button>
+            </div>
+            <div className="grid max-h-[70vh] grid-cols-2 gap-3 overflow-y-auto p-4 md:grid-cols-3">
+              {previousPanelImageOptions.map((option) => {
+                const displayUrl = toDisplayImageUrl(option.imageUrl) || option.imageUrl
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className="overflow-hidden rounded-lg border border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-surface-strong)] text-left transition hover:-translate-y-0.5 hover:border-[var(--glass-tone-info-fg)] hover:shadow-md"
+                    onClick={() => void handleUsePreviousPanelImage(option)}
+                  >
+                    <div className="aspect-video bg-[var(--glass-bg-muted)]">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={displayUrl} alt={option.label} className="h-full w-full object-cover" />
+                    </div>
+                    <div className="px-3 py-2 text-xs font-medium text-[var(--glass-text-secondary)]">
+                      {option.label}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      ) : null}
     </GlassSurface>
   )
 }

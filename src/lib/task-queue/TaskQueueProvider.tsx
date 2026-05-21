@@ -38,6 +38,7 @@ export type TaskQueueContextValue = {
   enqueueMany: (items: QueueItem[]) => void
   clearPending: () => void
   cancelCurrent: () => Promise<void>
+  cancelByUiKey: (uiKey: string) => Promise<boolean>
 }
 
 const TaskQueueContext = createContext<TaskQueueContextValue | null>(null)
@@ -85,6 +86,7 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
   const [externalBusyLanes, setExternalBusyLanes] = useState<TaskQueueLane[]>([])
   const noticeTimerRef = useRef<number | null>(null)
   const submittingItemIdsRef = useRef<Set<string>>(new Set())
+  const canceledItemIdsRef = useRef<Set<string>>(new Set())
   // 用 ref 镜像 queue 状态，避免 cancelCurrent 等回调因闭包引用陈旧 queue 导致取不到最新 running 项
   const queueRef = useRef<QueueItemState[]>(queue)
   queueRef.current = queue
@@ -184,6 +186,15 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
           setShowPopup(true)
           const { taskId } = await current.submit()
           const normalizedTaskId = String(taskId || '').trim()
+          if (canceledItemIdsRef.current.has(current.id)) {
+            submittingItemIdsRef.current.delete(current.id)
+            canceledItemIdsRef.current.delete(current.id)
+            if (normalizedTaskId) {
+              await apiFetch(`/api/tasks/${encodeURIComponent(normalizedTaskId)}`, { method: 'DELETE' }).catch(() => null)
+            }
+            startNextIfIdle()
+            return
+          }
           if (!normalizedTaskId) {
             // 同步完成：不依赖 SSE，直接判定为成功并进入下一项
             setQueue((prev) => prev.map((item) => item.id === current.id ? { ...item, status: 'succeeded' } : item))
@@ -201,6 +212,11 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
           const message = normalizeError(err)
           setQueue((prev) => prev.map((item) => item.id === current.id ? { ...item, status: 'failed', error: message } : item))
           submittingItemIdsRef.current.delete(current.id)
+          try {
+            await current.onFail?.('', err)
+          } catch {
+            // ignore follow-up refresh failures; the queue item itself has already failed
+          }
           // 自动继续下一个
           startNextIfIdle()
         }
@@ -345,6 +361,25 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
     }
   }, [])
 
+  const cancelByUiKey = useCallback(async (uiKey: string) => {
+    const targetKey = String(uiKey || '').trim()
+    if (!targetKey) return false
+    const item = queueRef.current.find((candidate) =>
+      candidate.uiKey === targetKey && (candidate.status === 'pending' || candidate.status === 'running'),
+    ) || null
+    if (!item) return false
+
+    canceledItemIdsRef.current.add(item.id)
+    submittingItemIdsRef.current.delete(item.id)
+    setQueue((prev) => prev.filter((candidate) => candidate.id !== item.id))
+
+    if (item.taskId) {
+      await apiFetch(`/api/tasks/${encodeURIComponent(item.taskId)}`, { method: 'DELETE' }).catch(() => null)
+    }
+    startNextIfIdle()
+    return true
+  }, [startNextIfIdle])
+
   const value = useMemo<TaskQueueContextValue>(() => ({
     enabled,
     projectId,
@@ -360,12 +395,14 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
     enqueueMany,
     clearPending,
     cancelCurrent,
+    cancelByUiKey,
   }), [
     activeItem,
     activeItems,
     activeTarget,
     activeTargets,
     cancelCurrent,
+    cancelByUiKey,
     clearPending,
     enqueue,
     enqueueMany,

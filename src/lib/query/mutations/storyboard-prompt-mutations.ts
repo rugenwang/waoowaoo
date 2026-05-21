@@ -52,9 +52,14 @@ export function useRefineProjectStoryboardPrompt(projectId: string) {
                 shotType?: string | null
                 cameraMove?: string | null
                 description?: string | null
+                imagePrompt?: string | null
                 videoPrompt?: string | null
                 location?: string | null
                 characters?: Array<{ name: string; appearance: string; slot?: string }>
+                props?: string[]
+                sourceText?: string | null
+                photographyRules?: string | null
+                actingNotes?: string | null
             }
         }) => await requestJsonWithError<{
             prompt: string

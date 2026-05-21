@@ -22,15 +22,14 @@ import {
   resolveNovelData,
 } from './image-task-handler-shared'
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
-import {
-  parseLocationAvailableSlots,
-} from '@/lib/location-available-slots'
 import { executeAiTextStep } from '@/lib/ai-runtime/client'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { clearTaskExternalId } from '@/lib/task/service'
+import { buildPanelAiDataJson } from '@/lib/novel-promotion/panel-ai-data-json'
+import { parseLocationAvailableSlots } from '@/lib/location-available-slots'
 
 type PromptRecord = Record<string, unknown>
-type PromptCharacter = { name?: unknown; appearance?: unknown; slot?: unknown }
+type PromptCharacter = { name?: unknown; appearance?: unknown; slot?: unknown; reference_description?: unknown }
 type PanelFrameForGeneration = {
   id: string
   frameIndex: number
@@ -40,6 +39,11 @@ type PanelFrameForGeneration = {
   imagePrompt: string | null
   videoPrompt: string | null
   imageUrl?: string | null
+}
+
+type FrameDependencyPlan = {
+  frameIndexes: number[]
+  previousTail: boolean
 }
 
 function parseJsonUnknown(raw: string | null | undefined): unknown | null {
@@ -66,7 +70,8 @@ function pickAppearanceDescription(appearance: {
   descriptions?: string | null
   description?: string | null
   selectedIndex?: number | null
-}): string {
+} | null | undefined): string {
+  if (!appearance) return ''
   const descriptions = parseDescriptionList(appearance.descriptions || null)
   if (descriptions.length > 0) {
     const selectedIndex = typeof appearance.selectedIndex === 'number' ? appearance.selectedIndex : 0
@@ -76,7 +81,20 @@ function pickAppearanceDescription(appearance: {
   if (typeof appearance.description === 'string' && appearance.description.trim()) {
     return appearance.description.trim()
   }
-  return '无描述'
+  return ''
+}
+
+function findPanelLocation(projectData: Awaited<ReturnType<typeof resolveNovelData>>, locationName: string | null | undefined) {
+  if (!locationName) return null
+  return (projectData.locations || []).find(
+    (item) => (item.assetKind || 'location') !== 'prop' && item.name.toLowerCase() === locationName.toLowerCase(),
+  ) || null
+}
+
+function findSelectedLocationImage(location: NonNullable<Awaited<ReturnType<typeof resolveNovelData>>['locations']>[number] | null) {
+  if (!location) return null
+  const images = location.images || []
+  return images.find((image) => image.isSelected) || images[0] || null
 }
 
 export function buildPanelPromptContext(params: {
@@ -89,70 +107,74 @@ export function buildPanelPromptContext(params: {
     videoPrompt: string | null
     location: string | null
     characters: string | null
+    props?: string | null
     srtSegment: string | null
     photographyRules: string | null
     actingNotes: string | null
   }
   projectData: Awaited<ReturnType<typeof resolveNovelData>>
+  aspectRatio?: string | null
 }) {
   const panelCharacters = parsePanelCharacterReferences(params.panel.characters)
   const characterContexts = panelCharacters.map((reference) => {
     const character = findCharacterByName(params.projectData.characters || [], reference.name)
-    if (!character) {
-      return {
-        name: reference.name,
-        appearance: reference.appearance || null,
-        description: '无角色外貌数据',
-      }
-    }
-
-    const appearances = character.appearances || []
+    const appearances = character?.appearances || []
     const matchedAppearance =
       (reference.appearance
         ? appearances.find((appearance) => (appearance.changeReason || '').toLowerCase() === reference.appearance!.toLowerCase())
         : null) || appearances[0] || null
 
     return {
-      name: character.name,
-      appearance: matchedAppearance?.changeReason || null,
-      description: matchedAppearance ? pickAppearanceDescription(matchedAppearance) : '无角色外貌数据',
-      slot: reference.slot || null,
+      name: reference.name,
+      appearance: reference.appearance || matchedAppearance?.changeReason || null,
+      slot: reference.slot,
+      referenceDescription: pickAppearanceDescription(matchedAppearance),
     }
   })
-
-  const locationContext = (() => {
-    if (!params.panel.location) return null
-    const matchedLocation = (params.projectData.locations || []).find(
-      (item) => item.name.toLowerCase() === params.panel.location!.toLowerCase(),
-    )
-    if (!matchedLocation) return null
-    const selectedImage = (matchedLocation.images || []).find((item) => item.isSelected) || matchedLocation.images?.[0]
-    return {
-      name: matchedLocation.name,
-      description: selectedImage?.description || null,
-      available_slots: parseLocationAvailableSlots(selectedImage?.availableSlots),
-    }
+  const selectedLocation = findSelectedLocationImage(findPanelLocation(params.projectData, params.panel.location))
+  const panelProps = (() => {
+    const raw = parseJsonUnknown(params.panel.props)
+    if (!Array.isArray(raw)) return []
+    return raw
+      .map((item) => {
+        const name = typeof item === 'string'
+          ? item.trim()
+          : item && typeof item === 'object' && typeof (item as PromptRecord).name === 'string'
+            ? String((item as PromptRecord).name).trim()
+            : ''
+        if (!name) return null
+        const prop = (params.projectData.locations || []).find(
+          (candidate) => (candidate.assetKind || 'location') === 'prop' && candidate.name.toLowerCase() === name.toLowerCase(),
+        )
+        const selectedPropImage = findSelectedLocationImage(prop || null)
+        return {
+          name,
+          description: selectedPropImage?.description || prop?.summary || '',
+        }
+      })
+      .filter((item): item is { name: string; description: string } => Boolean(item))
   })()
 
-  return {
-    panel: {
-      panel_id: params.panel.id,
-      shot_type: params.panel.shotType || '',
-      camera_move: params.panel.cameraMove || '',
-      description: params.panel.description || '',
-      image_prompt: params.panel.imagePrompt || '',
-      video_prompt: params.panel.videoPrompt || '',
-      location: params.panel.location || '',
-      characters: panelCharacters,
-      source_text: params.panel.srtSegment || '',
-      photography_rules: parseJsonUnknown(params.panel.photographyRules),
-      acting_notes: parseJsonUnknown(params.panel.actingNotes),
-    },
-    context: {
-      character_appearances: characterContexts,
-      location_reference: locationContext,
-    },
-  }
+  return buildPanelAiDataJson({
+    aspectRatio: params.aspectRatio || params.projectData.videoRatio || '',
+    shotType: params.panel.shotType,
+    cameraMove: params.panel.cameraMove,
+    description: params.panel.description,
+    location: params.panel.location,
+    locationReference: selectedLocation
+      ? {
+        description: selectedLocation.description || '',
+        availableSlots: parseLocationAvailableSlots(selectedLocation.availableSlots),
+      }
+      : null,
+    characters: characterContexts,
+    props: panelProps,
+    imagePrompt: params.panel.imagePrompt,
+    videoPrompt: params.panel.videoPrompt,
+    sourceText: params.panel.srtSegment,
+    photographyRules: parseJsonUnknown(params.panel.photographyRules),
+    actingNotes: parseJsonUnknown(params.panel.actingNotes),
+  })
 }
 
 export function buildPanelPrompt(params: {
@@ -180,15 +202,26 @@ export function buildPanelStructuredPrompt(params: {
   styleText: string
   context: ReturnType<typeof buildPanelPromptContext>
 }): string {
-  const shotType = String(params.context.panel.shot_type || '').trim()
-  const cameraMove = String(params.context.panel.camera_move || '').trim()
-  const description = String(params.context.panel.description || '').trim()
-  const imagePrompt = String(params.context.panel.image_prompt || '').trim()
-  const location = String(params.context.panel.location || '').trim()
+  const shot = (params.context as { shot?: PromptRecord }).shot || {}
+  const shotType = String(shot.shot_type || '').trim()
+  const cameraMove = String(shot.camera_move || '').trim()
+  const description = String(shot.description || '').trim()
+  const imagePrompt = String(shot.image_prompt || '').trim()
+  const location = String(shot.location || '').trim()
+  const referencePriority = String(shot.reference_priority || '').trim()
+  const locationReference = shot.location_reference && typeof shot.location_reference === 'object'
+    ? shot.location_reference as PromptRecord
+    : null
+  const locationReferenceText = [
+    locationReference?.description ? String(locationReference.description).trim() : '',
+    Array.isArray(locationReference?.available_slots) && locationReference.available_slots.length > 0
+      ? `${params.locale === 'en' ? 'available positions' : '可站位置'}：${locationReference.available_slots.map(String).join(params.locale === 'en' ? '; ' : '、')}`
+      : '',
+  ].filter(Boolean).join(params.locale === 'en' ? '; ' : '；')
 
   const characterLines = (() => {
-    const chars = Array.isArray(params.context.panel.characters)
-      ? params.context.panel.characters as PromptCharacter[]
+    const chars = Array.isArray(shot.characters)
+      ? shot.characters as PromptCharacter[]
       : []
     if (chars.length === 0) return ''
     if (params.locale === 'en') {
@@ -196,9 +229,11 @@ export function buildPanelStructuredPrompt(params: {
         const name = String(c?.name || '').trim()
         const appearance = String(c?.appearance || '').trim()
         const slot = String(c?.slot || '').trim()
+        const referenceDescription = String(c?.reference_description || '').trim()
         const extras = [
           appearance ? `appearance: ${appearance}` : '',
           slot ? `fixed position: ${slot}` : '',
+          referenceDescription ? `reference outfit/details: ${referenceDescription}` : '',
         ].filter(Boolean).join(', ')
         return extras ? `${name} (${extras})` : name
       }).filter(Boolean).join('; ')}`
@@ -207,16 +242,35 @@ export function buildPanelStructuredPrompt(params: {
       const name = String(c?.name || '').trim()
       const appearance = String(c?.appearance || '').trim()
       const slot = String(c?.slot || '').trim()
+      const referenceDescription = String(c?.reference_description || '').trim()
       const extras = [
         appearance ? `形象：${appearance}` : '',
         slot ? `固定位置：${slot}` : '',
+        referenceDescription ? `参考服装/细节：${referenceDescription}` : '',
       ].filter(Boolean).join('，')
       return extras ? `${name}（${extras}）` : name
     }).filter(Boolean).join('、')}`
   })()
 
+  const propLines = (() => {
+    const props = Array.isArray(shot.props)
+      ? shot.props as Array<string | PromptRecord>
+      : []
+    if (props.length === 0) return ''
+    const propText = props.map((prop) => {
+      if (typeof prop === 'string') return prop
+      const name = String(prop.name || '').trim()
+      const propDescription = String(prop.description || '').trim()
+      if (!name) return ''
+      return propDescription ? `${name}（${propDescription}）` : name
+    }).filter(Boolean)
+    return params.locale === 'en'
+      ? `Props: ${propText.join('; ')}`
+      : `道具：${propText.join('、')}`
+  })()
+
   const photographyText = (() => {
-    const rules = params.context.panel.photography_rules as PromptRecord | null
+    const rules = (params.context as { photography_rules?: unknown }).photography_rules as PromptRecord | null
     if (!rules || typeof rules !== 'object') return ''
     const lighting = rules.lighting && typeof rules.lighting === 'object'
       ? rules.lighting as PromptRecord
@@ -234,7 +288,7 @@ export function buildPanelStructuredPrompt(params: {
   })()
 
   const actingText = (() => {
-    const notes = params.context.panel.acting_notes
+    const notes = (params.context as { acting_notes?: unknown }).acting_notes
     if (!notes) return ''
     // 常见结构：[{ name, acting }]
     if (Array.isArray(notes)) {
@@ -266,7 +320,10 @@ export function buildPanelStructuredPrompt(params: {
       imagePrompt ? `Static image prompt: ${imagePrompt}` : '',
       description ? `Description: ${description}` : '',
       location ? `Location: ${location}` : '',
+      locationReferenceText ? `Location reference: ${locationReferenceText}` : '',
       characterLines,
+      propLines,
+      referencePriority ? `Reference priority: ${referencePriority}` : '',
       actingText,
       photographyText,
       params.styleText ? `Style: ${params.styleText}` : '',
@@ -281,7 +338,10 @@ export function buildPanelStructuredPrompt(params: {
     imagePrompt ? `静态生图提示：${imagePrompt}` : '',
     description ? `画面描述：${description}` : '',
     location ? `场景：${location}` : '',
+    locationReferenceText ? `场景参考：${locationReferenceText}` : '',
     characterLines,
+    propLines,
+    referencePriority ? `参考优先级：${referencePriority}` : '',
     actingText,
     photographyText,
     params.styleText ? `风格：${params.styleText}` : '',
@@ -301,19 +361,26 @@ function buildPanelDescriptionPrompt(params: {
   return params.styleText ? `${clean}，${params.styleText}` : clean
 }
 
-function parseDependencyFrameIds(raw: string | null | undefined): number[] {
-  if (!raw) return []
+function parseDependencyFramePlan(raw: string | null | undefined): FrameDependencyPlan {
+  if (!raw) return { frameIndexes: [], previousTail: false }
   try {
     const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((item) => {
-        const value = typeof item === 'number' ? item : typeof item === 'string' ? Number(item) : NaN
-        return Number.isFinite(value) ? Math.floor(value) : null
-      })
-      .filter((item): item is number => item !== null && item >= 0)
+    if (!Array.isArray(parsed)) return { frameIndexes: [], previousTail: false }
+    const frameIndexes: number[] = []
+    let previousTail = false
+    for (const item of parsed) {
+      if (typeof item === 'string' && item.trim().toUpperCase() === 'FP') {
+        previousTail = true
+        continue
+      }
+      const value = typeof item === 'number' ? item : typeof item === 'string' ? Number(item) : NaN
+      if (Number.isFinite(value) && value >= 0) {
+        frameIndexes.push(Math.floor(value))
+      }
+    }
+    return { frameIndexes, previousTail }
   } catch {
-    return []
+    return { frameIndexes: [], previousTail: false }
   }
 }
 
@@ -343,17 +410,45 @@ function uniqueNumbers(values: number[]): number[] {
 function buildFrameReferencePlan(params: {
   frame: PanelFrameForGeneration
   generatedByFrameIndex: Map<number, string>
+  previousTailImageUrl?: string | null
 }) {
-  const dependencyIndexes = uniqueNumbers(parseDependencyFrameIds(params.frame.dependencyFrameIds))
+  const dependencyPlan = parseDependencyFramePlan(params.frame.dependencyFrameIds)
+  const dependencyIndexes = uniqueNumbers(dependencyPlan.frameIndexes)
   const frameReferenceIndexes = params.frame.frameIndex > 0
     ? (dependencyIndexes.length > 0 ? dependencyIndexes : [Math.max(0, params.frame.frameIndex - 1)])
     : dependencyIndexes
   const urls = frameReferenceIndexes
     .map((frameIndex) => params.generatedByFrameIndex.get(frameIndex))
     .filter((value): value is string => Boolean(value))
+  if (dependencyPlan.previousTail && params.previousTailImageUrl) {
+    urls.unshift(params.previousTailImageUrl)
+  }
   return {
     frameReferenceIndexes,
+    usesPreviousTail: dependencyPlan.previousTail,
     urls: uniqueStrings(urls),
+  }
+}
+
+function buildPanelFrameRefineContext(params: {
+  panelContext: ReturnType<typeof buildPanelPromptContext>
+  frame: PanelFrameForGeneration
+  frameReferenceIndexes: number[]
+  usesPreviousTail: boolean
+  referenceImageCount: number
+}) {
+  return {
+    ...params.panelContext,
+    current_frame: {
+      frame_index: params.frame.frameIndex,
+      frame_label: `F${params.frame.frameIndex + 1}`,
+      frame_time_sec: params.frame.frameTimeSec,
+      frame_role: params.frame.frameRole || '',
+      image_prompt: params.frame.imagePrompt || '',
+      dependency_frame_indexes: params.frameReferenceIndexes,
+      uses_previous_panel_tail_frame: params.usesPreviousTail,
+      reference_image_count: params.referenceImageCount,
+    },
   }
 }
 
@@ -363,28 +458,74 @@ function buildPanelFramePrompt(params: {
   styleText: string
   frame: PanelFrameForGeneration
   panelDescription: string | null
-  groupVideoPrompt: string | null
+  panelContext: ReturnType<typeof buildPanelPromptContext>
   frameReferenceIndexes: number[]
+  usesPreviousTail: boolean
   frameReferenceImageCount: number
   hardConstraints: string
 }) {
+  const shot = (params.panelContext as { shot?: PromptRecord }).shot || {}
+  const shotType = String(shot.shot_type || '').trim()
+  const cameraMove = String(shot.camera_move || '').trim()
+  const location = String(shot.location || '').trim()
+  const referencePriority = String(shot.reference_priority || '').trim()
+  const locationReference = shot.location_reference && typeof shot.location_reference === 'object'
+    ? shot.location_reference as PromptRecord
+    : null
+  const locationReferenceText = [
+    locationReference?.description ? String(locationReference.description).trim() : '',
+    Array.isArray(locationReference?.available_slots) && locationReference.available_slots.length > 0
+      ? `${params.locale === 'en' ? 'available positions' : '可站位置'}：${locationReference.available_slots.map(String).join(params.locale === 'en' ? '; ' : '、')}`
+      : '',
+  ].filter(Boolean).join(params.locale === 'en' ? '; ' : '；')
+  const characters = Array.isArray(shot.characters)
+    ? (shot.characters as PromptCharacter[])
+      .map((character) => {
+        const name = String(character?.name || '').trim()
+        const appearance = String(character?.appearance || '').trim()
+        const slot = String(character?.slot || '').trim()
+        const referenceDescription = String(character?.reference_description || '').trim()
+        const extras = [
+          appearance,
+          slot ? `${params.locale === 'en' ? 'fixed position' : '固定位置'}：${slot}` : '',
+          referenceDescription ? `${params.locale === 'en' ? 'reference outfit/details' : '参考服装/细节'}：${referenceDescription}` : '',
+        ].filter(Boolean).join(params.locale === 'en' ? ', ' : '，')
+        return name ? (extras ? `${name}（${extras}）` : name) : ''
+      })
+      .filter(Boolean)
+      .join(params.locale === 'en' ? '; ' : '、')
+    : ''
+  const props = Array.isArray(shot.props)
+    ? (shot.props as Array<string | PromptRecord>).map((prop) => {
+      if (typeof prop === 'string') return prop
+      const name = String(prop.name || '').trim()
+      const propDescription = String(prop.description || '').trim()
+      if (!name) return ''
+      return propDescription ? `${name}（${propDescription}）` : name
+    }).filter(Boolean).join(params.locale === 'en' ? '; ' : '、')
+    : ''
   const framePrompt = String(params.frame.imagePrompt || params.panelDescription || '').trim()
-  const motionPrompt = String(params.frame.videoPrompt || '').trim()
-  const referenceLabels = params.frameReferenceIndexes.map((index) => `F${index + 1}`).join(', ')
-  const zhReferenceRule = params.frame.frameIndex > 0
+  const referenceLabels = [
+    params.usesPreviousTail ? 'FP（上一分镜尾帧）' : '',
+    ...params.frameReferenceIndexes.map((index) => `F${index + 1}`),
+  ].filter(Boolean).join(', ')
+  const hasReferenceRule = params.frame.frameIndex > 0 || params.usesPreviousTail
+  const zhReferenceRule = hasReferenceRule
     ? [
       params.frameReferenceImageCount > 0
-        ? `参考帧规则：参考图前 ${params.frameReferenceImageCount} 张是本分镜组已生成的直接关联关键帧${referenceLabels ? `（${referenceLabels}）` : ''}。`
-        : '参考帧规则：这是基础帧之后的关键帧，必须承接直接相邻剧情的角色、服饰、场景、光线和构图逻辑。',
+        ? `参考帧规则：参考图前 ${params.frameReferenceImageCount} 张是直接关联关键帧${referenceLabels ? `（${referenceLabels}）` : ''}。`
+        : '参考帧规则：必须承接直接相邻剧情的角色、服饰、场景、光线和构图逻辑。',
+      params.usesPreviousTail ? 'FP 表示本帧需要参考上一分镜的尾帧；请把上一分镜结尾状态自然承接为当前分镜开场状态，但不要原样复制上一帧构图。' : '',
       '请根据直接关联帧和本帧剧本描述，生成顺滑过渡到当前秒点的画面；保留身份和服装一致，但不要原样复制参考帧姿势、表情、站位或构图。',
       '本帧只表现当前秒点的关键状态，要有明确变化，例如动作进展、人物位置、手部/道具状态、视线、表情或场景转化。'
     ].join('\n')
     : ''
-  const enReferenceRule = params.frame.frameIndex > 0
+  const enReferenceRule = hasReferenceRule
     ? [
       params.frameReferenceImageCount > 0
-        ? `Reference-frame rule: the first ${params.frameReferenceImageCount} reference image(s) are directly linked generated keyframes from this storyboard group${referenceLabels ? ` (${referenceLabels})` : ''}.`
-        : 'Reference-frame rule: this is after the base frame; preserve continuity from the directly adjacent story beat.',
+        ? `Reference-frame rule: the first ${params.frameReferenceImageCount} reference image(s) are directly linked keyframes${referenceLabels ? ` (${referenceLabels})` : ''}.`
+        : 'Reference-frame rule: preserve continuity from the directly adjacent story beat.',
+      params.usesPreviousTail ? 'FP means this frame references the previous panel tail frame; continue naturally from the previous ending state into this panel opening state without copying the previous composition exactly.' : '',
       'Use the directly linked frame(s) and this frame script description to create a smooth current-frame image. Keep identity/outfit consistent, but do not copy the reference-frame pose, expression, position, or composition exactly.',
       'Show only the current second state with a clear change: action progress, body position, hand/prop state, gaze, expression, or scene transition.'
     ].join('\n')
@@ -392,24 +533,36 @@ function buildPanelFramePrompt(params: {
   const lines = params.locale === 'en'
     ? [
       `Aspect ratio: ${params.aspectRatio}`,
+      shotType || cameraMove ? `Shot: ${[shotType, cameraMove].filter(Boolean).join(', ')}` : '',
+      location ? `Location: ${location}` : '',
+      locationReferenceText ? `Location reference: ${locationReferenceText}` : '',
+      characters ? `Characters: ${characters}` : '',
+      props ? `Props: ${props}` : '',
+      referencePriority ? `Reference priority: ${referencePriority}` : '',
+      params.panelDescription ? `Panel description: ${params.panelDescription}` : '',
       framePrompt ? `Key frame image prompt: ${framePrompt}` : '',
       `Frame time: ${params.frame.frameTimeSec}s`,
       params.frame.frameRole ? `Frame role: ${params.frame.frameRole}` : '',
       params.frame.frameIndex === 0 ? 'This is the opening keyframe: show the original state before any later action, movement, emotional change, fight result, or transition result.' : '',
       enReferenceRule,
-      motionPrompt ? `Continuity note for this still frame only: ${motionPrompt}` : '',
       params.styleText ? `Style: ${params.styleText}` : '',
       'Generate exactly one still image for this key frame. Keep visual continuity with reference images. Do not depict camera movement, timeline segments, dialogue text, music, or multiple action moments.',
       params.hardConstraints,
     ]
     : [
       `画面比例：${params.aspectRatio}`,
+      shotType || cameraMove ? `镜头：${[shotType, cameraMove].filter(Boolean).join('，')}` : '',
+      location ? `场景：${location}` : '',
+      locationReferenceText ? `场景参考：${locationReferenceText}` : '',
+      characters ? `角色：${characters}` : '',
+      props ? `道具：${props}` : '',
+      referencePriority ? `参考优先级：${referencePriority}` : '',
+      params.panelDescription ? `分镜描述：${params.panelDescription}` : '',
       framePrompt ? `关键帧生图提示：${framePrompt}` : '',
       `所在秒点：${params.frame.frameTimeSec}s`,
       params.frame.frameRole ? `关键帧角色：${params.frame.frameRole}` : '',
       params.frame.frameIndex === 0 ? '这是开头关键帧：必须表现后续动作发生前的原始状态，人物尚未完成移动、转身、打斗、情绪变化或事件结果。' : '',
       zhReferenceRule,
-      motionPrompt ? `本帧静态衔接提示：${motionPrompt}` : '',
       params.styleText ? `风格：${params.styleText}` : '',
       '只生成这一秒点的一张静态关键帧图，必须与参考图保持人物、服饰、场景、光线和画风连贯。不要画运镜、时间轴、字幕、台词文字、背景音乐或多个连续动作瞬间。',
       params.hardConstraints,
@@ -433,9 +586,11 @@ export function buildStoryboardHardConstraints(params: {
       '- No text in image (no subtitles/labels/numbers/watermarks/symbols).',
       '- Output exactly ONE frame (no collage / no multi-panel).',
       '- In multi-person or crowd scenes, every visible person must have a distinct face. Do NOT generate multiple people with the same face, cloned facial features, or repeated identity in the same shot.',
-      '- Characters must be fully and properly clothed, consistent with their reference outfit; no shirtless, semi-nude, exposed torso, revealing outfit, missing clothing, or torn-clothing exposure.',
+      '- Character identity, hairstyle, makeup, outfit style, clothing color, fabric layers, accessories that belong to the outfit, and body silhouette must strictly match the corresponding character reference image. Do not redesign clothing or change outfits.',
+      '- Characters must be fully and properly clothed, exactly consistent with their reference outfit; no shirtless, semi-nude, exposed torso, revealing outfit, missing clothing, or torn-clothing exposure.',
+      '- Do NOT generate tilted heads, twisted heads, strongly turned heads, strange expressions, exaggerated expressions, or distorted facial expressions. Keep head and neck posture natural and upright; keep expressions realistic, restrained, and story-appropriate.',
       ratio ? `- Aspect ratio must be EXACT: ${ratio}.` : null,
-      hasRefs ? '- Match reference images for identity, outfit, style, and scene continuity; do NOT copy pose/composition exactly, and do NOT draw any text from references.' : null,
+      hasRefs ? '- Match reference images strictly: character asset images control identity/outfit/hairstyle; prior-frame references control continuity; location asset images control space/lighting/allowed positions; prop asset images control prop appearance. Do NOT copy pose/composition exactly, and do NOT draw any text from references.' : null,
       style ? `- Keep visual style consistent: ${style}.` : null,
     ].filter(Boolean).join('\n')
   }
@@ -445,9 +600,11 @@ export function buildStoryboardHardConstraints(params: {
     '- 画面中绝对禁止出现任何文字（字幕/标签/编号/水印/符号）。',
     '- 只生成一张镜头画面（禁止拼图/多镜头/多格）。',
     '- 多人或一群人的场景里，每个可见人物必须是不同的脸；禁止在同一个镜头中出现同一张脸、重复五官模板、克隆脸或看起来像同一个人的多个个体。',
-    '- 人物必须衣着完整、服饰得体，并与角色参考图/设定服装一致；禁止半裸、裸露上身、暴露服装、缺少衣服、衣物破损导致裸露。',
+    '- 人物身份、发型、妆容、服装款式、服装颜色、面料层次、属于服装的一切配饰、身体轮廓必须严格匹配对应角色参考图；禁止重新设计衣服、换衣服、改颜色或自由发挥服装。',
+    '- 人物必须衣着完整、服饰得体，并与角色参考图服装完全一致；禁止半裸、裸露上身、暴露服装、缺少衣服、衣物破损导致裸露。',
+    '- 禁止生成歪头、扭头、头部大幅偏转、怪异表情、夸张表情或五官扭曲表情；人物头颈姿态必须自然端正，表情真实克制并符合剧情。',
     ratio ? `- 画面比例必须严格为：${ratio}` : null,
-    hasRefs ? '- 有参考图时：外貌、服饰、画风、场景连续性需与参考图一致；禁止原样复制参考图姿势/构图；参考图上的文字标签仅供识别，禁止画入图中。' : null,
+    hasRefs ? '- 有参考图时必须严格匹配：角色资产图锁定身份/服装/发型；上一帧参考图锁定连续性；场景资产图锁定空间结构/光线/可站位置；道具资产图锁定道具外观。禁止原样复制参考图姿势/构图；参考图上的文字标签仅供识别，禁止画入图中。' : null,
     style ? `- 风格必须与参考一致：${style}` : null,
   ].filter(Boolean).join('\n')
 }
@@ -458,8 +615,49 @@ export function cleanupRefinedPrompt(raw: string): string {
   // 去掉可能的 code fence 或多余引号
   const noFence = text.replace(/^```[\s\S]*?\n/, '').replace(/```$/, '').trim()
   const unquoted = noFence.replace(/^["'“”]+/, '').replace(/["'“”]+$/, '').trim()
+  const stillOnly = sanitizeStillImagePrompt(unquoted)
   // 防止输出过长影响本地模型（保守截断）
-  return unquoted.length > 1200 ? unquoted.slice(0, 1200) : unquoted
+  return stillOnly.length > 1200 ? stillOnly.slice(0, 1200) : stillOnly
+}
+
+function sanitizeStillImagePrompt(raw: string): string {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  const bannedLinePattern = /(?:\b\d{1,2}:\d{2}(?::\d{2})?\s*[-–—至~]\s*\d{1,2}:\d{2}(?::\d{2})?\b|^【?(?:对话|台词|旁白|背景音乐|背景音|运镜|镜头切换|时间轴|音乐|sound|dialogue|voiceover|timeline|camera movement|background music)】?[:：])/i
+  const cleanedLines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !bannedLinePattern.test(line))
+
+  const joined = (cleanedLines.length > 0 ? cleanedLines.join('，') : text)
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\s*[-–—至~]\s*\d{1,2}:\d{2}(?::\d{2})?\b/g, '')
+    .replace(/【?(?:对话|台词|旁白|背景音乐|背景音|运镜|镜头切换|时间轴|音乐)】?[:：][^。；\n]*(?:[。；]|$)/g, '')
+    .replace(/\b(?:dialogue|voiceover|timeline|camera movement|background music)\s*:[^.;\n]*(?:[.;]|$)/gi, '')
+    .replace(/[，,；;]\s*[，,；;]+/g, '，')
+    .replace(/^[，,；;\s]+|[，,；;\s]+$/g, '')
+    .trim()
+
+  return joined || text
+}
+
+function buildShotPromptPrefix(params: {
+  locale: TaskJobData['locale']
+  context: ReturnType<typeof buildPanelPromptContext>
+}): string {
+  const shot = (params.context as { shot?: PromptRecord }).shot || {}
+  const shotType = String(shot.shot_type || '').trim()
+  const cameraMove = String(shot.camera_move || '').trim()
+  if (!shotType && !cameraMove) return ''
+  if (params.locale === 'en') {
+    return [
+      shotType ? `Shot type: ${shotType}` : '',
+      cameraMove ? `camera framing/movement hint: ${cameraMove}` : '',
+    ].filter(Boolean).join('; ')
+  }
+  return [
+    shotType ? `镜头类型：${shotType}` : '',
+    cameraMove ? `镜头方式：${cameraMove}` : '',
+  ].filter(Boolean).join('；')
 }
 
 export async function handlePanelImageTask(job: Job<TaskJobData>) {
@@ -518,10 +716,30 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   const usePanelDescriptionEnabled = modelConfig.localStoryboardUsePanelDescriptionEnabled === true
   const panelDescriptionText = String(panel.description || '').trim()
 
-  // 默认走 JSON 模板；只有在开启“启用画面描述”且 panel.description 有内容时，才用画面描述直出。
-  let contextJson = ''
+  const promptContext = buildPanelPromptContext({
+    panel: {
+      id: panel.id,
+      shotType: panel.shotType,
+      cameraMove: panel.cameraMove,
+      description: panel.description,
+      imagePrompt: null,
+      videoPrompt: panel.panelMode === 'group'
+        ? panel.groupVideoPrompt || panel.videoPrompt
+        : panel.videoPrompt,
+      location: panel.location,
+      characters: panel.characters,
+      props: panel.props,
+      srtSegment: null,
+      photographyRules: null,
+      actingNotes: null,
+    },
+    projectData,
+    aspectRatio,
+  })
+  const contextJson = JSON.stringify(promptContext, null, 2)
+
+  // 默认走当前“查看数据 JSON”；只有在开启“启用画面描述”且 panel.description 有内容时，才用画面描述直出。
   let prompt = ''
-  let promptContext: ReturnType<typeof buildPanelPromptContext> | null = null
   if (usePanelDescriptionEnabled && panelDescriptionText) {
     prompt = buildPanelDescriptionPrompt({
       description: panelDescriptionText,
@@ -529,24 +747,6 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       locale: job.data.locale,
     })
   } else {
-    promptContext = buildPanelPromptContext({
-      panel: {
-        id: panel.id,
-        shotType: panel.shotType,
-        cameraMove: panel.cameraMove,
-        description: panel.description,
-        imagePrompt: panel.imagePrompt,
-        videoPrompt: panel.videoPrompt,
-        location: panel.location,
-        characters: panel.characters,
-        srtSegment: panel.srtSegment,
-        photographyRules: panel.photographyRules,
-        actingNotes: panel.actingNotes,
-      },
-      projectData,
-    })
-    contextJson = JSON.stringify(promptContext, null, 2)
-
     // 对本地模型（ltx/MLX），不把 JSON 串当作最终 prompt；而是把结构化数据整理成“整洁的自然语言 prompt”
     // （与项目里其它生图链路一致：最终 prompt 是一段可读文本，而不是大段 JSON）。
     if (parsedStoryboardModel?.provider === 'local') {
@@ -562,7 +762,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
         locale: job.data.locale,
         aspectRatio,
         styleText: artStyle || '与参考图风格一致',
-        sourceText: panel.srtSegment || panel.description || '',
+        sourceText: panel.description || '',
         contextJson,
       })
     }
@@ -573,36 +773,43 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     modelConfig.localStoryboardPromptRefineEnabled === true
     && !!modelConfig.analysisModel
 
-  const refinedOrRawPrompt = shouldRefinePrompt ? await (async () => {
+  const sortedFrames = Array.isArray(panel.frames)
+    ? [...panel.frames].sort((left, right) => left.frameIndex - right.frameIndex)
+    : []
+  const isPanelGroup = panel.panelMode === 'group' || sortedFrames.length > 1
+
+  const isMultiFrameGroup = isPanelGroup && sortedFrames.length > 1
+  const refinedOrRawPrompt = !isMultiFrameGroup && shouldRefinePrompt ? await (async () => {
     try {
       const strength = modelConfig.localStoryboardPromptRefineLevel || 'medium'
-      // 本地模型精炼：
-      // - 勾选“使用画面描述”：精炼画面描述（纯文本）
-      // - 否则：用完整分镜 JSON 做精炼（你在 lib/prompts/novel-promotion/storyboard_prompt_refine.zh.txt 里配置的那个）
-      const refineUserPrompt = (usePanelDescriptionEnabled && panelDescriptionText)
-        ? buildPrompt({
-          promptId: PROMPT_IDS.NP_STORYBOARD_PROMPT_REFINE_DESCRIPTION,
+      const refineUserPrompt = buildPrompt({
+        promptId: PROMPT_IDS.NP_STORYBOARD_PROMPT_REFINE,
+        locale: job.data.locale,
+        variables: {
+          storyboard_text_json_input: contextJson,
+          source_text: panel.description || '',
+          aspect_ratio: aspectRatio,
+          style: artStyle || '与参考图风格一致',
+          strength,
+          reference_images_count: String(normalizedRefs.length),
+        },
+      })
+
+      logger.info({
+        message: 'storyboard prompt refine request payload',
+        details: {
+          panelId: panel.id,
           locale: job.data.locale,
-          variables: {
-            panel_description: panelDescriptionText,
-            aspect_ratio: aspectRatio,
-            style: artStyle || '与参考图风格一致',
-            strength,
-            reference_images_count: String(normalizedRefs.length),
-          },
-        })
-        : buildPrompt({
-          promptId: PROMPT_IDS.NP_STORYBOARD_PROMPT_REFINE,
-          locale: job.data.locale,
-          variables: {
-            storyboard_text_json_input: contextJson,
-            source_text: panel.srtSegment || panel.description || '',
-            aspect_ratio: aspectRatio,
-            style: artStyle || '与参考图风格一致',
-            strength,
-            reference_images_count: String(normalizedRefs.length),
-          },
-        })
+          model: modelConfig.analysisModel,
+          usePanelDescription: usePanelDescriptionEnabled && !!panelDescriptionText,
+          aspectRatio,
+          strength,
+          referenceImagesCount: normalizedRefs.length,
+          data: promptContext,
+          contextJson,
+          refineUserPrompt,
+        },
+      })
 
       const res = await executeAiTextStep({
         userId: job.data.userId,
@@ -624,6 +831,14 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       })
 
       const refined = cleanupRefinedPrompt(res.text)
+      logger.info({
+        message: 'storyboard prompt refine response payload',
+        details: {
+          panelId: panel.id,
+          rawResponseText: res.text,
+          cleanedPrompt: refined,
+        },
+      })
       return refined || prompt
     } catch (err) {
       logger.warn({
@@ -633,9 +848,14 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       return prompt
     }
   })() : prompt
+  const shotPromptPrefix = buildShotPromptPrefix({
+    locale: job.data.locale,
+    context: promptContext,
+  })
+  const imagePromptWithShotType = [shotPromptPrefix, refinedOrRawPrompt].filter(Boolean).join('\n')
 
   const withAnimeStyle = prependAnimeStyleLabel({
-    prompt: refinedOrRawPrompt,
+    prompt: imagePromptWithShotType,
     artStyle: modelConfig.artStyle,
     locale: job.data.locale === 'en' ? 'en' : 'zh',
   })
@@ -647,13 +867,20 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     referenceImagesCount: normalizedRefs.length,
   })
 
-  const sortedFrames = Array.isArray(panel.frames)
-    ? [...panel.frames].sort((left, right) => left.frameIndex - right.frameIndex)
-    : []
-  const isPanelGroup = panel.panelMode === 'group' || sortedFrames.length > 1
-  if (isPanelGroup && sortedFrames.length > 1) {
+  if (isMultiFrameGroup) {
     const generatedByFrameIndex = new Map<number, string>()
     const generatedUrls: string[] = []
+    const previousPanel = await prisma.novelPromotionPanel.findFirst({
+      where: {
+        storyboardId: panel.storyboardId,
+        panelIndex: { lt: panel.panelIndex },
+      },
+      orderBy: { panelIndex: 'desc' },
+      include: {
+        frames: { orderBy: { frameIndex: 'desc' }, take: 1 },
+      },
+    })
+    const previousTailImageUrl = previousPanel?.frames?.[0]?.imageUrl || previousPanel?.imageUrl || null
     const targetFrame = targetFrameId
       ? sortedFrames.find((frame) => frame.id === targetFrameId)
       : null
@@ -692,7 +919,11 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       : sortedFrames.filter((frame) => !(shouldResumePartialGroup && frame.imageUrl))
 
     for (const frame of targetFrame ? framesToGenerate : []) {
-      for (const dependencyIndex of parseDependencyFrameIds(frame.dependencyFrameIds)) {
+      const dependencyPlan = parseDependencyFramePlan(frame.dependencyFrameIds)
+      if (dependencyPlan.previousTail && !previousTailImageUrl) {
+        throw new Error(`F${frame.frameIndex + 1} 需要参考上一分镜尾帧 FP，但上一分镜还没有可用尾帧图片`)
+      }
+      for (const dependencyIndex of dependencyPlan.frameIndexes) {
         if (!generatedByFrameIndex.get(dependencyIndex)) {
           throw new Error(`请先生成关联帧 F${dependencyIndex + 1}，再重新生成 F${frame.frameIndex + 1}`)
         }
@@ -714,7 +945,8 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
         },
       })
 
-      const frameReferencePlan = buildFrameReferencePlan({ frame, generatedByFrameIndex })
+      try {
+      const frameReferencePlan = buildFrameReferencePlan({ frame, generatedByFrameIndex, previousTailImageUrl })
       const dependencyUrls = frameReferencePlan.urls
         .map((value) => toSignedUrlIfCos(value, 3600))
         .filter((value): value is string => Boolean(value))
@@ -725,25 +957,132 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
         ...normalizedFrameReferenceRefs,
         ...normalizedRefs,
       ])
-      const framePrompt = prependAnimeStyleLabel({
-        prompt: buildPanelFramePrompt({
-          locale: job.data.locale,
-          aspectRatio,
-          styleText: artStyle || '',
-          frame,
-          panelDescription: panel.description,
-          groupVideoPrompt: panel.groupVideoPrompt || panel.videoPrompt,
-          frameReferenceIndexes: frameReferencePlan.frameReferenceIndexes,
-          frameReferenceImageCount: normalizedFrameReferenceRefs.length,
-          hardConstraints: buildStoryboardHardConstraints({
+      const frameHardConstraints = buildStoryboardHardConstraints({
+        locale: job.data.locale,
+        aspectRatio,
+        styleText: artStyle || '',
+        referenceImagesCount: normalizedFrameRefs.length,
+      })
+      const frameBasePrompt = buildPanelFramePrompt({
+        locale: job.data.locale,
+        aspectRatio,
+        styleText: artStyle || '',
+        frame,
+        panelDescription: panel.description,
+        panelContext: promptContext,
+        frameReferenceIndexes: frameReferencePlan.frameReferenceIndexes,
+        usesPreviousTail: frameReferencePlan.usesPreviousTail,
+        frameReferenceImageCount: normalizedFrameReferenceRefs.length,
+        hardConstraints: frameHardConstraints,
+      })
+      const framePromptInput = buildPanelFrameRefineContext({
+        panelContext: promptContext,
+        frame,
+        frameReferenceIndexes: frameReferencePlan.frameReferenceIndexes,
+        usesPreviousTail: frameReferencePlan.usesPreviousTail,
+        referenceImageCount: normalizedFrameRefs.length,
+      })
+      const frameContextJson = JSON.stringify(framePromptInput, null, 2)
+      const frameResolvedPrompt = shouldRefinePrompt ? await (async () => {
+        try {
+          const strength = modelConfig.localStoryboardPromptRefineLevel || 'medium'
+          const refineUserPrompt = buildPrompt({
+            promptId: PROMPT_IDS.NP_STORYBOARD_PROMPT_REFINE,
             locale: job.data.locale,
-            aspectRatio,
-            styleText: artStyle || '',
-            referenceImagesCount: normalizedFrameRefs.length,
-          }),
-        }),
+            variables: {
+              storyboard_text_json_input: frameContextJson,
+              source_text: frame.imagePrompt || panel.description || '',
+              aspect_ratio: aspectRatio,
+              style: artStyle || '与参考图风格一致',
+              strength,
+              reference_images_count: String(normalizedFrameRefs.length),
+            },
+          })
+
+          logger.info({
+            message: 'storyboard frame prompt refine request payload',
+            details: {
+              panelId: panel.id,
+              frameId: frame.id,
+              frameIndex: frame.frameIndex,
+              locale: job.data.locale,
+              model: modelConfig.analysisModel,
+              aspectRatio,
+              strength,
+              referenceImagesCount: normalizedFrameRefs.length,
+              data: framePromptInput,
+              contextJson: frameContextJson,
+              refineUserPrompt,
+            },
+          })
+
+          const res = await executeAiTextStep({
+            userId: job.data.userId,
+            projectId: job.data.projectId,
+            model: modelConfig.analysisModel!,
+            action: 'NP_STORYBOARD_PROMPT_REFINE',
+            meta: {
+              stepId: 'np_storyboard_frame_prompt_refine',
+              stepTitle: 'storyboard_frame_prompt_refine',
+              stepIndex: 1,
+              stepTotal: 1,
+              stepAttempt: 1,
+            },
+            reasoning: false,
+            temperature: 0.2,
+            messages: [
+              { role: 'user', content: refineUserPrompt },
+            ],
+          })
+
+          const refined = cleanupRefinedPrompt(res.text)
+          const refinedWithConstraints = refined
+            ? [refined, frameHardConstraints].filter(Boolean).join('\n\n')
+            : ''
+          logger.info({
+            message: 'storyboard frame prompt refine response payload',
+            details: {
+              panelId: panel.id,
+              frameId: frame.id,
+              frameIndex: frame.frameIndex,
+              rawResponseText: res.text,
+              cleanedPrompt: refinedWithConstraints || refined,
+            },
+          })
+          return refinedWithConstraints || frameBasePrompt
+        } catch (err) {
+          logger.warn({
+            message: 'storyboard frame prompt refine failed, fallback to frame base prompt',
+            details: {
+              panelId: panel.id,
+              frameId: frame.id,
+              frameIndex: frame.frameIndex,
+              error: String(err),
+            },
+          })
+          return frameBasePrompt
+        }
+      })() : frameBasePrompt
+      const framePromptWithShotType = [
+        buildShotPromptPrefix({ locale: job.data.locale, context: promptContext }),
+        frameResolvedPrompt,
+      ].filter(Boolean).join('\n')
+      const framePrompt = prependAnimeStyleLabel({
+        prompt: framePromptWithShotType,
         artStyle: modelConfig.artStyle,
         locale: job.data.locale === 'en' ? 'en' : 'zh',
+      })
+      logger.info({
+        message: 'panel frame image prompt resolved',
+        details: {
+          panelId: panel.id,
+          frameId: frame.id,
+          frameIndex: frame.frameIndex,
+          promptRefineEnabled: shouldRefinePrompt,
+          analysisModel: modelConfig.analysisModel || null,
+          promptLength: framePrompt.length,
+          prompt: framePrompt,
+        },
       })
 
       try {
@@ -784,6 +1123,16 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
           })
           panel.imageUrl = cosKey
         }
+      } catch (error) {
+        await prisma.novelPromotionPanelFrame.update({
+          where: { id: frame.id },
+          data: {
+            generationStatus: 'failed',
+            errorMessage: error instanceof Error ? error.message : String(error),
+          },
+        })
+        throw error
+      }
       } catch (error) {
         await prisma.novelPromotionPanelFrame.update({
           where: { id: frame.id },

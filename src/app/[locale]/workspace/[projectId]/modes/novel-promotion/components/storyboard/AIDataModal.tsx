@@ -10,6 +10,7 @@ import { useAIDataModalState } from './hooks/useAIDataModalState'
 import AIDataModalFormPane from './AIDataModalFormPane'
 import AIDataModalPreviewPane from './AIDataModalPreviewPane'
 import { lockModalPageScroll } from './modal-scroll-lock'
+import { buildPanelAiDataJson } from '@/lib/novel-promotion/panel-ai-data-json'
 
 export type {
   AIDataModalProps,
@@ -30,6 +31,9 @@ export default function AIDataModal({
   description: initialDescription,
   location,
   characters,
+  props = [],
+  imagePrompt = null,
+  sourceText = null,
   videoPrompt: initialVideoPrompt,
   photographyRules: initialPhotographyRules,
   actingNotes: initialActingNotes,
@@ -70,19 +74,20 @@ export default function AIDataModal({
     onClose()
   }
 
-  const previewJson = {
-    aspect_ratio: videoRatio,
-    shot: {
-      shot_type: shotType,
-      camera_move: cameraMove,
-      description,
-      location,
-      characters,
-      prompt_text: `A ${videoRatio} shot: ${description}. ${videoPrompt}`,
-    },
-    ...(photographyRules ? { photography_rules: photographyRules } : {}),
-    ...(actingNotes.length > 0 ? { acting_notes: actingNotes } : {}),
-  }
+  const previewJson = buildPanelAiDataJson({
+    aspectRatio: videoRatio,
+    shotType,
+    cameraMove,
+    description,
+    location,
+    characters,
+    props,
+    imagePrompt,
+    videoPrompt,
+    sourceText,
+    photographyRules,
+    actingNotes: actingNotes.length > 0 ? actingNotes : null,
+  })
 
   useEffect(() => {
     if (!isOpen || typeof document === 'undefined') return undefined

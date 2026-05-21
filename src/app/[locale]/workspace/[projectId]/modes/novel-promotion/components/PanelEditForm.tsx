@@ -3,7 +3,7 @@
 import { useTranslations } from 'next-intl'
 import PanelEditFormV2 from '@/components/ui/patterns/PanelEditFormV2'
 import { GlassButton, GlassModalShell, GlassSurface } from '@/components/ui/primitives'
-import { Character, Location } from '@/types/project'
+import { Character, Location, Prop } from '@/types/project'
 import { useProjectAssets } from '@/lib/query/hooks/useProjectAssets'
 import { AppIcon } from '@/components/ui/icons'
 
@@ -22,10 +22,12 @@ export interface PanelEditData {
   description: string | null
   location: string | null
   characters: { name: string; appearance: string; slot?: string }[]
+  props: string[]
   srtStart: number | null
   srtEnd: number | null
   duration: number | null
   videoPrompt: string | null
+  groupVideoPrompt?: string | null
   photographyRules?: string | null
   actingNotes?: string | null
   sourceText?: string | null
@@ -40,8 +42,11 @@ interface PanelEditFormProps {
   onUpdate: (updates: Partial<PanelEditData>) => void
   onOpenCharacterPicker: () => void
   onOpenLocationPicker: () => void
+  onOpenPropPicker: () => void
   onRemoveCharacter: (index: number) => void
   onRemoveLocation: () => void
+  onRemoveProp: (index: number) => void
+  videoPromptField?: 'videoPrompt' | 'groupVideoPrompt'
   onRefineStoryboardPrompt?: () => void
   isRefiningStoryboardPrompt?: boolean
   refinedStoryboardPrompt?: string | null
@@ -59,8 +64,11 @@ export default function PanelEditForm({
   onUpdate,
   onOpenCharacterPicker,
   onOpenLocationPicker,
+  onOpenPropPicker,
   onRemoveCharacter,
   onRemoveLocation,
+  onRemoveProp,
+  videoPromptField,
   onRefineStoryboardPrompt,
   isRefiningStoryboardPrompt,
   refinedStoryboardPrompt,
@@ -78,8 +86,11 @@ export default function PanelEditForm({
       onUpdate={onUpdate}
       onOpenCharacterPicker={onOpenCharacterPicker}
       onOpenLocationPicker={onOpenLocationPicker}
+      onOpenPropPicker={onOpenPropPicker}
       onRemoveCharacter={onRemoveCharacter}
       onRemoveLocation={onRemoveLocation}
+      onRemoveProp={onRemoveProp}
+      videoPromptField={videoPromptField}
       onRefineStoryboardPrompt={onRefineStoryboardPrompt}
       isRefiningStoryboardPrompt={isRefiningStoryboardPrompt}
       refinedStoryboardPrompt={refinedStoryboardPrompt}
@@ -88,6 +99,66 @@ export default function PanelEditForm({
       isRegeneratingVideoPrompt={isRegeneratingVideoPrompt}
       uiMode="flow"
     />
+  )
+}
+
+interface PropPickerModalProps {
+  projectId: string
+  currentProps: string[]
+  onSelect: (propName: string) => void
+  onClose: () => void
+}
+
+export function PropPickerModal({
+  projectId,
+  currentProps,
+  onSelect,
+  onClose,
+}: PropPickerModalProps) {
+  const ts = useTranslations('storyboard')
+  const { data: assets } = useProjectAssets(projectId)
+  const props: Prop[] = assets?.props ?? []
+
+  return (
+    <GlassModalShell open onClose={onClose} size="md" title={ts('panel.selectProp')}>
+      <div className="max-h-[60vh] overflow-y-auto">
+        {props.length === 0 ? (
+          <p className="py-8 text-center text-[var(--glass-text-secondary)]">{ts('panel.noPropAssets')}</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {props.map(prop => {
+              const isSelected = currentProps.some((name) => name === prop.name)
+              return (
+                <button
+                  key={prop.id}
+                  type="button"
+                  disabled={isSelected}
+                  onClick={() => {
+                    if (!isSelected) onSelect(prop.name)
+                  }}
+                  className={`rounded-[var(--glass-radius-md)] border px-3 py-3 text-left transition-colors ${
+                    isSelected
+                      ? 'bg-[var(--glass-tone-success-bg)] text-[var(--glass-tone-success-fg)]'
+                      : 'bg-[var(--glass-bg-muted)] text-[var(--glass-text-secondary)] hover:border-[var(--glass-stroke-focus)]'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 font-medium text-[var(--glass-text-primary)]">
+                    <AppIcon name="package" className="h-3.5 w-3.5 text-[var(--glass-text-tertiary)]" />
+                    <span>{prop.name}</span>
+                  </div>
+                  {prop.summary ? (
+                    <div className="mt-1 line-clamp-2 text-xs text-[var(--glass-text-tertiary)]">{prop.summary}</div>
+                  ) : null}
+                  {isSelected ? (
+                    <span className="mt-1 inline-flex text-xs text-[var(--glass-tone-success-fg)]">{ts('panel.selected')}</span>
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </GlassModalShell>
   )
 }
 

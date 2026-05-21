@@ -19,6 +19,7 @@ interface ImageSectionActionButtonsProps {
   onOpenEditModal: () => void
   onOpenAIDataModal: () => void
   onUploadImage?: (panelId: string, file: File) => void | Promise<void>
+  onUsePreviousImage?: () => void
   onUndo?: (panelId: string) => void
   triggerPulse: () => void
 }
@@ -33,6 +34,7 @@ export default function ImageSectionActionButtons({
   onOpenEditModal,
   onOpenAIDataModal,
   onUploadImage,
+  onUsePreviousImage,
   onUndo,
   triggerPulse,
 }: ImageSectionActionButtonsProps) {
@@ -42,9 +44,9 @@ export default function ImageSectionActionButtons({
 
   return (
     <>
-      <div className={`absolute bottom-1.5 left-1/2 -translate-x-1/2 z-20 transition-opacity ${isSubmittingPanelImageTask ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-        <div className="relative glass-surface-modal border border-[var(--glass-stroke-base)] rounded-lg p-0.5">
-          <div className="flex items-center gap-0.5">
+      <div className={`absolute inset-x-2 bottom-1.5 z-20 flex justify-center transition-opacity ${isSubmittingPanelImageTask ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+        <div className="relative max-w-full glass-surface-modal border border-[var(--glass-stroke-base)] rounded-lg p-0.5">
+          <div className="flex max-w-full flex-wrap items-center justify-center gap-0.5">
             <ImageGenerationInlineCountButton
               prefix={
                 <>
@@ -89,6 +91,19 @@ export default function ImageSectionActionButtons({
                   title="上传图片"
                 >
                   <AppIcon name="upload" className="w-2.5 h-2.5" />
+                </button>
+              </>
+            )}
+            {onUsePreviousImage && (
+              <>
+                <div className="w-px h-3 bg-[var(--glass-stroke-base)]" />
+                <button
+                  onClick={onUsePreviousImage}
+                  className={`glass-btn-base glass-btn-secondary flex h-6 items-center gap-0.5 rounded-md px-1.5 text-[10px] transition-all active:scale-95 ${isSubmittingPanelImageTask || isModifying ? 'opacity-75' : ''}`}
+                  title="从上一大分镜选择图片"
+                >
+                  <AppIcon name="imagePreview" className="w-2.5 h-2.5" />
+                  <span>上一镜</span>
                 </button>
               </>
             )}

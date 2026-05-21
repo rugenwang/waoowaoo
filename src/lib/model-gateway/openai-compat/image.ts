@@ -190,6 +190,10 @@ function isEeeApiProvider(providerId: string): boolean {
   return normalized === 'eeeapi' || normalized.startsWith('eeeapi:')
 }
 
+function isGptImage2Model(modelId: string | undefined): boolean {
+  return (modelId || '').trim().toLowerCase() === 'gpt-image-2'
+}
+
 function aspectRatioToEeeApiSize(aspectRatio: string): string | undefined {
   const ratio = aspectRatio.trim()
   const mapping: Record<string, string> = {
@@ -200,6 +204,14 @@ function aspectRatioToEeeApiSize(aspectRatio: string): string | undefined {
     '2:3': '1024x1536',
   }
   return mapping[ratio]
+}
+
+function normalizeEeeApiSizeAlias(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const normalized = value.trim().toLowerCase()
+  if (normalized === '2k') return '2720x1536'
+  if (normalized === '4k') return '3840x2160'
+  return value
 }
 
 function buildExtraBody(options: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -372,7 +384,11 @@ export async function generateImageViaOpenAICompat(request: OpenAICompatImageReq
     const rawSize = resolveRawSize(effectiveOptions)
     // 用户如果已经显式选择了 resolution/size，则优先尊重用户输入；
     // 只有在未指定尺寸时，才根据 aspectRatio 推导默认 size。
-    if (!rawSize && rawAspectRatio) {
+    if (rawSize && rawAspectRatio) {
+      // exact pixel size wins. Sending aspect_ratio together with 2720x1536 can make
+      // some gpt-image-2 compatible services fall back to the ratio preset, e.g. 3:2 -> 1536x1024.
+      delete effectiveOptions.aspectRatio
+    } else if (!rawSize && rawAspectRatio) {
       const mapped = aspectRatioToEeeApiSize(rawAspectRatio)
       if (mapped) {
         effectiveOptions.size = mapped
@@ -399,8 +415,11 @@ export async function generateImageViaOpenAICompat(request: OpenAICompatImageReq
   const responseFormat = normalizeResponseFormat(effectiveOptions.responseFormat)
   const outputFormat = normalizeOutputFormat(effectiveOptions.outputFormat)
   const quality = normalizeGenerateQuality(effectiveOptions.quality)
-  const rawSize = resolveRawSize(effectiveOptions)
-  const size = isEeeApiProvider(providerId)
+  const supportsFlexiblePixelSize = isEeeApiProvider(providerId) || isGptImage2Model(normalizedModelId)
+  const rawSize = supportsFlexiblePixelSize
+    ? normalizeEeeApiSizeAlias(resolveRawSize(effectiveOptions))
+    : resolveRawSize(effectiveOptions)
+  const size = supportsFlexiblePixelSize
     ? (rawSize
       ? (rawSize === 'auto' || /^\d{2,5}x\d{2,5}$/.test(rawSize)
         ? rawSize

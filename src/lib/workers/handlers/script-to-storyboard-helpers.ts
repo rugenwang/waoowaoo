@@ -79,9 +79,23 @@ function readString(record: JsonRecord, keys: string[]): string | null {
   return null
 }
 
+const FACE_PROMPT_FORBIDDEN_REPLACEMENTS: Array<[RegExp, string]> = [
+  [/(瞪大双眼|瞪眼|怒目圆睁)/g, '目光锐利'],
+  [/(死鱼眼|无神大眼|眼睛超大)/g, '眼神专注'],
+  [/(嘴角夸张上扬|歪嘴|邪笑)/g, '神情克制'],
+  [/(咬牙切齿|咬紧牙关|嘴唇紧闭用力)/g, '下颌微收'],
+  [/(五官扭曲|面部紧绷|面部狰狞)/g, '神情紧张克制'],
+  [/(瞳孔放大|眼球突出|眼白过多)/g, '目光一怔'],
+  [/(挑眉过度|挑眉凶狠)/g, '眉头微蹙'],
+  [/(脸部僵硬|面无表情呆滞)/g, '神情克制'],
+]
+
 function cleanVideoPromptText(value: string | null): string | null {
   if (!value) return null
-  const cleaned = value
+  const cleaned = FACE_PROMPT_FORBIDDEN_REPLACEMENTS.reduce(
+    (text, [pattern, replacement]) => text.replace(pattern, replacement),
+    value,
+  )
     .replace(/[①②③④⑤⑥⑦⑧⑨⑩]\s*/g, '')
     .replace(/(?:[（(]\s*)?(?:主运镜|辅助运镜)(?:\s*[）)])?/g, '')
     .replace(/【对话】\s*(?:无台词|无明确台词|暂无台词|没有台词)\s*[；;。]?/g, '')

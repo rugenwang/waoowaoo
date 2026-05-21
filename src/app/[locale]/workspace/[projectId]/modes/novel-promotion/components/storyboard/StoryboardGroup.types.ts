@@ -3,6 +3,7 @@ import type { StoryboardPanel } from './hooks/useStoryboardState'
 import type { PanelEditData } from '../PanelEditForm'
 import type { VariantData, VariantOptions } from './hooks/usePanelVariant'
 import type { PanelSaveState } from './hooks/usePanelCrudActions'
+import type { PreviousPanelImageOption } from './PanelCard'
 
 export interface StoryboardGroupProps {
   storyboard: NovelPromotionStoryboard
@@ -39,12 +40,16 @@ export interface StoryboardGroupProps {
   onPanelDelete: (panelId: string) => void
   onOpenCharacterPicker: (panelId: string) => void
   onOpenLocationPicker: (panelId: string) => void
+  onOpenPropPicker: (panelId: string) => void
   onRemoveCharacter: (panel: StoryboardPanel, index: number) => void
   onRemoveLocation: (panel: StoryboardPanel) => void
+  onRemoveProp: (panel: StoryboardPanel, index: number) => void
   onRetryPanelSave: (panelId: string) => void
   onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean) => void
   onUploadImage?: (panelId: string, file: File) => void | Promise<void>
+  onUploadImageFromSource?: (panelId: string, sourceImageUrl: string) => void | Promise<void>
   onUploadFrameImage?: (frameId: string, file: File) => void | Promise<void>
+  onUploadFrameImageFromSource?: (frameId: string, sourceImageUrl: string) => void | Promise<void>
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
@@ -72,4 +77,5 @@ export interface StoryboardGroupProps {
     options: VariantOptions,
   ) => Promise<void>
   submittingVariantPanelId: string | null
+  previousPanelImageOptionsByPanelId?: Record<string, PreviousPanelImageOption[]>
 }

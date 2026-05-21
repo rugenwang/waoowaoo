@@ -7,6 +7,7 @@ import { getArtStylePrompt, prependAnimeStyleLabel } from '@/lib/constants'
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
 import { executeAiTextStep } from '@/lib/ai-runtime/client'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
+import { createScopedLogger } from '@/lib/logging/core'
 import {
   buildPanelPrompt,
   buildPanelPromptContext,
@@ -32,6 +33,18 @@ function pickDraftString(draft: DraftRecord | null, key: string, fallback: strin
   return typeof value === 'string' ? value : fallback
 }
 
+function pickDraftJsonString(draft: DraftRecord | null, key: string, fallback: string | null): string | null {
+  if (!draft || !(key in draft)) return fallback
+  const value = draft[key]
+  if (value === null || value === undefined) return null
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return fallback
+  }
+}
+
 export const POST = apiHandler(async (
   request: NextRequest,
   context: { params: Promise<{ projectId: string }> },
@@ -40,6 +53,12 @@ export const POST = apiHandler(async (
   const authResult = await requireProjectAuth(projectId)
   if (isErrorResponse(authResult)) return authResult
   const { session } = authResult
+  const logger = createScopedLogger({
+    module: 'api.novel-promotion.refine-storyboard-prompt',
+    action: 'NP_STORYBOARD_PROMPT_REFINE',
+    projectId,
+    userId: session.user.id,
+  })
 
   const body = await request.json().catch(() => ({}))
   const panelId = typeof body?.panelId === 'string' ? body.panelId.trim() : ''
@@ -82,23 +101,31 @@ export const POST = apiHandler(async (
   const draftCharacters = draft && Array.isArray(draft.characters)
     ? JSON.stringify(draft.characters)
     : panel.characters
+  const draftProps = draft && Array.isArray(draft.props)
+    ? JSON.stringify(draft.props)
+    : panel.props
+  const panelVideoPromptFallback = panel.panelMode === 'group'
+    ? panel.groupVideoPrompt || panel.videoPrompt
+    : panel.videoPrompt
   const effectivePanel = {
     id: panel.id,
     shotType: pickDraftString(draft, 'shotType', panel.shotType),
     cameraMove: pickDraftString(draft, 'cameraMove', panel.cameraMove),
     description: pickDraftString(draft, 'description', panel.description),
-    imagePrompt: panel.imagePrompt,
-    videoPrompt: pickDraftString(draft, 'videoPrompt', panel.videoPrompt),
+    imagePrompt: pickDraftString(draft, 'imagePrompt', null),
+    videoPrompt: pickDraftString(draft, 'videoPrompt', panelVideoPromptFallback || null),
     location: pickDraftString(draft, 'location', panel.location),
     characters: draftCharacters,
-    srtSegment: panel.srtSegment,
-    photographyRules: panel.photographyRules,
-    actingNotes: panel.actingNotes,
+    props: draftProps,
+    srtSegment: pickDraftString(draft, 'sourceText', null),
+    photographyRules: pickDraftJsonString(draft, 'photographyRules', null),
+    actingNotes: pickDraftJsonString(draft, 'actingNotes', null),
     sketchImageUrl: panel.sketchImageUrl,
   }
   const promptContext = buildPanelPromptContext({
     panel: effectivePanel,
     projectData,
+    aspectRatio,
   })
   const contextJson = JSON.stringify(promptContext, null, 2)
   const parsedStoryboardModel = parseModelKeyStrict(modelConfig.storyboardModel)
@@ -113,7 +140,7 @@ export const POST = apiHandler(async (
       locale,
       aspectRatio,
       styleText: artStyle || '与参考图风格一致',
-      sourceText: effectivePanel.srtSegment || effectivePanel.description || '',
+      sourceText: effectivePanel.description || '',
       contextJson,
     })
 
@@ -139,13 +166,31 @@ export const POST = apiHandler(async (
       locale,
       variables: {
         storyboard_text_json_input: contextJson,
-        source_text: effectivePanel.srtSegment || effectivePanel.description || '',
+        source_text: effectivePanel.description || '',
         aspect_ratio: aspectRatio,
         style: artStyle || '与参考图风格一致',
         strength,
         reference_images_count: String(referenceImages.length),
       },
     })
+
+  logger.info({
+    message: 'storyboard prompt refine request payload',
+    details: {
+      panelId,
+      locale,
+      model: modelConfig.analysisModel,
+      usePanelDescription,
+      aspectRatio,
+      strength,
+      referenceImagesCount: referenceImages.length,
+      data: usePanelDescription
+        ? { panel_description: panelDescription }
+        : promptContext,
+      contextJson,
+      refineUserPrompt,
+    },
+  })
 
   const res = await executeAiTextStep({
     userId: session.user.id,
@@ -167,6 +212,14 @@ export const POST = apiHandler(async (
   })
 
   const refinedPrompt = cleanupRefinedPrompt(res.text) || fallbackPrompt
+  logger.info({
+    message: 'storyboard prompt refine response payload',
+    details: {
+      panelId,
+      rawResponseText: res.text,
+      cleanedPrompt: refinedPrompt,
+    },
+  })
   const withAnimeStyle = prependAnimeStyleLabel({
     prompt: refinedPrompt,
     artStyle: modelConfig.artStyle,

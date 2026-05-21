@@ -33,10 +33,11 @@ Output format (JSON array only):
   {
     "panel_number": 1,
     "description": "visual action description",
-    "characters": [
-      { "name": "Character Name", "appearance": "appearance name", "slot": "the position beneath the throne steps at the center of the hall" }
-    ],
-    "location": "location name",
+	    "characters": [
+	      { "name": "Character Name", "appearance": "appearance name", "slot": "the position beneath the throne steps at the center of the hall" }
+	    ],
+	    "props": [],
+	    "location": "location name",
     "scene_type": "daily",
     "source_text": "exact or near-exact source excerpt",
     "shot_type": "medium shot",
@@ -61,7 +62,7 @@ Output format (JSON array only):
 
 Panel mode semantics:
 - `panel_mode` is the storyboard structure type. It tells the system whether this top-level panel should be generated from one representative image or from a connected group of key frames.
-- `panel_mode="single"` means one image is enough: one spoken line, one stable reaction, one simple expression, one small/static action. `frames` must contain exactly 1 item with `frame_index=0`, `frame_time_sec=0`, `frame_role="hero"`, `dependency_frame_ids=[]`. Do not output `group_video_prompt`.
+- `panel_mode="single"` means one image is enough: one spoken line, one stable reaction, one simple expression, one small/static action. `frames` must contain exactly 1 item with `frame_index=0`, `frame_time_sec=0`, `frame_role="hero"`, `dependency_frame_ids=[]` unless the first frame needs to continue from the previous top-level panel tail, in which case `dependency_frame_ids` may be `["FP"]`. Do not output `group_video_prompt`.
 - `panel_mode="group"` means the panel is a continuous video beat needing 2-20 connected key frames, decided by duration + action density + transition/camera-movement density: visible movement, turning, walking, chasing, fighting, scene transition, multi-stage emotion/action, or clearly different beginning/end states. Frames must be chronological and later frames should depend on earlier frames through `dependency_frame_ids`.
 - Do not make every panel `group` just because the user selected an 8/10/15/20 second duration preference. Use `group` only when multiple visual states are truly needed. Simple panels remain `single`.
 - For group panels, `duration_sec` must be <= 20 seconds. The first frame must be the original/before-action state, not the completed result.
@@ -69,6 +70,8 @@ Panel mode semantics:
 - Increase frame count when there are many actions, position changes, prop interactions, multi-person interactions, scene transitions, flashbacks/dreams, or dense camera moves such as orbit, dive, tracking, whip pan, dolly, push, pull, or pass-through shots.
 - Ultra-high density action/camera movement should approach 1 frame per second, capped by duration_sec, so a 20s group may use up to 20 frames. Use this for continuous fighting, melee, high-speed chase, repeated dodge/block/combo actions, explosion/falling, rapid cutting, continuous transitions, or dense whip-pan/pass-through/tracking camera combinations.
 - If a non-ultra-high-density 20s beat needs more than 8 key states, split it into two top-level group panels. If it is clearly ultra-high-density action/camera movement, keep one group and output up to 20 frames.
+- Top-level `props` must list visible or interacted prop asset names selected from Props info. Distinctive objects such as backpacks, bags, watches, rings, bracelets, phones, books, umbrellas, cups, cameras, keys, suitcases, weapons, magical tools, tokens, and folders must be prop assets, not character appearance. If no prop is visible or used, output `props: []`.
+- `FP` means the first frame references the previous top-level panel tail frame. Use `FP` only in `frame_index=0` when continuity truly needs the previous ending state: same character position, pose, prop state, lighting, or continuous action. Do not use `FP` for a new scene, time jump, dream/flashback, or unrelated shot. The frame `reference_policy` must mention preserving continuity from the previous panel tail without copying composition.
 
 Mode examples:
 [
@@ -76,9 +79,10 @@ Mode examples:
     "panel_number": 1,
     "panel_mode": "group",
     "duration_sec": 8,
-    "description": "Continuous group: Zhang San enters the office, looks at Li Si and Wang Wu, and announces the meeting",
-    "characters": [{"name": "Zhang San", "appearance": "default"}, {"name": "Li Si", "appearance": "default"}, {"name": "Wang Wu", "appearance": "default"}],
-    "location": "Office",
+	    "description": "Continuous group: Zhang San enters the office, looks at Li Si and Wang Wu, and announces the meeting",
+	    "characters": [{"name": "Zhang San", "appearance": "default"}, {"name": "Li Si", "appearance": "default"}, {"name": "Wang Wu", "appearance": "default"}],
+	    "props": [],
+	    "location": "Office",
     "scene_type": "daily",
     "source_text": "Zhang San walks into the office and says: meeting time.",
     "frames": [
@@ -106,9 +110,10 @@ Mode examples:
     "panel_number": 2,
     "panel_mode": "single",
     "duration_sec": 4,
-    "description": "Single panel: Zhang San adds one line at the office doorway, focusing on his face and lip movement",
-    "characters": [{"name": "Zhang San", "appearance": "default"}],
-    "location": "Office",
+	    "description": "Single panel: Zhang San adds one line at the office doorway, focusing on his face and lip movement",
+	    "characters": [{"name": "Zhang San", "appearance": "default"}],
+	    "props": [],
+	    "location": "Office",
     "scene_type": "daily",
     "source_text": "Zhang San adds: hurry up.",
     "frames": [
@@ -138,5 +143,6 @@ Planning rules:
 10. Do not shorten, rewrite, summarize, or replace a provided slot phrase with a short token such as `slot_1`, `left`, or `throne_front`.
 11. Every top-level panel must include `panel_mode`, `duration_sec`, and `frames`.
 12. `single` panels must have exactly 1 frame. `group` panels must have 2-20 frames, based on duration, action density, and transition/camera-movement density; ultra-high-density action/camera movement may approach 1 frame per second.
+13. Every panel must include `props`; use an empty array when no provided prop asset is visible or used.
 13. Return strict JSON only.
 14. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.

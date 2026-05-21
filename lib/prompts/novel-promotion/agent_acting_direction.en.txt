@@ -17,6 +17,7 @@ Requirements:
    - body language / posture
    - micro action and gaze direction
 4. Use only observable descriptions. Avoid abstract words like "sad" without visual evidence.
+5. Do not use face-damaging Chinese-style acting terms or their equivalents: glaring, bulging eyes, dead eyes, oversized eyes, crooked grin, evil smirk, exaggerated mouth corner, gritted teeth, tightly clenched lips, twisted features, distorted face, bulging eyeballs, excessive eye whites, over-raised eyebrows, stiff face, or blank lifeless expression. Prefer restrained natural expressions such as focused gaze, slightly furrowed brows, controlled expression, and subtly set jaw.
 
 Output format (JSON array only):
 [

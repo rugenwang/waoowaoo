@@ -356,11 +356,20 @@ export async function resolveImageSourceFromGeneration(
             ? (baseUrlRaw.endsWith('/v1') ? `${baseUrlRaw}/images/generations` : `${baseUrlRaw}/v1/images/generations`)
             : 'https://api.img.dengche.cc/v1/images/generations'
           const optAny = (params.options || {}) as Record<string, unknown>
-          const size = (typeof optAny.size === 'string' && optAny.size.trim())
+          const normalizeEeeApiSizeAlias = (value: string) => {
+            const normalized = value.trim().toLowerCase()
+            if (normalized === '2k') return '2720x1536'
+            if (normalized === '4k') return '3840x2160'
+            return value.trim()
+          }
+          const configuredSize = (typeof optAny.size === 'string' && optAny.size.trim())
             ? optAny.size.trim()
             : (typeof (capabilityOptions as Record<string, unknown>)?.size === 'string'
               ? String((capabilityOptions as Record<string, unknown>).size)
-              : '1024x1024')
+              : (typeof (capabilityOptions as Record<string, unknown>)?.resolution === 'string'
+                ? String((capabilityOptions as Record<string, unknown>).resolution)
+                : '1024x1024'))
+          const size = normalizeEeeApiSizeAlias(configuredSize)
           const n = (typeof optAny.n === 'number' && Number.isFinite(optAny.n)) ? Math.max(1, Math.floor(optAny.n)) : 1
           return {
             endpoint,

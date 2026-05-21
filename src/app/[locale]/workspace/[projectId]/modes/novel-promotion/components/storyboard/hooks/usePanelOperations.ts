@@ -83,6 +83,8 @@ export function usePanelOperations({
     addCharacterToPanel: panelCrud.addCharacterToPanel,
     removeCharacterFromPanel: panelCrud.removeCharacterFromPanel,
     setPanelLocation: panelCrud.setPanelLocation,
+    addPropToPanel: panelCrud.addPropToPanel,
+    removePropFromPanel: panelCrud.removePropFromPanel,
     insertPanel: panelInsert.insertPanel,
     duplicatePanel,
     splitPanelFrame,

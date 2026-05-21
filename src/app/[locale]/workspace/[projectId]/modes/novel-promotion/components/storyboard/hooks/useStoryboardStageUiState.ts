@@ -5,7 +5,7 @@ import { useState } from 'react'
 export function useStoryboardStageUiState() {
   const [assetPickerPanel, setAssetPickerPanel] = useState<{
     panelId: string
-    type: 'character' | 'location'
+    type: 'character' | 'location' | 'prop'
   } | null>(null)
 
   const [aiDataPanel, setAIDataPanel] = useState<{

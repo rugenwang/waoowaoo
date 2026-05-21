@@ -317,8 +317,9 @@ export function useRefreshStoryboards(episodeId: string | null) {
 
     return () => {
         if (episodeId) {
-            queryClient.invalidateQueries({ queryKey: queryKeys.storyboards.all(episodeId) })
+            return queryClient.invalidateQueries({ queryKey: queryKeys.storyboards.all(episodeId) })
         }
+        return Promise.resolve()
     }
 }
 

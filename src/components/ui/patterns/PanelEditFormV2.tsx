@@ -22,8 +22,11 @@ export interface PanelEditFormV2Props {
   onUpdate: (updates: Partial<PanelEditData>) => void
   onOpenCharacterPicker: () => void
   onOpenLocationPicker: () => void
+  onOpenPropPicker: () => void
   onRemoveCharacter: (index: number) => void
   onRemoveLocation: () => void
+  onRemoveProp: (index: number) => void
+  videoPromptField?: 'videoPrompt' | 'groupVideoPrompt'
   onRefineStoryboardPrompt?: () => void
   isRefiningStoryboardPrompt?: boolean
   refinedStoryboardPrompt?: string | null
@@ -50,8 +53,11 @@ export default function PanelEditFormV2({
   onUpdate,
   onOpenCharacterPicker,
   onOpenLocationPicker,
+  onOpenPropPicker,
   onRemoveCharacter,
   onRemoveLocation,
+  onRemoveProp,
+  videoPromptField = 'videoPrompt',
   onRefineStoryboardPrompt,
   isRefiningStoryboardPrompt = false,
   refinedStoryboardPrompt = null,
@@ -72,12 +78,20 @@ export default function PanelEditFormV2({
     }
   }
 
+  const currentVideoPromptValue = videoPromptField === 'groupVideoPrompt'
+    ? panelData.groupVideoPrompt || panelData.videoPrompt || ''
+    : panelData.videoPrompt || ''
+
+  const updateVideoPromptValue = (value: string) => {
+    onUpdate(videoPromptField === 'groupVideoPrompt' ? { groupVideoPrompt: value } : { videoPrompt: value })
+  }
+
   const openLargeTextEditor = (field: 'description' | 'videoPrompt') => {
     setLargeTextEditor({
       field,
       title: field === 'description' ? t('panel.sceneDescription') : t('panel.videoPrompt'),
       subtitle: field === 'description' ? t('panel.sceneDescriptionPlaceholder') : t('panel.videoPromptHint'),
-      value: field === 'description' ? panelData.description || '' : panelData.videoPrompt || '',
+      value: field === 'description' ? panelData.description || '' : currentVideoPromptValue,
       placeholder: field === 'description' ? t('panel.sceneDescriptionPlaceholder') : t('panel.videoPromptPlaceholder'),
     })
   }
@@ -89,7 +103,7 @@ export default function PanelEditFormV2({
     if (largeTextEditor.field === 'description') {
       onUpdate({ description: largeTextEditor.value })
     } else {
-      onUpdate({ videoPrompt: largeTextEditor.value })
+      updateVideoPromptValue(largeTextEditor.value)
     }
     setLargeTextEditor(null)
   }
@@ -254,16 +268,20 @@ export default function PanelEditFormV2({
           </div>
         )}
       >
-        <GlassTextarea
-          density="compact"
-          rows={2}
-          value={panelData.videoPrompt || ''}
-          onChange={(event) => onUpdate({ videoPrompt: event.target.value })}
-          placeholder={t('panel.videoPromptPlaceholder')}
-        />
+        <button
+          type="button"
+          onClick={() => openLargeTextEditor('videoPrompt')}
+          className="block max-h-28 min-h-[4.75rem] w-full overflow-y-auto whitespace-pre-wrap break-words rounded-[var(--glass-radius-md)] border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] px-3 py-2.5 text-left text-xs leading-5 text-[var(--glass-text-secondary)] transition hover:border-[var(--glass-tone-info-fg)] hover:bg-[var(--glass-bg-surface)]"
+        >
+          {currentVideoPromptValue || (
+            <span className="text-[var(--glass-text-tertiary)] italic">
+              {t('panel.videoPromptPlaceholder')}
+            </span>
+          )}
+        </button>
       </GlassField>
 
-      <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2 xl:grid-cols-3">
         <GlassField
           label={t('panel.locationLabel')}
           actions={
@@ -311,6 +329,33 @@ export default function PanelEditFormV2({
             </div>
           ) : (
             <p className="text-xs text-[var(--glass-text-tertiary)]">{t('panel.charactersNotEdited')}</p>
+          )}
+        </GlassField>
+
+        <GlassField
+          label={t('panel.propLabelWithCount', { count: panelData.props.length })}
+          actions={
+            <button
+              type="button"
+              onClick={onOpenPropPicker}
+              className="inline-flex h-8 w-8 items-center justify-center text-[var(--glass-text-secondary)] hover:text-[var(--glass-tone-info-fg)] transition-colors"
+              aria-label={t('panel.editProp')}
+              title={t('panel.editProp')}
+            >
+              <AppIcon name="edit" className="h-4 w-4" />
+            </button>
+          }
+        >
+          {panelData.props.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {panelData.props.map((propName, index) => (
+                <GlassChip key={`${propName}-${index}`} tone="neutral" onRemove={() => onRemoveProp(index)}>
+                  {propName}
+                </GlassChip>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-[var(--glass-text-tertiary)]">{t('panel.propsNotEdited')}</p>
           )}
         </GlassField>
       </div>

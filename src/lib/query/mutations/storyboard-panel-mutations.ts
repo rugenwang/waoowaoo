@@ -13,6 +13,39 @@ import {
     requestTaskResponseWithError,
 } from './mutation-shared'
 
+type EpisodeDataWithStoryboards = {
+    storyboards?: Array<{
+        id?: string
+        panels?: Array<Record<string, unknown>>
+    }>
+} & Record<string, unknown>
+
+function patchEpisodePanelsCache(
+    queryClient: ReturnType<typeof useQueryClient>,
+    projectId: string,
+    payload: {
+        storyboardId: string
+        panelIndex: number
+        patch: Record<string, unknown>
+    },
+) {
+    const queries = queryClient.getQueriesData<EpisodeDataWithStoryboards>({
+        queryKey: ['episode-data', projectId],
+    })
+
+    for (const [queryKey, data] of queries) {
+        if (!data?.storyboards) continue
+        const nextStoryboards = data.storyboards.map((storyboard) => {
+            if (storyboard.id !== payload.storyboardId || !Array.isArray(storyboard.panels)) return storyboard
+            const nextPanels = storyboard.panels.map((panel, index) =>
+                index === payload.panelIndex ? { ...panel, ...payload.patch } : panel,
+            )
+            return { ...storyboard, panels: nextPanels }
+        })
+        queryClient.setQueryData(queryKey, { ...data, storyboards: nextStoryboards })
+    }
+}
+
 export function useRegenerateProjectPanelImage(projectId: string) {
     const queryClient = useQueryClient()
     return useMutation({
@@ -77,10 +110,20 @@ export function useUploadProjectPanelImage(projectId: string) {
         mutationFn: async ({
             file,
             panelId,
+            sourceImageUrl,
         }: {
-            file: File
+            file?: File
             panelId: string
+            sourceImageUrl?: string
         }) => {
+            if (sourceImageUrl) {
+                return await requestJsonWithError(`/api/novel-promotion/${projectId}/upload-panel-image`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ panelId, sourceImageUrl }),
+                }, '上传分镜图失败')
+            }
+            if (!file) throw new Error('缺少上传图片')
             const formData = new FormData()
             formData.append('file', file)
             formData.append('panelId', panelId)
@@ -102,10 +145,20 @@ export function useUploadProjectPanelFrameImage(projectId: string) {
         mutationFn: async ({
             file,
             frameId,
+            sourceImageUrl,
         }: {
-            file: File
+            file?: File
             frameId: string
+            sourceImageUrl?: string
         }) => {
+            if (sourceImageUrl) {
+                return await requestJsonWithError(`/api/novel-promotion/${projectId}/upload-panel-frame-image`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ frameId, sourceImageUrl }),
+                }, '上传关键帧图片失败')
+            }
+            if (!file) throw new Error('缺少上传图片')
             const formData = new FormData()
             formData.append('file', file)
             formData.append('frameId', frameId)
@@ -369,8 +422,23 @@ export function useUpdateProjectPanel(projectId: string) {
                 },
                 '保存失败',
             ),
+        onMutate: (payload: Record<string, unknown>) => {
+            const storyboardId = typeof payload.storyboardId === 'string' ? payload.storyboardId : ''
+            const panelIndex = typeof payload.panelIndex === 'number' ? payload.panelIndex : Number(payload.panelIndex)
+            if (!storyboardId || !Number.isFinite(panelIndex)) return
+            const patch = { ...payload }
+            delete patch.storyboardId
+            delete patch.panelIndex
+            delete patch.id
+            patchEpisodePanelsCache(queryClient, projectId, {
+                storyboardId,
+                panelIndex,
+                patch,
+            })
+        },
         onSettled: () => {
             invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            void queryClient.invalidateQueries({ queryKey: ['episode-data', projectId], exact: false })
         },
     })
 }

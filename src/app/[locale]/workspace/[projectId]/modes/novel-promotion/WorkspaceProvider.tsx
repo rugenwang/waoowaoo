@@ -46,6 +46,7 @@ export function WorkspaceProvider({ projectId, episodeId, invalidateMode = 'defa
     }
 
     if (!scope || scope === 'all' || scope === 'assets') {
+      promises.push(queryClient.refetchQueries({ queryKey: queryKeys.assets.all('project', projectId) }))
       promises.push(queryClient.refetchQueries({ queryKey: queryKeys.projectAssets.all(projectId) }))
     }
 

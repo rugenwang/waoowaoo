@@ -52,29 +52,40 @@ export function useSSE({
     const invalidateByTarget = (targetType: string | null, resolvedEpisodeId: string | null) => {
       if (isGlobalAssetProject) {
         if (targetType?.startsWith('GlobalCharacter')) {
+          queryClient.invalidateQueries({ queryKey: queryKeys.assets.all('global') })
           queryClient.invalidateQueries({ queryKey: queryKeys.globalAssets.characters() })
+          queryClient.invalidateQueries({ queryKey: queryKeys.globalAssets.all() })
           return
         }
         if (targetType?.startsWith('GlobalLocation')) {
+          queryClient.invalidateQueries({ queryKey: queryKeys.assets.all('global') })
           queryClient.invalidateQueries({ queryKey: queryKeys.globalAssets.locations() })
+          queryClient.invalidateQueries({ queryKey: queryKeys.globalAssets.all() })
           return
         }
         if (targetType?.startsWith('GlobalVoice')) {
+          queryClient.invalidateQueries({ queryKey: queryKeys.assets.all('global') })
           queryClient.invalidateQueries({ queryKey: queryKeys.globalAssets.voices() })
+          queryClient.invalidateQueries({ queryKey: queryKeys.globalAssets.all() })
           return
         }
+        queryClient.invalidateQueries({ queryKey: queryKeys.assets.all('global') })
         queryClient.invalidateQueries({ queryKey: queryKeys.globalAssets.all() })
         return
       }
 
       if (targetType === 'CharacterAppearance' || targetType === 'NovelPromotionCharacter') {
+        queryClient.invalidateQueries({ queryKey: queryKeys.assets.all('project', projectId) })
         queryClient.invalidateQueries({ queryKey: queryKeys.projectAssets.characters(projectId) })
         queryClient.invalidateQueries({ queryKey: queryKeys.projectAssets.all(projectId) })
+        queryClient.invalidateQueries({ queryKey: queryKeys.projectData(projectId) })
         return
       }
       if (targetType === 'LocationImage' || targetType === 'NovelPromotionLocation') {
+        queryClient.invalidateQueries({ queryKey: queryKeys.assets.all('project', projectId) })
         queryClient.invalidateQueries({ queryKey: queryKeys.projectAssets.locations(projectId) })
         queryClient.invalidateQueries({ queryKey: queryKeys.projectAssets.all(projectId) })
+        queryClient.invalidateQueries({ queryKey: queryKeys.projectData(projectId) })
         return
       }
       if (targetType === 'NovelPromotionVoiceLine') {
@@ -83,6 +94,7 @@ export function useSSE({
       }
       if (
         targetType === 'NovelPromotionPanel' ||
+        targetType === 'NovelPromotionPanelFrame' ||
         targetType === 'NovelPromotionStoryboard' ||
         targetType === 'NovelPromotionShot'
       ) {
@@ -195,7 +207,7 @@ export function useSSE({
             normalizedLifecycleType === TASK_EVENT_TYPE.COMPLETED ||
             normalizedLifecycleType === TASK_EVENT_TYPE.FAILED
           ) {
-            invalidateEpisodeScoped(resolvedEpisodeId)
+            invalidateByTarget(targetType, resolvedEpisodeId)
           }
           return
         }

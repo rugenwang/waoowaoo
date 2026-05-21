@@ -116,10 +116,11 @@ export function useRefreshEpisodeData(projectId: string | null, episodeId: strin
 
     return () => {
         if (projectId && episodeId) {
-            queryClient.invalidateQueries({
+            return queryClient.invalidateQueries({
                 queryKey: queryKeys.episodeData(projectId, episodeId)
             })
         }
+        return Promise.resolve()
     }
 }
 
@@ -131,6 +132,7 @@ export function useRefreshAll(projectId: string | null, episodeId: string | null
 
     return () => {
         if (projectId) {
+            queryClient.invalidateQueries({ queryKey: queryKeys.assets.all('project', projectId) })
             queryClient.invalidateQueries({ queryKey: queryKeys.projectData(projectId) })
             queryClient.invalidateQueries({ queryKey: queryKeys.projectAssets.all(projectId) })
         }

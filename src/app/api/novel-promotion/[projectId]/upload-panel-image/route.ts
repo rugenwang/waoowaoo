@@ -1,10 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import sharp from 'sharp'
 import { prisma } from '@/lib/prisma'
-import { uploadObject, generateUniqueKey } from '@/lib/storage'
+import { uploadObject, generateUniqueKey, getObjectBuffer, toFetchableUrl } from '@/lib/storage'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
-import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
+import { ensureMediaObjectFromStorageKey, resolveStorageKeyFromMediaValue } from '@/lib/media/service'
+
+async function readSourceImageBuffer(file: File | null, sourceImageUrl: string | null) {
+  if (file) {
+    return Buffer.from(await file.arrayBuffer())
+  }
+  if (!sourceImageUrl) return null
+
+  const storageKey = await resolveStorageKeyFromMediaValue(sourceImageUrl)
+  if (storageKey) {
+    return getObjectBuffer(storageKey)
+  }
+
+  const response = await fetch(toFetchableUrl(sourceImageUrl))
+  if (!response.ok) {
+    throw new ApiError('INVALID_PARAMS', {
+      message: `读取来源图片失败：${response.status}`,
+    })
+  }
+  return Buffer.from(await response.arrayBuffer())
+}
 
 /**
  * POST /api/novel-promotion/[projectId]/upload-panel-image
@@ -19,11 +39,22 @@ export const POST = apiHandler(async (
   const authResult = await requireProjectAuthLight(projectId)
   if (isErrorResponse(authResult)) return authResult
 
-  const formData = await request.formData()
-  const file = formData.get('file') as File | null
-  const panelId = String(formData.get('panelId') || '')
+  const contentType = request.headers.get('content-type') || ''
+  let file: File | null = null
+  let panelId = ''
+  let sourceImageUrl: string | null = null
 
-  if (!file || !panelId) {
+  if (contentType.includes('application/json')) {
+    const body = await request.json().catch(() => ({}))
+    panelId = typeof body?.panelId === 'string' ? body.panelId.trim() : ''
+    sourceImageUrl = typeof body?.sourceImageUrl === 'string' ? body.sourceImageUrl.trim() : null
+  } else {
+    const formData = await request.formData()
+    file = formData.get('file') as File | null
+    panelId = String(formData.get('panelId') || '')
+  }
+
+  if ((!file && !sourceImageUrl) || !panelId) {
     throw new ApiError('INVALID_PARAMS')
   }
 
@@ -47,8 +78,10 @@ export const POST = apiHandler(async (
     throw new ApiError('NOT_FOUND')
   }
 
-  const arrayBuffer = await file.arrayBuffer()
-  const buffer = Buffer.from(arrayBuffer)
+  const buffer = await readSourceImageBuffer(file, sourceImageUrl)
+  if (!buffer) {
+    throw new ApiError('INVALID_PARAMS')
+  }
   const processed = await sharp(buffer)
     .rotate()
     .jpeg({ quality: 90, mozjpeg: true })

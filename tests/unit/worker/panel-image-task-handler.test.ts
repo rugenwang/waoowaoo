@@ -5,6 +5,7 @@ import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
 const prismaMock = vi.hoisted(() => ({
   novelPromotionPanel: {
     findUnique: vi.fn(),
+    findFirst: vi.fn(),
     update: vi.fn(async () => ({})),
   },
   novelPromotionPanelFrame: {
@@ -38,6 +39,18 @@ const sharedMock = vi.hoisted(() => ({
           },
         ],
       },
+      {
+        name: '咖啡杯',
+        assetKind: 'prop',
+        summary: '白色陶瓷咖啡杯',
+        images: [
+          {
+            isSelected: true,
+            description: '白色陶瓷咖啡杯，杯中有热咖啡',
+            imageUrl: 'cos/prop-coffee-cup.png',
+          },
+        ],
+      },
     ],
   })),
 }))
@@ -50,10 +63,15 @@ const promptMock = vi.hoisted(() => ({
   buildPrompt: vi.fn(() => 'panel-image-prompt'),
 }))
 
+const aiRuntimeMock = vi.hoisted(() => ({
+  executeAiTextStep: vi.fn(async () => ({ text: 'REFINED_STILL_FRAME_PROMPT' })),
+}))
+
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/workers/utils', () => utilsMock)
 vi.mock('@/lib/task/service', () => ({ clearTaskExternalId: vi.fn(async () => true) }))
 vi.mock('@/lib/media/outbound-image', () => outboundMock)
+vi.mock('@/lib/ai-runtime/client', () => aiRuntimeMock)
 vi.mock('@/lib/workers/shared', () => ({ reportTaskProgress: vi.fn(async () => undefined) }))
 vi.mock('@/lib/logging/core', () => ({
   logInfo: vi.fn(),
@@ -118,6 +136,7 @@ describe('worker panel-image-task-handler behavior', () => {
       videoPrompt: 'dramatic',
       location: 'Old Town',
       characters: JSON.stringify([{ name: 'Hero', appearance: 'default', slot: '街道左侧靠墙的留白位置' }]),
+      props: null,
       srtSegment: '台词片段',
       photographyRules: null,
       actingNotes: null,
@@ -126,6 +145,7 @@ describe('worker panel-image-task-handler behavior', () => {
       panelMode: 'single',
       frames: [],
     })
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValue(null)
 
     utilsMock.resolveImageSourceFromGeneration
       .mockResolvedValueOnce('generated-source-1')
@@ -171,6 +191,16 @@ describe('worker panel-image-task-handler behavior', () => {
     expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
       variables: expect.objectContaining({
         storyboard_text_json_input: expect.stringContaining('"available_slots"'),
+      }),
+    }))
+    expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      variables: expect.objectContaining({
+        storyboard_text_json_input: expect.stringContaining('"reference_priority"'),
+      }),
+    }))
+    expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      variables: expect.objectContaining({
+        storyboard_text_json_input: expect.stringContaining('"video_prompt": "dramatic"'),
       }),
     }))
 
@@ -522,7 +552,7 @@ describe('worker panel-image-task-handler behavior', () => {
           frameRole: 'continuity',
           dependencyFrameIds: '[1]',
           imagePrompt: 'frame 3 prompt',
-          videoPrompt: null,
+          videoPrompt: '年轻女子扎高马尾穿学生装双肩包，从走廊迎面跑来',
           imageUrl: 'cos/frame-3-old.png',
         },
       ],
@@ -548,6 +578,145 @@ describe('worker panel-image-task-handler behavior', () => {
             'normalized:https://signed.example/ref-1.png',
           ],
         }),
+      }),
+    )
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.not.stringContaining('年轻女子扎高马尾穿学生装双肩包'),
+      }),
+    )
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.not.stringContaining('当前分镜核查 JSON'),
+      }),
+    )
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.not.stringContaining('"description": "group scene"'),
+      }),
+    )
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.stringContaining('分镜描述：group scene'),
+      }),
+    )
+  })
+
+  it('target frame regeneration with refine enabled -> sends refined frame prompt plus hard constraints', async () => {
+    utilsMock.resolveImageSourceFromGeneration.mockReset()
+    utilsMock.uploadImageSourceToCos.mockReset()
+    aiRuntimeMock.executeAiTextStep.mockClear()
+    utilsMock.getProjectModels.mockResolvedValueOnce({
+      storyboardModel: 'storyboard-model-1',
+      artStyle: 'realistic',
+      localStoryboardPromptRefineEnabled: true,
+      localStoryboardPromptRefineLevel: 'medium',
+      analysisModel: 'analysis-model-1',
+    } as any)
+    outboundMock.normalizeReferenceImagesForGeneration.mockImplementation(async (...args: unknown[]) => {
+      const refs = Array.isArray(args[0]) ? args[0] as string[] : []
+      return refs.map((ref) => `normalized:${ref}`)
+    })
+
+    prismaMock.novelPromotionPanel.findUnique.mockResolvedValueOnce({
+      id: 'panel-1',
+      storyboardId: 'storyboard-1',
+      panelIndex: 0,
+      shotType: 'medium',
+      cameraMove: 'push-in',
+      description: 'group scene',
+      imagePrompt: null,
+      videoPrompt: 'group motion',
+      groupVideoPrompt: 'group video prompt',
+      location: 'Old Town',
+      characters: '[]',
+      props: JSON.stringify([{ name: '咖啡杯' }]),
+      srtSegment: null,
+      photographyRules: null,
+      actingNotes: null,
+      sketchImageUrl: null,
+      imageUrl: 'cos/frame-1-old.png',
+      panelMode: 'group',
+      frames: [
+        {
+          id: 'frame-1',
+          frameIndex: 0,
+          frameTimeSec: 0,
+          frameRole: 'base',
+          dependencyFrameIds: null,
+          imagePrompt: 'frame 1 prompt',
+          videoPrompt: null,
+          imageUrl: 'cos/frame-1-old.png',
+        },
+        {
+          id: 'frame-2',
+          frameIndex: 1,
+          frameTimeSec: 4,
+          frameRole: 'continuity',
+          dependencyFrameIds: '[0]',
+          imagePrompt: 'frame 2 prompt',
+          videoPrompt: '年轻女子扎高马尾穿学生装双肩包，从走廊迎面跑来',
+          imageUrl: null,
+        },
+      ],
+    })
+
+    utilsMock.resolveImageSourceFromGeneration.mockResolvedValueOnce('generated-frame-source-2')
+    utilsMock.uploadImageSourceToCos.mockResolvedValueOnce('cos/frame-2-new.png')
+
+    await handlePanelImageTask(buildJob({
+      candidateCount: 1,
+      targetFrameId: 'frame-2',
+    }))
+
+    expect(aiRuntimeMock.executeAiTextStep).toHaveBeenCalledTimes(1)
+    expect(aiRuntimeMock.executeAiTextStep).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'analysis-model-1',
+      action: 'NP_STORYBOARD_PROMPT_REFINE',
+    }))
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.stringContaining('REFINED_STILL_FRAME_PROMPT'),
+      }),
+    )
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.stringContaining('镜头类型：medium'),
+      }),
+    )
+    expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      variables: expect.objectContaining({
+        storyboard_text_json_input: expect.stringContaining('咖啡杯'),
+      }),
+    }))
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.not.stringContaining('道具要求：咖啡杯'),
+      }),
+    )
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.stringContaining('同一张脸'),
+      }),
+    )
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.not.stringContaining('当前分镜核查 JSON'),
+      }),
+    )
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.not.stringContaining('年轻女子扎高马尾穿学生装双肩包'),
       }),
     )
   })
@@ -578,8 +747,8 @@ describe('worker panel-image-task-handler behavior', () => {
       aspectRatio: '16:9',
       styleText: '写实短剧风格',
       context: {
-        panel: {
-          panel_id: 'panel-1',
+        aspect_ratio: '16:9',
+        shot: {
           shot_type: '平视中景',
           camera_move: '缓推',
           description: '年轻女子站在窗边回头',
@@ -587,13 +756,9 @@ describe('worker panel-image-task-handler behavior', () => {
           video_prompt: '00:00-00:03\n运镜：缓推\n人物：年轻女子\n动作：走到窗边后回头\n台词：无台词',
           location: '书房',
           characters: [],
-          source_text: '',
-          photography_rules: null,
-          acting_notes: null,
-        },
-        context: {
-          character_appearances: [],
-          location_reference: null,
+          props: [],
+          reference_priority: '严格按输入参考图生成',
+          prompt_text: '年轻女子站在窗边回头，手扶窗框，暖光侧逆光。年轻女子站在窗边回头',
         },
       },
     })

@@ -41,10 +41,15 @@ interface EditingPropState {
 
 interface LocationImageEditModalState {
   assetType: 'location' | 'prop'
+  locationId: string
+  imageIndex: number
   locationName: string
 }
 
 interface CharacterImageEditModalState {
+  characterId: string
+  appearanceId: string
+  imageIndex: number
   characterName: string
 }
 
@@ -144,6 +149,11 @@ export default function AssetsStageModals({
         <ImageEditModal
           type={imageEditModal.assetType}
           name={imageEditModal.locationName}
+          assetScope="project"
+          projectId={projectId}
+          targetAssetId={imageEditModal.locationId}
+          targetVariantIndex={imageEditModal.imageIndex}
+          targetRenderIndex={0}
           onClose={closeImageEditModal}
           onConfirm={handleLocationImageEdit}
         />
@@ -153,6 +163,11 @@ export default function AssetsStageModals({
         <ImageEditModal
           type="character"
           name={characterImageEditModal.characterName}
+          assetScope="project"
+          projectId={projectId}
+          targetAssetId={characterImageEditModal.characterId}
+          targetVariantId={characterImageEditModal.appearanceId}
+          targetRenderIndex={characterImageEditModal.imageIndex}
           onClose={closeCharacterImageEditModal}
           onConfirm={handleCharacterImageEdit}
         />

@@ -24,6 +24,7 @@ Output format (single JSON object only):
   "panel_number": 0,
   "description": "visual description",
   "characters": [{ "name": "Character Name", "appearance": "appearance name", "slot": "the position beneath the throne steps at the center of the hall" }],
+  "props": [],
   "location": "location name",
   "scene_type": "daily",
   "source_text": "source text or transition shot",
@@ -42,6 +43,7 @@ Rules:
 6. If `slot` is used, it must copy one full placement phrase from the available slots list verbatim. Do not shorten or rename it.
 7. JSON only, no markdown.
 8. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.
+8.1 Every inserted panel must include `props`: select visible or interacted prop asset names from provided prop context. Distinctive objects such as backpacks, bags, watches, rings, bracelets, phones, books, umbrellas, cups, cameras, keys, suitcases, weapons, magical items, tokens, and folders must be prop assets, not character appearance. If none, output [].
 9. video_prompt MUST be Chinese and follow this format:
    - First paragraph starts with 高清4K, 高清 4K, or 4K and contains positive visual quality, scene lighting, character details, smooth motion, vivid expression, no flicker / no face collapse / no limb deformity in Chinese wording, clear visual differences and directionality between multiple people in the same shot, visual tone, and one background music type.
    - Then use one-paragraph timeline ranges such as `00:00-00:04：平视中景固定镜......；越肩推镜，从人物肩后推进到对方正面......；【对话】...；背景音...`.
@@ -52,3 +54,4 @@ Rules:
    - Use age+gender labels instead of character names inside video_prompt.
    - Multiple people in the same shot must have clearly different age range, gender, clothing, hairstyle, body shape, temperament, position, and facing direction; do not create people with identical appearance or face.
    - Do NOT use circled-number list markers. Do NOT add primary/auxiliary camera-move labels. If there is no dialogue or narration, omit that part entirely and do not write any placeholder.
+   - Do NOT use these face-damaging Chinese expression terms: 瞪眼、瞪大双眼、怒目圆睁、死鱼眼、无神大眼、眼睛超大、歪嘴、邪笑、嘴角夸张上扬、咬牙切齿、咬紧牙关、嘴唇紧闭用力、五官扭曲、面部紧绷、面部狰狞、瞳孔放大、眼球突出、眼白过多、挑眉过度、挑眉凶狠、脸部僵硬、面无表情呆滞. Use natural expressions such as 目光锐利、眉头微蹙、神情克制、眼神专注、下颌微收.

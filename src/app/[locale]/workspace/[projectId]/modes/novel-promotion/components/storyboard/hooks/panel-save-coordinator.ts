@@ -29,6 +29,7 @@ function clonePanelEditData(data: PanelEditData): PanelEditData {
   return {
     ...data,
     characters: data.characters.map((character) => ({ ...character })),
+    props: [...data.props],
   }
 }
 

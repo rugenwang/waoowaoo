@@ -6,12 +6,14 @@ Character profiles JSON:
 
 Rules:
 1. Keep identity consistency with profile fields.
-2. Convert personality/social identity into visual details (face, hair, outfit, accessories).
+2. Convert personality/social identity into visual details (face, hair, outfit, and low-profile clothing-integrated details).
 3. Support both human and non-human characters.
 4. Respect era_period and costume_tier.
 5. If primary_identifier exists, include it clearly in each main description.
 6. Do not include expression, action, background, or plot narration.
 7. Do not include skin color, eye color, or lip color.
+8. Do not include distinctive detachable props or carried/worn item assets: backpack, bag, watch, ring, bracelet, weapon, phone, book, umbrella, cup, camera, key, suitcase, magical item, token, handheld item, or carried item. These belong to prop assets, not character appearance.
+9. If primary_identifier is a distinctive object or accessory, convert it into an intrinsic visual mark or clothing-integrated detail when possible; otherwise omit it from character appearance so it can be represented as a prop asset.
 
 Appearance strategy:
 - Initial appearance should be complete and self-contained.

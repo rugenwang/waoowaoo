@@ -135,7 +135,7 @@ export async function generateImage(
         let openaiCompatOptions = { ...generatorOptions }
         if (providerKey !== 'eeeapi' && openaiCompatOptions.aspectRatio) {
             const mappedSize = aspectRatioToOpenAISize(openaiCompatOptions.aspectRatio)
-            if (mappedSize && !openaiCompatOptions.size) {
+            if (mappedSize && !openaiCompatOptions.size && !openaiCompatOptions.resolution) {
                 openaiCompatOptions = { ...openaiCompatOptions, size: mappedSize }
             }
             // 移除不支持的 aspectRatio

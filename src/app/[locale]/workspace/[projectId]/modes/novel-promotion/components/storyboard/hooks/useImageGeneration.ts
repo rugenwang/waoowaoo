@@ -186,12 +186,14 @@ export function useStoryboardImageGeneration({
     setLocalStoryboards,
   ])
 
-  const uploadPanelImage = useCallback(async (panelId: string, file: File) => {
-    const result = await uploadPanelImageMutation.mutateAsync({ panelId, file }) as {
+  const applyUploadedPanelImageResult = useCallback((
+    panelId: string,
+    result: {
       imageUrl?: string | null
       frameId?: string | null
       frameImageUpdated?: boolean
-    }
+    },
+  ) => {
     if (result?.imageUrl) {
       setLocalStoryboards((previousStoryboards) =>
         previousStoryboards.map((storyboard) => {
@@ -227,16 +229,45 @@ export function useStoryboardImageGeneration({
         }),
       )
     }
+  }, [setLocalStoryboards])
+
+  const uploadPanelImage = useCallback(async (panelId: string, file: File) => {
+    const result = await uploadPanelImageMutation.mutateAsync({ panelId, file }) as {
+      imageUrl?: string | null
+      frameId?: string | null
+      frameImageUpdated?: boolean
+    }
+    applyUploadedPanelImageResult(panelId, result)
     if (onSilentRefresh) {
       await onSilentRefresh()
     }
     refreshEpisode()
     refreshStoryboards()
   }, [
+    applyUploadedPanelImageResult,
     onSilentRefresh,
     refreshEpisode,
     refreshStoryboards,
-    setLocalStoryboards,
+    uploadPanelImageMutation,
+  ])
+
+  const uploadPanelImageFromSource = useCallback(async (panelId: string, sourceImageUrl: string) => {
+    const result = await uploadPanelImageMutation.mutateAsync({ panelId, sourceImageUrl }) as {
+      imageUrl?: string | null
+      frameId?: string | null
+      frameImageUpdated?: boolean
+    }
+    applyUploadedPanelImageResult(panelId, result)
+    if (onSilentRefresh) {
+      await onSilentRefresh()
+    }
+    refreshEpisode()
+    refreshStoryboards()
+  }, [
+    applyUploadedPanelImageResult,
+    onSilentRefresh,
+    refreshEpisode,
+    refreshStoryboards,
     uploadPanelImageMutation,
   ])
 
@@ -255,14 +286,13 @@ export function useStoryboardImageGeneration({
     return () => window.clearInterval(timer)
   }, [localStoryboards, refreshEpisode, refreshStoryboards, submittingPanelImageIds.size])
 
-  const uploadPanelFrameImage = useCallback(async (frameId: string, file: File) => {
-    const result = await uploadPanelFrameImageMutation.mutateAsync({ frameId, file }) as {
+  const applyUploadedPanelFrameImageResult = useCallback((result: {
       frameId?: string
       panelId?: string
       frameIndex?: number
       imageUrl?: string | null
       panelImageUpdated?: boolean
-    }
+    }) => {
     const nextImageUrl = result?.imageUrl || null
 
     if (result?.frameId && nextImageUrl) {
@@ -307,6 +337,17 @@ export function useStoryboardImageGeneration({
         }),
       )
     }
+  }, [setLocalStoryboards])
+
+  const uploadPanelFrameImage = useCallback(async (frameId: string, file: File) => {
+    const result = await uploadPanelFrameImageMutation.mutateAsync({ frameId, file }) as {
+      frameId?: string
+      panelId?: string
+      frameIndex?: number
+      imageUrl?: string | null
+      panelImageUpdated?: boolean
+    }
+    applyUploadedPanelFrameImageResult(result)
 
     if (onSilentRefresh) {
       await onSilentRefresh()
@@ -314,10 +355,33 @@ export function useStoryboardImageGeneration({
     refreshEpisode()
     refreshStoryboards()
   }, [
+    applyUploadedPanelFrameImageResult,
     onSilentRefresh,
     refreshEpisode,
     refreshStoryboards,
-    setLocalStoryboards,
+    uploadPanelFrameImageMutation,
+  ])
+
+  const uploadPanelFrameImageFromSource = useCallback(async (frameId: string, sourceImageUrl: string) => {
+    const result = await uploadPanelFrameImageMutation.mutateAsync({ frameId, sourceImageUrl }) as {
+      frameId?: string
+      panelId?: string
+      frameIndex?: number
+      imageUrl?: string | null
+      panelImageUpdated?: boolean
+    }
+    applyUploadedPanelFrameImageResult(result)
+
+    if (onSilentRefresh) {
+      await onSilentRefresh()
+    }
+    refreshEpisode()
+    refreshStoryboards()
+  }, [
+    applyUploadedPanelFrameImageResult,
+    onSilentRefresh,
+    refreshEpisode,
+    refreshStoryboards,
     uploadPanelFrameImageMutation,
   ])
 
@@ -376,14 +440,18 @@ export function useStoryboardImageGeneration({
           return { taskId: String(data?.taskId || '') }
         },
         onDone: async () => {
-          if (onSilentRefresh) await onSilentRefresh()
-          refreshEpisode()
-          refreshStoryboards()
+          await Promise.all([
+            onSilentRefresh ? onSilentRefresh() : Promise.resolve(),
+            refreshEpisode(),
+            refreshStoryboards(),
+          ])
         },
         onFail: async () => {
-          if (onSilentRefresh) await onSilentRefresh()
-          refreshEpisode()
-          refreshStoryboards()
+          await Promise.all([
+            onSilentRefresh ? onSilentRefresh() : Promise.resolve(),
+            refreshEpisode(),
+            refreshStoryboards(),
+          ])
         },
       })
       return null
@@ -442,7 +510,9 @@ export function useStoryboardImageGeneration({
     getPanelCandidates,
     modifyPanelImage,
     uploadPanelImage,
+    uploadPanelImageFromSource,
     uploadPanelFrameImage,
+    uploadPanelFrameImageFromSource,
     regeneratePanelFrameImage,
     downloadAllImages,
     clearStoryboardError,

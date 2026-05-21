@@ -22,6 +22,7 @@ Required fields per panel:
 - panel_number
 - description
 - characters
+- props (array of visible or interacted prop asset names; empty array if none)
 - location
 - scene_type (daily/emotion/action/epic/suspense)
 - source_text
@@ -44,13 +45,15 @@ Key-frame group rules:
 - group duration_sec must be <= 20 seconds. single duration_sec should usually be 2-8 seconds; group duration_sec should usually be 6-20 seconds.
 - Each frame must include frame_index, frame_time_sec, frame_role, dependency_frame_ids, image_prompt, video_prompt, reference_policy.
 - frame_time_sec starts at 0, increases in playback order, and never exceeds duration_sec.
-- dependency_frame_ids may only reference earlier frame_index values. Use it to keep the next generated image consistent with the prior frame or base reference.
+- dependency_frame_ids may reference earlier frame_index values. For frame_index=0 only, it may also contain "FP", meaning this first frame should reference the previous top-level panel tail frame to preserve continuity.
+- Use "FP" only when the current panel must continue from the previous panel ending state: same character position, pose, prop state, light, or continuous action. Do not use FP for a new scene, time jump, dream/flashback, or unrelated shot. The frame reference_policy must mention preserving continuity from the previous panel tail without copying composition.
 - image_prompt must be a direct positive image-generation prompt and preserve character identity, clothing, scene, light, aspect, and visual style across the group.
 - The first group frame (frame_index=0, frame_time_sec=0, frame_role="hero") MUST be the original state before the video action starts: the character has not completed later actions, emotional changes, movement, fight results, or transition results.
 - The first frame image_prompt must explicitly describe before-action/original position/initial pose/initial expression and must naturally lead into later frames.
 - Every frame image_prompt must state that characters are fully and properly clothed, with clothing consistent with character settings/reference images. Do not create shirtless, semi-nude, exposed torso, missing clothing, revealing outfit, or torn-clothing exposure unless explicitly required by the source text; even then keep clothing decent.
 - When panel_mode="group", group_video_prompt must describe positive visual quality, background music style, segmented timeline, camera movement, characters, actions, expressions, dialogue, and transitions. Avoid exaggerated action.
 - When panel_mode="single", do not output group_video_prompt.
+- Every panel must output `props`: select names from Props info for visible, held, carried, handed, fought over, used, opened/closed, or story-identifying objects. Distinctive items such as backpacks, bags, watches, rings, bracelets, phones, books, umbrellas, cups, cameras, keys, suitcases, weapons, magical items, tokens, and folders must be prop assets, not character appearance. If none, output [].
 
 【video_prompt CINEMATIC SHORT-DRAMA FORMAT — MANDATORY】
 
@@ -74,6 +77,7 @@ If there is no dialogue, omit the dialogue part entirely and do not write any no
 Dialogue must use age+gender speaker labels, emotion, voice texture, tone, and expression. Example: 年轻女子声音轻柔清亮，语气带着迟疑地说：「我明白了」.
 Narration, inner monologue, and voiceover must use `【旁白】`, not `【对话】`.
 Do NOT use the old five-line field format `运镜：人物：动作：表情：台词：`.
+Do NOT use face-damaging expression terms in Chinese video_prompt: 瞪眼、瞪大双眼、怒目圆睁、死鱼眼、无神大眼、眼睛超大、歪嘴、邪笑、嘴角夸张上扬、咬牙切齿、咬紧牙关、嘴唇紧闭用力、五官扭曲、面部紧绷、面部狰狞、瞳孔放大、眼球突出、眼白过多、挑眉过度、挑眉凶狠、脸部僵硬、面无表情呆滞. Use natural expressions such as 目光锐利、眉头微蹙、神情克制、眼神专注、下颌微收.
 
 Example:
 00:00-00:03：平视中景推镜，从书桌左侧缓缓推进到画面右侧年轻女子身前；近景固定镜，聚焦右侧年轻女子坐下并打开笔记本电脑的动作；表情特写切到她轻轻上扬的嘴角；【对话】画面右侧年轻女子声音轻柔清亮，语气带着自我鼓励地说：「今天也要好好加油呀。」；背景音中键盘轻响与治愈温柔轻音乐自然响起。
@@ -87,6 +91,7 @@ Output schema example (field names must be preserved):
     "panel_number": 1,
     "description": "panel description",
     "characters": [{ "name": "Character", "appearance": "appearance", "slot": "the position beneath the throne steps at the center of the hall" }],
+    "props": ["笔记本电脑"],
     "location": "location name",
     "scene_type": "daily",
     "source_text": "source text excerpt",
@@ -130,7 +135,9 @@ Rules:
 14.2 Multiple people in the same shot must have clearly different age range, gender, clothing, hairstyle, body shape, temperament, position, and facing direction; do not create people with identical appearance or face.
 14.2.1 Multi-character interactions must explicitly state directionality in Chinese: screen-left/screen-right, front/back, near/far, facing/back-facing, and movement direction. For example: 画面左侧年轻女子对右侧年轻女子说; 后方年轻女子上前半步，轻拍前方年轻女子右肩.
 14.3 Do NOT use circled-number list markers. Do NOT add primary/auxiliary camera-move labels. When there is no dialogue or narration, omit that part entirely and do not write any placeholder.
+14.4 Do NOT output face-damaging expression terms listed above in video_prompt.
 15. duration range: 2-8 seconds, integer. Dialogue/micro-actions 3-7s, major actions 4-8s, close-ups 2-4s.
 16. For group panels, duration_sec must be <= 20 seconds and frames count must be 2-20 based on duration, action density, and transition/camera-movement density; ultra-high-density action/camera movement may approach 1 frame per second.
 17. For single panels, frames count must be exactly 1 and group_video_prompt must be omitted.
 18. Every frame image_prompt must be suitable for direct image generation and keep group visual continuity.
+19. Every panel must include `props`; use [] when no provided prop is visible or used.

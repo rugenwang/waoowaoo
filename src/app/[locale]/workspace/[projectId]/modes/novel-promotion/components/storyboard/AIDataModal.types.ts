@@ -54,6 +54,9 @@ export interface AIDataModalProps {
   description: string | null
   location: string | null
   characters: AIDataCharacter[]
+  props?: string[]
+  imagePrompt?: string | null
+  sourceText?: string | null
   videoPrompt: string | null
   photographyRules: PhotographyRules | null
   actingNotes: ActingNotes | ActingCharacter[] | null

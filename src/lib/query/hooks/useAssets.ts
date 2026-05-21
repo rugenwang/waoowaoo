@@ -262,15 +262,20 @@ function invalidateScopeQueries(queryClient: ReturnType<typeof useQueryClient>, 
 export function useRefreshAssets(input: { scope: 'global' | 'project'; projectId?: string | null }) {
   const queryClient = useQueryClient()
   return () => {
-    queryClient.invalidateQueries({
-      queryKey: queryKeys.assets.all(input.scope, input.projectId),
-    })
+    const promises: Promise<unknown>[] = [
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.assets.all(input.scope, input.projectId),
+      }),
+    ]
     if (input.scope === 'global') {
-      queryClient.invalidateQueries({ queryKey: queryKeys.globalAssets.all() })
+      promises.push(queryClient.invalidateQueries({ queryKey: queryKeys.globalAssets.all() }))
+      promises.push(queryClient.invalidateQueries({ queryKey: queryKeys.tasks.targetStatesAll('global-asset-hub'), exact: false }))
     } else if (input.projectId) {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projectAssets.all(input.projectId) })
-      queryClient.invalidateQueries({ queryKey: queryKeys.projectData(input.projectId) })
+      promises.push(queryClient.invalidateQueries({ queryKey: queryKeys.projectAssets.all(input.projectId) }))
+      promises.push(queryClient.invalidateQueries({ queryKey: queryKeys.projectData(input.projectId) }))
+      promises.push(queryClient.invalidateQueries({ queryKey: queryKeys.tasks.targetStatesAll(input.projectId), exact: false }))
     }
+    return Promise.all(promises)
   }
 }
 

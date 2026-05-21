@@ -330,11 +330,9 @@ export async function resolveProjectModelCapabilityGenerationOptions(input: {
       const height = mode === 'i2i' ? config.localI2IHeight : config.localT2IHeight
       const steps = mode === 'i2i' ? config.localI2ISteps : config.localT2ISteps
 
-      // MLX/z-image 常见约束：尺寸建议为 64 的倍数；避免出现 reshape 维度不匹配（例如 1080x1920）
-      const snap64 = (v: number) => Math.max(64, Math.floor(v / 64) * 64)
       return {
         ...resolved,
-        size: `${snap64(width)}x${snap64(height)}`,
+        size: `${width}x${height}`,
         steps: Math.max(1, Math.min(200, Math.floor(steps))),
       }
     }

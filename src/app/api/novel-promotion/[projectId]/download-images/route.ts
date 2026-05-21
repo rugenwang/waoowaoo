@@ -11,6 +11,11 @@ interface PanelData {
   panelIndex: number | null
   description: string | null
   imageUrl: string | null
+  frames?: Array<{
+    frameIndex: number
+    frameRole: string | null
+    imageUrl: string | null
+  }>
 }
 
 interface StoryboardData {
@@ -50,7 +55,12 @@ export const GET = apiHandler(async (
       include: {
         storyboards: {
           include: {
-            panels: { orderBy: { panelIndex: 'asc' } }
+            panels: {
+              orderBy: { panelIndex: 'asc' },
+              include: {
+                frames: { orderBy: { frameIndex: 'asc' } },
+              },
+            }
           },
           orderBy: { createdAt: 'asc' }
         },
@@ -71,7 +81,12 @@ export const GET = apiHandler(async (
           include: {
             storyboards: {
               include: {
-                panels: { orderBy: { panelIndex: 'asc' } }
+                panels: {
+                  orderBy: { panelIndex: 'asc' },
+                  include: {
+                    frames: { orderBy: { frameIndex: 'asc' } },
+                  },
+                }
               },
               orderBy: { createdAt: 'asc' }
             },
@@ -95,6 +110,7 @@ export const GET = apiHandler(async (
     imageUrl: string
     clipIndex: number
     panelIndex: number
+    frameIndex: number
   }
   const images: ImageItem[] = []
 
@@ -114,12 +130,27 @@ export const GET = apiHandler(async (
     // 使用独立的 Panel 记录
     const panels = storyboard.panels || []
     for (const panel of panels) {
+      const panelIndex = panel.panelIndex || 0
+      const panelUrl = typeof panel.imageUrl === 'string' && panel.imageUrl.trim() ? panel.imageUrl.trim() : ''
       if (panel.imageUrl) {
         images.push({
           description: panel.description || `镜头`,
-          imageUrl: panel.imageUrl,
+          imageUrl: panelUrl,
           clipIndex: clipIndex >= 0 ? clipIndex : 999,
-          panelIndex: panel.panelIndex || 0
+          panelIndex,
+          frameIndex: -1,
+        })
+      }
+      const frames = Array.isArray(panel.frames) ? panel.frames : []
+      for (const frame of frames) {
+        const frameUrl = typeof frame.imageUrl === 'string' && frame.imageUrl.trim() ? frame.imageUrl.trim() : ''
+        if (!frameUrl || frameUrl === panelUrl) continue
+        images.push({
+          description: `${panel.description || '镜头'}_F${frame.frameIndex + 1}${frame.frameRole ? `_${frame.frameRole}` : ''}`,
+          imageUrl: frameUrl,
+          clipIndex: clipIndex >= 0 ? clipIndex : 999,
+          panelIndex,
+          frameIndex: frame.frameIndex,
         })
       }
     }
@@ -130,7 +161,10 @@ export const GET = apiHandler(async (
     if (a.clipIndex !== b.clipIndex) {
       return a.clipIndex - b.clipIndex
     }
-    return a.panelIndex - b.panelIndex
+    if (a.panelIndex !== b.panelIndex) {
+      return a.panelIndex - b.panelIndex
+    }
+    return a.frameIndex - b.frameIndex
   })
 
   // 重新分配连续的全局索引

@@ -599,6 +599,12 @@ export default function AssetHubPage() {
                 <ImageEditModal
                     type={imageEditModal.type}
                     name={imageEditModal.name}
+                    assetScope="global"
+                    targetAssetId={imageEditModal.id}
+                    targetVariantIndex={imageEditModal.type === 'character'
+                        ? imageEditModal.appearanceIndex
+                        : imageEditModal.imageIndex}
+                    targetRenderIndex={imageEditModal.type === 'character' ? imageEditModal.imageIndex : 0}
                     onClose={() => setImageEditModal(null)}
                     onConfirm={handleImageEdit}
                 />

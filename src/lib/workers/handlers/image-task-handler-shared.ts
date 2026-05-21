@@ -37,6 +37,8 @@ interface LocationImageLike {
 
 interface LocationLike {
   name: string
+  summary?: string | null
+  assetKind?: string | null
   images?: LocationImageLike[]
 }
 
@@ -49,6 +51,7 @@ interface NovelProjectData {
 interface PanelLike {
   sketchImageUrl?: string | null
   characters?: string | null
+  props?: string | null
   location?: string | null
 }
 
@@ -204,6 +207,24 @@ export function parsePanelCharacterReferences(value: string | null | undefined):
   }
 }
 
+function parsePanelPropReferences(value: string | null | undefined): string[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((item: unknown) => {
+        if (typeof item === 'string') return item.trim()
+        if (!item || typeof item !== 'object') return ''
+        const name = (item as { name?: unknown }).name
+        return typeof name === 'string' ? name.trim() : ''
+      })
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 /**
  * 按角色名查找角色（支持别名匹配）
  * 优先级：1. 精确全名匹配  2. 按 '/' 拆分后别名精确匹配
@@ -257,13 +278,24 @@ export async function collectPanelReferenceImages(projectData: NovelProjectData,
   }
 
   if (panel.location) {
-    const location = (projectData.locations || []).find((loc) => loc.name.toLowerCase() === panel.location!.toLowerCase())
+    const location = (projectData.locations || []).find((loc) => (loc.assetKind || 'location') !== 'prop' && loc.name.toLowerCase() === panel.location!.toLowerCase())
     if (location) {
       const images = location.images || []
       const selected = images.find((img) => img.isSelected) || images[0]
       const signed = toSignedUrlIfCos(selected?.imageUrl, 3600)
       if (signed) refs.push(signed)
     }
+  }
+
+  for (const propName of parsePanelPropReferences(panel.props)) {
+    const prop = (projectData.locations || []).find(
+      (item) => (item.assetKind || 'location') === 'prop' && item.name.toLowerCase() === propName.toLowerCase(),
+    )
+    if (!prop) continue
+    const images = prop.images || []
+    const selected = images.find((img) => img.isSelected) || images[0]
+    const signed = toSignedUrlIfCos(selected?.imageUrl, 3600)
+    if (signed) refs.push(signed)
   }
 
   return refs

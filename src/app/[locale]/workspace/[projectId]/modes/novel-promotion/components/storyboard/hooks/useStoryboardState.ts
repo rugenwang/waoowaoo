@@ -27,14 +27,16 @@ export interface StoryboardPanel {
   camera_move: string | null
   description: string
   characters: { name: string; appearance: string; slot?: string }[]
+  props: string[]
   location?: string
   srt_range?: string
   duration?: number
   panelMode?: PanelMode
-  groupDurationSec?: number | null
-  groupVideoPrompt?: string | null
+      groupDurationSec?: number | null
+      groupVideoPrompt?: string | null
   groupPlanJson?: string | null
   frames?: NovelPromotionPanelFrame[]
+  image_prompt?: string | null
   video_prompt?: string
   source_text?: string
   candidateImages?: string
@@ -42,6 +44,26 @@ export interface StoryboardPanel {
   photographyRules?: string | null  // 单镜头摄影规则JSON
   actingNotes?: string | null       // 演技指导数据JSON
   imageTaskRunning?: boolean  // 任务态运行状态（由 tasks 派生）
+}
+
+function parsePanelProps(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((item: unknown) => {
+        if (typeof item === 'string') return item.trim()
+        if (item && typeof item === 'object') {
+          const name = (item as { name?: unknown }).name
+          return typeof name === 'string' ? name.trim() : ''
+        }
+        return ''
+      })
+      .filter(Boolean)
+  } catch {
+    return []
+  }
 }
 
 interface UseStoryboardStateProps {
@@ -140,6 +162,7 @@ export function useStoryboardState({
           }]
         })
         : []
+      const props = parsePanelProps(p.props)
       return {
         id: p.id,
         panelIndex: p.panelIndex,
@@ -149,6 +172,7 @@ export function useStoryboardState({
         description: p.description ?? '',
         location: p.location || undefined,
         characters,
+        props,
         srt_range: p.srtStart && p.srtEnd ? `${p.srtStart}-${p.srtEnd}` : undefined,
         duration: p.duration ?? undefined,
         panelMode: normalizePanelMode(p),
@@ -156,6 +180,7 @@ export function useStoryboardState({
         groupVideoPrompt: p.groupVideoPrompt ?? null,
         groupPlanJson: p.groupPlanJson ?? null,
         frames: getSortedPanelFrames(p),
+        image_prompt: p.imagePrompt ?? null,
         video_prompt: p.videoPrompt || undefined,
         source_text: p.srtSegment || undefined,
         candidateImages: p.candidateImages || undefined,
@@ -180,10 +205,12 @@ export function useStoryboardState({
       description: panel.description,
       location: panel.location || null,
       characters: panel.characters || [],
+      props: panel.props || [],
       srtStart: null,
       srtEnd: null,
       duration: panel.duration || null,
       videoPrompt: panel.video_prompt || null,
+      groupVideoPrompt: panel.groupVideoPrompt ?? null,
       photographyRules: panel.photographyRules ?? null,
       actingNotes: panel.actingNotes ?? null,
       sourceText: panel.source_text

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
 import { resolveOriginalImageUrl, toDisplayImageUrl } from '@/lib/media/image-url'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
@@ -37,9 +38,11 @@ export default function ImagePreviewModal({ imageUrl, onClose }: ImagePreviewMod
   const originalImageUrl = resolveOriginalImageUrl(imageUrl) || displayImageUrl
   if (!displayImageUrl) return null
 
-  return (
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--glass-overlay)] backdrop-blur-sm"
+      className="fixed inset-0 z-[200000] flex items-center justify-center bg-[var(--glass-overlay)] backdrop-blur-sm"
       onClick={onClose}
       style={{ margin: 0, padding: 0 }}
     >
@@ -72,6 +75,7 @@ export default function ImagePreviewModal({ imageUrl, onClose }: ImagePreviewMod
           onClick={(e) => e.stopPropagation()}
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

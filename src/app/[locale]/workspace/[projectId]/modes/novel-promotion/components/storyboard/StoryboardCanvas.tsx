@@ -1,6 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
+import { useMemo } from 'react'
 import { NovelPromotionClip, NovelPromotionPanel, NovelPromotionStoryboard } from '@/types/project'
 import StoryboardGroup from './StoryboardGroup'
 import { StoryboardPanel } from './hooks/useStoryboardState'
@@ -9,6 +10,7 @@ import { VariantData, VariantOptions } from './hooks/usePanelVariant'
 import type { PanelSaveState } from './hooks/usePanelCrudActions'
 import { AppIcon } from '@/components/ui/icons'
 import { GlassButton } from '@/components/ui/primitives'
+import type { PreviousPanelImageOption } from './PanelCard'
 
 interface StoryboardCanvasProps {
   sortedStoryboards: NovelPromotionStoryboard[]
@@ -49,12 +51,16 @@ interface StoryboardCanvasProps {
   ) => Promise<void>
   onOpenCharacterPicker: (panelId: string) => void
   onOpenLocationPicker: (panelId: string) => void
+  onOpenPropPicker: (panelId: string) => void
   onRemoveCharacter: (panel: StoryboardPanel, index: number, storyboardId: string) => void
   onRemoveLocation: (panel: StoryboardPanel, storyboardId: string) => void
+  onRemoveProp: (panel: StoryboardPanel, index: number, storyboardId: string) => void
   onRetryPanelSave: (panelId: string) => void
   onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean) => void
   onUploadImage?: (panelId: string, file: File) => void | Promise<void>
+  onUploadImageFromSource?: (panelId: string, sourceImageUrl: string) => void | Promise<void>
   onUploadFrameImage?: (frameId: string, file: File) => void | Promise<void>
+  onUploadFrameImageFromSource?: (frameId: string, sourceImageUrl: string) => void | Promise<void>
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
@@ -115,12 +121,16 @@ export default function StoryboardCanvas({
   onPanelDelete,
   onOpenCharacterPicker,
   onOpenLocationPicker,
+  onOpenPropPicker,
   onRemoveCharacter,
   onRemoveLocation,
+  onRemoveProp,
   onRetryPanelSave,
   onRegeneratePanelImage,
   onUploadImage,
+  onUploadImageFromSource,
   onUploadFrameImage,
+  onUploadFrameImageFromSource,
   onRegenerateFrameImage,
   onUpdateFrameTime,
   onUpdateFramePrompt,
@@ -140,6 +150,49 @@ export default function StoryboardCanvas({
   setLocalStoryboards,
 }: StoryboardCanvasProps) {
   const t = useTranslations('storyboard')
+  const previousPanelImageOptionsByPanelId = useMemo(() => {
+    const next: Record<string, PreviousPanelImageOption[]> = {}
+    let previousOptions: PreviousPanelImageOption[] = []
+
+    const collectPanelImages = (panel: StoryboardPanel, globalPanelNumber: number): PreviousPanelImageOption[] => {
+      const frames = Array.isArray(panel.frames)
+        ? [...panel.frames].sort((left, right) => left.frameIndex - right.frameIndex)
+        : []
+      const frameOptions = frames
+        .filter((frame) => typeof frame.imageUrl === 'string' && frame.imageUrl.trim())
+        .map((frame) => ({
+          id: `${panel.id}:frame:${frame.id}`,
+          label: `分镜 ${globalPanelNumber} · F${frame.frameIndex + 1}${frame.frameRole ? ` · ${frame.frameRole}` : ''}`,
+          imageUrl: frame.imageUrl!.trim(),
+        }))
+
+      if (frameOptions.length > 0) return frameOptions
+
+      const imageUrl = typeof panel.imageUrl === 'string' && panel.imageUrl.trim()
+        ? panel.imageUrl.trim()
+        : ''
+      if (!imageUrl) return []
+      return [{
+        id: `${panel.id}:panel`,
+        label: `分镜 ${globalPanelNumber} · 主图`,
+        imageUrl,
+      }]
+    }
+
+    for (const storyboard of sortedStoryboards) {
+      const panels = getTextPanels(storyboard)
+      const startIndex = storyboardStartIndex[storyboard.id] || 0
+      panels.forEach((panel, index) => {
+        next[panel.id] = previousOptions
+        const options = collectPanelImages(panel, startIndex + index + 1)
+        if (options.length > 0) {
+          previousOptions = options
+        }
+      })
+    }
+    return next
+  }, [getTextPanels, sortedStoryboards, storyboardStartIndex])
+
   if (sortedStoryboards.length === 0) {
     return (
       <div className="text-center py-12 text-[var(--glass-text-tertiary)]">
@@ -196,12 +249,16 @@ export default function StoryboardCanvas({
               onPanelDelete={(panelId) => onPanelDelete(panelId, storyboard.id, setLocalStoryboards)}
               onOpenCharacterPicker={onOpenCharacterPicker}
               onOpenLocationPicker={onOpenLocationPicker}
+              onOpenPropPicker={onOpenPropPicker}
               onRemoveCharacter={(panel, index) => onRemoveCharacter(panel, index, storyboard.id)}
               onRemoveLocation={(panel) => onRemoveLocation(panel, storyboard.id)}
+              onRemoveProp={(panel, index) => onRemoveProp(panel, index, storyboard.id)}
               onRetryPanelSave={onRetryPanelSave}
               onRegeneratePanelImage={onRegeneratePanelImage}
               onUploadImage={onUploadImage}
+              onUploadImageFromSource={onUploadImageFromSource}
               onUploadFrameImage={onUploadFrameImage}
+              onUploadFrameImageFromSource={onUploadFrameImageFromSource}
               onRegenerateFrameImage={onRegenerateFrameImage}
               onUpdateFrameTime={onUpdateFrameTime}
               onUpdateFramePrompt={onUpdateFramePrompt}
@@ -222,6 +279,7 @@ export default function StoryboardCanvas({
               episodeId={episodeId}
               onPanelVariant={onPanelVariant}
               submittingVariantPanelId={submittingVariantPanelId}
+              previousPanelImageOptionsByPanelId={previousPanelImageOptionsByPanelId}
             />
 
             <div className="flex justify-center py-2">

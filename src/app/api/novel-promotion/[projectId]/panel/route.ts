@@ -63,6 +63,7 @@ export const POST = apiHandler(async (
     srtEnd,
     duration,
     videoPrompt,
+    groupVideoPrompt,
     firstLastFramePrompt,
   } = body
 
@@ -106,6 +107,7 @@ export const POST = apiHandler(async (
       srtEnd: srtEnd ?? null,
       duration: duration !== undefined ? parseNullableIntField(duration) : null,
       videoPrompt: videoPrompt ?? null,
+      groupVideoPrompt: groupVideoPrompt ?? null,
       firstLastFramePrompt: firstLastFramePrompt ?? null,
     }
   })
@@ -375,6 +377,7 @@ export const PUT = apiHandler(async (
     srtEnd,
     duration,
     videoPrompt,
+    groupVideoPrompt,
     firstLastFramePrompt,
     actingNotes,  // 演技指导数据
     photographyRules,  // 单镜头摄影规则
@@ -406,6 +409,7 @@ export const PUT = apiHandler(async (
     srtEnd?: number | null
     duration?: number | null
     videoPrompt?: string | null
+    groupVideoPrompt?: string | null
     firstLastFramePrompt?: string | null
     actingNotes?: string | null
     photographyRules?: string | null
@@ -422,6 +426,7 @@ export const PUT = apiHandler(async (
   // duration 必须为整数秒
   if (duration !== undefined) updateData.duration = parseNullableIntField(duration)
   if (videoPrompt !== undefined) updateData.videoPrompt = videoPrompt
+  if (groupVideoPrompt !== undefined) updateData.groupVideoPrompt = groupVideoPrompt
   if (firstLastFramePrompt !== undefined) updateData.firstLastFramePrompt = firstLastFramePrompt
   // JSON 字段存为规范化 JSON 字符串
   if (actingNotes !== undefined) {

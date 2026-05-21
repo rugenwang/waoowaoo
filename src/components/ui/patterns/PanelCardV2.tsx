@@ -28,8 +28,10 @@ export interface PanelCardV2Props {
   onDelete: () => void
   onOpenCharacterPicker: () => void
   onOpenLocationPicker: () => void
+  onOpenPropPicker?: () => void
   onRemoveCharacter: (index: number) => void
   onRemoveLocation: () => void
+  onRemoveProp?: (index: number) => void
   onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean) => void
   onOpenEditModal: () => void
   onOpenAIDataModal: () => void
@@ -55,8 +57,10 @@ export default function PanelCardV2({
   onDelete,
   onOpenCharacterPicker,
   onOpenLocationPicker,
+  onOpenPropPicker,
   onRemoveCharacter,
   onRemoveLocation,
+  onRemoveProp,
   onRegeneratePanelImage,
   onOpenEditModal,
   onOpenAIDataModal,
@@ -173,8 +177,10 @@ export default function PanelCardV2({
           onUpdate={onUpdate}
           onOpenCharacterPicker={onOpenCharacterPicker}
           onOpenLocationPicker={onOpenLocationPicker}
+          onOpenPropPicker={onOpenPropPicker || (() => {})}
           onRemoveCharacter={onRemoveCharacter}
           onRemoveLocation={onRemoveLocation}
+          onRemoveProp={onRemoveProp || (() => {})}
           uiMode={uiMode}
         />
       </div>

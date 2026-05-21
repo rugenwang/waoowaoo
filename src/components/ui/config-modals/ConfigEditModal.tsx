@@ -337,16 +337,14 @@ export function SettingsModal({
     }, [isOpen])
 
     const clampInt = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
-    const snap64 = (value: number) => Math.max(64, Math.floor(value / 64) * 64)
-
     const commitT2IWidth = () => {
         const n = parseInt(t2iWidthDraft, 10)
-        if (Number.isFinite(n)) onLocalT2IWidthChange?.(snap64(clampInt(n, 64, 4096)))
+        if (Number.isFinite(n)) onLocalT2IWidthChange?.(clampInt(n, 64, 4096))
         else setT2IWidthDraft(String(t2iWidth))
     }
     const commitT2IHeight = () => {
         const n = parseInt(t2iHeightDraft, 10)
-        if (Number.isFinite(n)) onLocalT2IHeightChange?.(snap64(clampInt(n, 64, 4096)))
+        if (Number.isFinite(n)) onLocalT2IHeightChange?.(clampInt(n, 64, 4096))
         else setT2IHeightDraft(String(t2iHeight))
     }
     const commitT2ISteps = () => {
@@ -356,12 +354,12 @@ export function SettingsModal({
     }
     const commitI2IWidth = () => {
         const n = parseInt(i2iWidthDraft, 10)
-        if (Number.isFinite(n)) onLocalI2IWidthChange?.(snap64(clampInt(n, 64, 4096)))
+        if (Number.isFinite(n)) onLocalI2IWidthChange?.(clampInt(n, 64, 4096))
         else setI2IWidthDraft(String(i2iWidth))
     }
     const commitI2IHeight = () => {
         const n = parseInt(i2iHeightDraft, 10)
-        if (Number.isFinite(n)) onLocalI2IHeightChange?.(snap64(clampInt(n, 64, 4096)))
+        if (Number.isFinite(n)) onLocalI2IHeightChange?.(clampInt(n, 64, 4096))
         else setI2IHeightDraft(String(i2iHeight))
     }
     const commitI2ISteps = () => {

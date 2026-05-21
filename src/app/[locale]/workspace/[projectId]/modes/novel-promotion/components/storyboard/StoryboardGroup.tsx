@@ -50,12 +50,16 @@ export default function StoryboardGroup({
   onPanelDelete,
   onOpenCharacterPicker,
   onOpenLocationPicker,
+  onOpenPropPicker,
   onRemoveCharacter,
   onRemoveLocation,
+  onRemoveProp,
   onRetryPanelSave,
   onRegeneratePanelImage,
   onUploadImage,
+  onUploadImageFromSource,
   onUploadFrameImage,
+  onUploadFrameImageFromSource,
   onRegenerateFrameImage,
   onUpdateFrameTime,
   onUpdateFramePrompt,
@@ -76,6 +80,7 @@ export default function StoryboardGroup({
   episodeId,
   onPanelVariant,
   submittingVariantPanelId,
+  previousPanelImageOptionsByPanelId,
 }: StoryboardGroupProps) {
   const t = useTranslations('storyboard')
 
@@ -228,12 +233,16 @@ export default function StoryboardGroup({
         onPanelDelete={onPanelDelete}
         onOpenCharacterPicker={onOpenCharacterPicker}
         onOpenLocationPicker={onOpenLocationPicker}
+        onOpenPropPicker={onOpenPropPicker}
         onRemoveCharacter={onRemoveCharacter}
         onRemoveLocation={onRemoveLocation}
+        onRemoveProp={onRemoveProp}
         onRetryPanelSave={onRetryPanelSave}
         onRegeneratePanelImage={handleRegeneratePanelImage}
         onUploadImage={onUploadImage}
+        onUploadImageFromSource={onUploadImageFromSource}
         onUploadFrameImage={onUploadFrameImage}
+        onUploadFrameImageFromSource={onUploadFrameImageFromSource}
         onRegenerateFrameImage={onRegenerateFrameImage}
         onUpdateFrameTime={onUpdateFrameTime}
         onUpdateFramePrompt={onUpdateFramePrompt}
@@ -254,6 +263,7 @@ export default function StoryboardGroup({
           insertingAfterPanelId === panelId ||
           submittingVariantPanelId === panelId
         }
+        previousPanelImageOptionsByPanelId={previousPanelImageOptionsByPanelId}
       />
 
       <StoryboardGroupDialogs
