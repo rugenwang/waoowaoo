@@ -8,6 +8,12 @@ import { useEditorState } from '../hooks/useEditorState'
 import { createProjectFromPanels, useEditorActions } from '../hooks/useEditorActions'
 import type { VideoEditorProject } from '../types/editor.types'
 import { calculateTimelineDuration, computeClipPositions, framesToTime } from '../utils/time-utils'
+import {
+    createPartialRegeneratedClip,
+    insertClipAfter,
+    resolvePartialRegenerateFrameRange,
+    type PartialRegenerateFrameMode,
+} from '../utils/partial-regenerate'
 import { RemotionPreview } from './Preview'
 import { Timeline } from './Timeline'
 import { TransitionPicker, TransitionType } from './TransitionPicker'
@@ -105,6 +111,9 @@ export function VideoEditorStage({
     const [isLibraryOpen, setIsLibraryOpen] = useState(false)
     const [toneMode, setToneMode] = useState<EditorToneMode>('soft')
     const [reversePreviewGeneratingClipId, setReversePreviewGeneratingClipId] = useState<string | null>(null)
+    const [clipRegeneratePrompt, setClipRegeneratePrompt] = useState('')
+    const [clipRegenerateFrameMode, setClipRegenerateFrameMode] = useState<PartialRegenerateFrameMode>('first-last')
+    const [isRegeneratingClip, setIsRegeneratingClip] = useState(false)
 
     const totalDuration = calculateTimelineDuration(project.timeline)
     const totalTime = framesToTime(totalDuration, project.config.fps)
@@ -129,6 +138,10 @@ export function VideoEditorStage({
             || selectedClip.trim.to < (selectedClip.originalDurationInFrames || selectedClip.durationInFrames)
         )
     )
+    const isSelectedClipEditorGenerated = Boolean(selectedClip?.metadata.regeneratedFromClipId)
+    const selectedClipRegenerateRange = selectedClip
+        ? resolvePartialRegenerateFrameRange(selectedClip, project.config.fps)
+        : null
     const generatedSourceCount = useMemo(
         () => sourcePanels.filter((panel) => panel.lipSyncVideoUrl || panel.videoUrl).length,
         [sourcePanels],
@@ -165,7 +178,9 @@ export function VideoEditorStage({
 
     useEffect(() => {
         setPromptDraft(selectedClip?.metadata.videoPrompt || '')
-    }, [selectedClip?.id, selectedClip?.metadata.videoPrompt])
+        setClipRegeneratePrompt(selectedClip?.metadata.videoPrompt || selectedClip?.metadata.description || '')
+        setClipRegenerateFrameMode('first-last')
+    }, [selectedClip?.id, selectedClip?.metadata.description, selectedClip?.metadata.videoPrompt])
 
     const handleSave = async () => {
         try {
@@ -297,7 +312,18 @@ export function VideoEditorStage({
     }
 
     const handleSavePrompt = async () => {
-        if (!selectedClip || !onUpdateVideoPrompt) return
+        if (!selectedClip) return
+        if (isSelectedClipEditorGenerated) {
+            updateClip(selectedClip.id, {
+                metadata: {
+                    ...selectedClip.metadata,
+                    videoPrompt: promptDraft,
+                },
+            })
+            setStatusMessage('剪辑提示词已保存到当前片段，不会回写分镜')
+            return
+        }
+        if (!onUpdateVideoPrompt) return
         const panelIndex = selectedClip.metadata.panelIndex ?? 0
         const field = selectedClip.metadata.promptField || 'videoPrompt'
         await onUpdateVideoPrompt(selectedClip.metadata.storyboardId, panelIndex, promptDraft, field)
@@ -312,6 +338,10 @@ export function VideoEditorStage({
 
     const handleRegenerateSelected = async () => {
         if (!selectedClip || !onGenerateVideo) return
+        if (isSelectedClipEditorGenerated) {
+            setStatusMessage('当前是剪辑局部生成片段，请使用下方“局部重生成并插入”')
+            return
+        }
         await handleSavePrompt()
         await onGenerateVideo(
             selectedClip.metadata.storyboardId,
@@ -322,6 +352,82 @@ export function VideoEditorStage({
             selectedClip.metadata.panelId,
         )
         setStatusMessage('已提交该片段重新生成，完成后可点击“同步成片片段”刷新时间线素材')
+    }
+
+    const handleRegenerateClipPartial = async () => {
+        if (!selectedClip || isRegeneratingClip) return
+        const prompt = clipRegeneratePrompt.trim()
+        if (!prompt) {
+            setStatusMessage('请先填写剪辑局部重生成提示词')
+            return
+        }
+        if (!defaultVideoModel) {
+            setStatusMessage('请先在项目配置中选择生视频模型')
+            return
+        }
+        if (!selectedClip.src) {
+            setStatusMessage('当前片段没有可用视频素材，无法局部重生成')
+            return
+        }
+
+        const range = resolvePartialRegenerateFrameRange(selectedClip, project.config.fps)
+        setIsRegeneratingClip(true)
+        setStatusMessage('正在截取当前片段首尾帧并局部重生成...')
+        try {
+            const response = await fetch(`/api/novel-promotion/${projectId}/editor/regenerate-clip`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    src: selectedClip.src,
+                    prompt,
+                    videoModel: defaultVideoModel,
+                    fps: project.config.fps,
+                    durationInFrames: range.durationInFrames,
+                    trim: {
+                        from: range.trimFrom,
+                        to: range.trimTo,
+                    },
+                    frameMode: clipRegenerateFrameMode,
+                }),
+            })
+            if (!response.ok) {
+                const text = await response.text().catch(() => '')
+                let message = text || '片段局部重生成失败'
+                try {
+                    const parsed = JSON.parse(text) as { message?: string; error?: string }
+                    message = parsed.message || parsed.error || message
+                } catch {
+                    // keep raw response text
+                }
+                throw new Error(message)
+            }
+            const data = await response.json() as {
+                videoUrl?: string
+                durationInFrames?: number
+                frameMode?: PartialRegenerateFrameMode
+                prompt?: string
+            }
+            if (!data.videoUrl) throw new Error('片段局部重生成未返回视频地址')
+
+            const newClip = createPartialRegeneratedClip({
+                sourceClip: selectedClip,
+                videoUrl: data.videoUrl,
+                durationInFrames: data.durationInFrames || range.durationInFrames,
+                prompt: data.prompt || prompt,
+                frameMode: data.frameMode || clipRegenerateFrameMode,
+            })
+            setProject((previous) => ({
+                ...previous,
+                timeline: insertClipAfter(previous.timeline, selectedClip.id, newClip),
+            }))
+            selectClip(newClip.id)
+            setStatusMessage('局部重生成完成，已插入到当前片段后面')
+        } catch (error) {
+            _ulogError('Partial clip regeneration failed:', error)
+            setStatusMessage(error instanceof Error ? error.message : '片段局部重生成失败')
+        } finally {
+            setIsRegeneratingClip(false)
+        }
     }
 
     const downloadResponseBlob = async (response: Response, fallbackName: string) => {
@@ -739,12 +845,12 @@ export function VideoEditorStage({
 
                             <div>
                                 <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--glass-text-secondary)' }}>
-                                    视频提示词
+                                    {isSelectedClipEditorGenerated ? '剪辑提示词' : '分镜视频提示词'}
                                 </h4>
                                 <textarea
                                     value={promptDraft}
                                     onChange={(event) => setPromptDraft(event.target.value)}
-                                    placeholder="编辑该片段的视频提示词..."
+                                    placeholder={isSelectedClipEditorGenerated ? '编辑当前剪辑片段提示词...' : '编辑该片段对应分镜的视频提示词...'}
                                     style={{
                                         width: '100%',
                                         minHeight: 180,
@@ -761,19 +867,89 @@ export function VideoEditorStage({
                                 <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                                     <button
                                         onClick={() => { void handleSavePrompt() }}
-                                        disabled={!onUpdateVideoPrompt}
+                                        disabled={!isSelectedClipEditorGenerated && !onUpdateVideoPrompt}
                                         className="glass-btn-base glass-btn-primary px-3 py-2 text-xs disabled:opacity-50"
                                     >
-                                        保存提示词
+                                        {isSelectedClipEditorGenerated ? '保存到片段' : '保存提示词'}
                                     </button>
                                     <button
                                         onClick={() => { void handleRegenerateSelected() }}
-                                        disabled={!onGenerateVideo || !defaultVideoModel}
+                                        disabled={isSelectedClipEditorGenerated || !onGenerateVideo || !defaultVideoModel}
                                         className="glass-btn-base glass-btn-tone-warning px-3 py-2 text-xs disabled:opacity-50"
                                     >
                                         重新生成视频
                                     </button>
                                 </div>
+                            </div>
+
+                            <div style={{
+                                padding: 10,
+                                borderRadius: 10,
+                                border: '1px solid var(--glass-stroke-base)',
+                                background: 'var(--glass-bg-surface)',
+                            }}>
+                                <h4 style={{ margin: '0 0 6px 0', fontSize: '13px', color: 'var(--glass-text-primary)' }}>
+                                    剪辑局部重生成
+                                </h4>
+                                <p style={{ margin: '0 0 8px 0', fontSize: 11, lineHeight: 1.5, color: 'var(--glass-text-tertiary)' }}>
+                                    只生成一个新剪辑片段并插入到当前片段后面，不会保存回分镜视频提示词。
+                                </p>
+                                <textarea
+                                    value={clipRegeneratePrompt}
+                                    onChange={(event) => setClipRegeneratePrompt(event.target.value)}
+                                    placeholder="编辑本次局部重生成提示词..."
+                                    style={{
+                                        width: '100%',
+                                        minHeight: 140,
+                                        resize: 'vertical',
+                                        padding: 10,
+                                        borderRadius: 8,
+                                        border: '1px solid var(--glass-stroke-base)',
+                                        background: 'var(--glass-bg-muted)',
+                                        color: 'var(--glass-text-primary)',
+                                        fontSize: 12,
+                                        lineHeight: 1.6,
+                                    }}
+                                />
+                                <div style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '1fr 1fr',
+                                    gap: 8,
+                                    marginTop: 8,
+                                }}>
+                                    {([
+                                        ['first-last', '首尾帧'],
+                                        ['first', '仅首帧'],
+                                    ] as const).map(([value, label]) => (
+                                        <button
+                                            key={value}
+                                            type="button"
+                                            onClick={() => setClipRegenerateFrameMode(value)}
+                                            className={`glass-btn-base px-3 py-2 text-xs ${clipRegenerateFrameMode === value ? 'glass-btn-tone-info' : 'glass-btn-secondary'}`}
+                                            title={value === 'first-last' ? '使用当前片段首帧和尾帧约束生成' : '只使用当前片段首帧生成'}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                                {selectedClipRegenerateRange && (
+                                    <p style={{ margin: '8px 0 0 0', fontSize: 11, lineHeight: 1.5, color: 'var(--glass-text-tertiary)' }}>
+                                        生成范围：{framesToTime(selectedClipRegenerateRange.trimFrom, project.config.fps)}
+                                        {' - '}
+                                        {framesToTime(selectedClipRegenerateRange.trimTo, project.config.fps)}
+                                        {' · '}
+                                        {selectedClipRegenerateRange.durationSeconds.toFixed(1)}s
+                                    </p>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => { void handleRegenerateClipPartial() }}
+                                    disabled={!defaultVideoModel || !selectedClip.src || isRegeneratingClip}
+                                    className="glass-btn-base glass-btn-tone-warning mt-3 w-full px-3 py-2 text-xs disabled:opacity-50"
+                                    title="截取当前选中片段的首尾帧，生成新视频后插入到当前片段后面"
+                                >
+                                    {isRegeneratingClip ? '局部生成中...' : '局部重生成并插入'}
+                                </button>
                             </div>
 
                             {/* 转场设置 */}

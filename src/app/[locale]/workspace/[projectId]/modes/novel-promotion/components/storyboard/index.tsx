@@ -11,6 +11,7 @@ import StoryboardCanvas from './StoryboardCanvas'
 import { useStoryboardStageController } from './hooks/useStoryboardStageController'
 import { useStoryboardModalRuntime } from './hooks/useStoryboardModalRuntime'
 import { useDeleteProjectPanelFrame, useUpdateProjectPanelFramePrompt, useUpdateProjectPanelFrameTime } from '@/lib/query/hooks'
+import { toDisplayImageUrl } from '@/lib/media/image-url'
 
 interface StoryboardStageProps {
   projectId: string
@@ -174,6 +175,11 @@ export default function StoryboardStage({
   }
   const deletePanelFrame = async (panelId: string, frameId: string) => {
     const result = await deletePanelFrameMutation.mutateAsync({ frameId })
+    const nextImageUrl = toDisplayImageUrl(result.imageUrl) || result.imageUrl
+    const nextFrames = result.frames.map((frame) => ({
+      ...frame,
+      imageUrl: toDisplayImageUrl(frame.imageUrl) || frame.imageUrl,
+    }))
     setLocalStoryboards((prev) =>
       prev.map((storyboard) => ({
         ...storyboard,
@@ -182,12 +188,12 @@ export default function StoryboardStage({
           return {
             ...panel,
             panelMode: result.panelMode,
-            imageUrl: result.imageUrl,
+            imageUrl: nextImageUrl,
             groupDurationSec: result.groupDurationSec,
             groupVideoPrompt: result.groupVideoPrompt,
             groupPlanJson: result.groupPlanJson,
             candidateImages: null,
-            frames: result.frames,
+            frames: nextFrames,
           }
         }),
       })),

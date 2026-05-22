@@ -431,6 +431,7 @@ function PanelFrameGrid({
       <div className={`${isVerticalRatio ? 'flex gap-2 overflow-x-auto pb-1' : 'grid grid-cols-2 gap-2.5 sm:grid-cols-3'}`}>
         {frames.map((frame) => {
           const imageUrl = frame.imageUrl || ''
+          const displayImageUrl = toDisplayImageUrl(imageUrl) || imageUrl
           const relationText = getRelationText(frame)
           const isFrameStaleProcessing = isStaleFrameProcessing(frame)
           const isFrameBusy = isFrameGenerationBusy(frame) && !isFrameStaleProcessing
@@ -445,7 +446,7 @@ function PanelFrameGrid({
                   type="button"
                   className={`group absolute inset-0 h-full w-full text-left ${imageUrl && onPreviewImage ? 'cursor-zoom-in' : 'cursor-default'}`}
                   onClick={() => {
-                    if (imageUrl) onPreviewImage?.(imageUrl)
+                    if (displayImageUrl) onPreviewImage?.(displayImageUrl)
                   }}
                   aria-label={`预览关键帧 F${frame.frameIndex + 1}`}
                   title={imageUrl && onPreviewImage ? `点击放大 F${frame.frameIndex + 1}` : undefined}
@@ -453,7 +454,7 @@ function PanelFrameGrid({
                   {imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={imageUrl}
+                      src={displayImageUrl}
                       alt={`frame ${frame.frameIndex + 1}`}
                       className="h-full w-full object-cover"
                     />
@@ -600,12 +601,15 @@ function PanelFrameGrid({
                       type="button"
                       className={`group/expanded-frame relative mx-auto block w-full bg-[var(--glass-bg-muted)] ${frame.imageUrl && onPreviewImage ? 'cursor-zoom-in' : 'cursor-default'} ${isVerticalRatio ? 'max-w-[260px]' : ''}`}
                       style={{ aspectRatio: frameAspectRatio }}
-                      onClick={() => frame.imageUrl && onPreviewImage?.(frame.imageUrl)}
+                      onClick={() => {
+                        const displayUrl = toDisplayImageUrl(frame.imageUrl) || frame.imageUrl
+                        if (displayUrl) onPreviewImage?.(displayUrl)
+                      }}
                       title={frame.imageUrl && onPreviewImage ? `点击放大 F${frame.frameIndex + 1}` : undefined}
                     >
                       {frame.imageUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={frame.imageUrl} alt={`F${frame.frameIndex + 1}`} className="h-full w-full object-contain" />
+                        <img src={toDisplayImageUrl(frame.imageUrl) || frame.imageUrl} alt={`F${frame.frameIndex + 1}`} className="h-full w-full object-contain" />
                       ) : (
                         <div className="flex h-full items-center justify-center text-sm text-[var(--glass-text-tertiary)]">待生成</div>
                       )}

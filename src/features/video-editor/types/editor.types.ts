@@ -101,6 +101,8 @@ export interface ClipMetadata {
     promptField?: 'videoPrompt' | 'groupVideoPrompt'
     imageUrl?: string
     durationSeconds?: number
+    regeneratedFromClipId?: string
+    regenerationFrameMode?: 'first' | 'first-last'
 }
 
 /**
