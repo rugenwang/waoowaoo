@@ -27,6 +27,18 @@ interface PanelData {
     panelMode?: string | null
 }
 
+function readPositiveNumber(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
+function resolvePanelDurationSeconds(panel: Pick<PanelData, 'duration' | 'groupDurationSec'>): number {
+    return readPositiveNumber(panel.duration) ?? readPositiveNumber(panel.groupDurationSec) ?? 3
+}
+
+function resolvePanelSourceId(panel: PanelData, index: number): string {
+    return panel.id || `${panel.storyboardId}-${panel.panelIndex ?? index}`
+}
+
 /**
  * 从已生成的视频面板创建编辑器项目
  */
@@ -42,8 +54,9 @@ export function createProjectFromPanels(
     const timeline: VideoClip[] = videoPanels.map((panel, index) => {
         // 查找匹配的配音（简单匹配：按索引）
         const matchedVoice = voiceLines?.[index]
+        const durationSeconds = resolvePanelDurationSeconds(panel)
 
-        const durationInFrames = Math.max(1, Math.round((panel.groupDurationSec || panel.duration || 3) * 30))
+        const durationInFrames = Math.max(1, Math.round(durationSeconds * 30))
 
         return {
             id: `clip_${panel.id || panel.storyboardId}_${panel.panelIndex ?? index}`,
@@ -63,14 +76,14 @@ export function createProjectFromPanels(
             },
             transition: undefined,
             metadata: {
-                panelId: panel.id || `${panel.storyboardId}-${panel.panelIndex ?? index}`,
+                panelId: resolvePanelSourceId(panel, index),
                 storyboardId: panel.storyboardId,
                 panelIndex: panel.panelIndex ?? index,
                 description: panel.description || undefined,
                 videoPrompt: panel.groupVideoPrompt || panel.videoPrompt || undefined,
                 promptField: panel.panelMode === 'group' ? 'groupVideoPrompt' : 'videoPrompt',
                 imageUrl: panel.imageUrl || undefined,
-                durationSeconds: panel.groupDurationSec || panel.duration || undefined,
+                durationSeconds,
             }
         }
     })
@@ -87,6 +100,46 @@ export function createProjectFromPanels(
         timeline,
         bgmTrack: []
     }
+}
+
+export function reconcileProjectWithPanels(project: VideoEditorProject, panels: PanelData[]): VideoEditorProject {
+    const fps = readPositiveNumber(project.config?.fps) ?? 30
+    const durationByPanelId = new Map<string, number>()
+
+    panels.forEach((panel, index) => {
+        durationByPanelId.set(resolvePanelSourceId(panel, index), resolvePanelDurationSeconds(panel))
+    })
+
+    let changed = false
+    const timeline = project.timeline.map((clip) => {
+        const durationSeconds = durationByPanelId.get(clip.metadata?.panelId)
+        if (!durationSeconds) return clip
+
+        // 已分割、裁剪或由编辑器重新生成的片段保留用户剪辑结果，不自动拉长/压缩。
+        if (clip.trim || clip.metadata?.regeneratedFromClipId) return clip
+
+        const durationInFrames = Math.max(1, Math.round(durationSeconds * fps))
+        if (
+            clip.durationInFrames === durationInFrames
+            && clip.originalDurationInFrames === durationInFrames
+            && clip.metadata?.durationSeconds === durationSeconds
+        ) {
+            return clip
+        }
+
+        changed = true
+        return {
+            ...clip,
+            durationInFrames,
+            originalDurationInFrames: durationInFrames,
+            metadata: {
+                ...clip.metadata,
+                durationSeconds,
+            },
+        }
+    })
+
+    return changed ? { ...project, timeline } : project
 }
 
 export function useEditorActions({ projectId, episodeId }: UseEditorActionsProps) {

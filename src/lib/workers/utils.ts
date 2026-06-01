@@ -252,6 +252,7 @@ export async function resolveImageSourceFromGeneration(
     prompt: string
     options?: {
       referenceImages?: string[]
+      referenceImageLabels?: string[]
       aspectRatio?: string
       resolution?: string
       size?: string
@@ -300,6 +301,7 @@ export async function resolveImageSourceFromGeneration(
   if (typeof params.options?.resolution === 'string') {
     runtimeSelections.resolution = params.options.resolution
   }
+  const { referenceImageLabels: _referenceImageLabels, ...providerOptions } = params.options || {}
   const imageMode: 't2i' | 'i2i' =
     (params.options?.referenceImages?.length || 0) > 0 ? 'i2i' : 't2i'
 
@@ -413,7 +415,7 @@ export async function resolveImageSourceFromGeneration(
   const result = await withLogContext(
     { projectId: job.data.projectId, taskId: job.data.taskId, userId: params.userId },
     () => generateImage(params.userId, params.modelId, params.prompt, {
-      ...params.options,
+      ...providerOptions,
       ...capabilityOptions,
       // 仅用于调试：让具体 provider 实现可以把最终请求记录到 task stream（不会透传到外部 API）
       __debugTaskId: job.data.taskId,

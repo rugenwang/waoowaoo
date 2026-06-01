@@ -87,6 +87,7 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
   const noticeTimerRef = useRef<number | null>(null)
   const submittingItemIdsRef = useRef<Set<string>>(new Set())
   const canceledItemIdsRef = useRef<Set<string>>(new Set())
+  const terminalHandlingTaskIdsRef = useRef<Set<string>>(new Set())
   // 用 ref 镜像 queue 状态，避免 cancelCurrent 等回调因闭包引用陈旧 queue 导致取不到最新 running 项
   const queueRef = useRef<QueueItemState[]>(queue)
   queueRef.current = queue
@@ -228,6 +229,9 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
     if (!enabled) return
     if (!isTaskTerminalLifecycle(event)) return
     const taskId = event.taskId
+    if (!taskId) return
+    if (terminalHandlingTaskIdsRef.current.has(taskId)) return
+    terminalHandlingTaskIdsRef.current.add(taskId)
     const isCompleted = isTaskCompleted(event)
 
     // 使用 setQueue 函数式更新，避免闭包捕获陈旧的 queue 引用。
@@ -252,6 +256,7 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
     // 此时仍需确保 runningRef 正确重置，否则队列会永久卡死。
     const terminalItem = matchedItem as QueueItemState | null
     if (!terminalItem) {
+      terminalHandlingTaskIdsRef.current.delete(taskId)
       if (!hadRunningItem) startNextIfIdle()
       return
     }
@@ -280,6 +285,61 @@ export function TaskQueueProvider(props: TaskQueueProviderProps) {
     })
     return unsubscribe
   }, [enabled, subscribeTaskEvents, handleTerminal])
+
+  useEffect(() => {
+    if (!enabled) return
+    const runningWithTask = queue.filter((item) => item.status === 'running' && item.taskId)
+    if (runningWithTask.length === 0) return
+
+    let cancelled = false
+    let timer: number | null = null
+
+    const pollTerminalTasks = async () => {
+      const currentRunning = queueRef.current.filter((item) => item.status === 'running' && item.taskId)
+      for (const item of currentRunning) {
+        const taskId = item.taskId
+        if (!taskId || terminalHandlingTaskIdsRef.current.has(taskId)) continue
+        try {
+          const res = await apiFetch(`/api/tasks/${encodeURIComponent(taskId)}`)
+          if (!res.ok) continue
+          const data = await res.json().catch(() => ({}))
+          const task = data && typeof data === 'object' ? (data as { task?: Record<string, unknown> }).task : null
+          const status = typeof task?.status === 'string' ? task.status : ''
+          if (status !== 'completed' && status !== 'failed' && status !== 'canceled') continue
+          await handleTerminal({
+            id: `poll:${taskId}:${typeof task?.updatedAt === 'string' ? task.updatedAt : Date.now()}`,
+            type: TASK_SSE_EVENT_TYPE.LIFECYCLE,
+            taskId,
+            projectId,
+            userId: typeof task?.userId === 'string' ? task.userId : '',
+            ts: typeof task?.updatedAt === 'string' ? task.updatedAt : new Date().toISOString(),
+            taskType: typeof task?.type === 'string' ? task.type : '',
+            targetType: typeof task?.targetType === 'string' ? task.targetType : item.target.targetType,
+            targetId: typeof task?.targetId === 'string' ? task.targetId : item.target.targetId,
+            episodeId: typeof task?.episodeId === 'string' ? task.episodeId : null,
+            payload: {
+              ...(task?.payload && typeof task.payload === 'object' && !Array.isArray(task.payload)
+                ? task.payload as Record<string, unknown>
+                : {}),
+              lifecycleType: status === 'completed' ? TASK_EVENT_TYPE.COMPLETED : TASK_EVENT_TYPE.FAILED,
+              message: typeof task?.errorMessage === 'string' ? task.errorMessage : undefined,
+            },
+          })
+        } catch {
+          // SSE is still the primary path; polling is only a best-effort fallback.
+        }
+      }
+      if (!cancelled && queueRef.current.some((item) => item.status === 'running' && item.taskId)) {
+        timer = window.setTimeout(pollTerminalTasks, 3000)
+      }
+    }
+
+    timer = window.setTimeout(pollTerminalTasks, 3000)
+    return () => {
+      cancelled = true
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [enabled, handleTerminal, projectId, queue])
 
   const enqueue = useCallback((item: QueueItem) => {
     if (!enabled) return

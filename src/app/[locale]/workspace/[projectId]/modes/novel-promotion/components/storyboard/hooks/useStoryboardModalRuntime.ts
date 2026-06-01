@@ -6,6 +6,7 @@ import type { PanelEditData } from '../../PanelEditForm'
 import type { StoryboardPanel } from './useStoryboardState'
 import type { SelectedAsset } from './useImageGeneration'
 import { useStoryboardAiDataRuntime } from './useStoryboardAiDataRuntime'
+import type { PreviousPanelImageOption } from '../PanelCard'
 
 interface AssetPickerPanelRef {
   panelId: string
@@ -29,6 +30,8 @@ interface UseStoryboardModalRuntimeParams {
   projectId: string
   videoRatio: string
   localStoryboards: NovelPromotionStoryboard[]
+  sortedStoryboards: NovelPromotionStoryboard[]
+  storyboardStartIndex: Record<string, number>
   editingPanel: { storyboardId: string; panelIndex: number } | null
   setEditingPanel: (panel: { storyboardId: string; panelIndex: number } | null) => void
   assetPickerPanel: AssetPickerPanelRef | null
@@ -76,6 +79,8 @@ export function useStoryboardModalRuntime({
   projectId,
   videoRatio,
   localStoryboards,
+  sortedStoryboards,
+  storyboardStartIndex,
   editingPanel,
   setEditingPanel,
   assetPickerPanel,
@@ -102,6 +107,73 @@ export function useStoryboardModalRuntime({
     return getDefaultAssetsForClip(clipId)
   }, [editingPanel, getDefaultAssetsForClip, localStoryboards])
 
+  const imageEditPreviousPanelImageOptions = useMemo<PreviousPanelImageOption[]>(() => {
+    if (!editingPanel) return []
+
+    let previousOptions: PreviousPanelImageOption[] = []
+    const resolveImageUrl = (value: {
+      imageUrl?: string | null
+      imageMedia?: { url?: string | null; publicId?: string | null; storageKey?: string | null } | null
+      media?: { url?: string | null; publicId?: string | null; storageKey?: string | null } | null
+    }) => {
+      const imageUrl = typeof value.imageUrl === 'string' ? value.imageUrl.trim() : ''
+      if (imageUrl) return imageUrl
+      const imageMediaUrl = typeof value.imageMedia?.url === 'string' ? value.imageMedia.url.trim() : ''
+      if (imageMediaUrl) return imageMediaUrl
+      const imageMediaPublicId = typeof value.imageMedia?.publicId === 'string' ? value.imageMedia.publicId.trim() : ''
+      if (imageMediaPublicId) return imageMediaPublicId
+      const imageMediaStorageKey = typeof value.imageMedia?.storageKey === 'string' ? value.imageMedia.storageKey.trim() : ''
+      if (imageMediaStorageKey) return imageMediaStorageKey
+      const mediaUrl = typeof value.media?.url === 'string' ? value.media.url.trim() : ''
+      if (mediaUrl) return mediaUrl
+      const mediaPublicId = typeof value.media?.publicId === 'string' ? value.media.publicId.trim() : ''
+      if (mediaPublicId) return mediaPublicId
+      const mediaStorageKey = typeof value.media?.storageKey === 'string' ? value.media.storageKey.trim() : ''
+      return mediaStorageKey
+    }
+    const collectPanelImages = (panel: StoryboardPanel, globalPanelNumber: number): PreviousPanelImageOption[] => {
+      const frames = Array.isArray(panel.frames)
+        ? [...panel.frames].sort((left, right) => left.frameIndex - right.frameIndex)
+        : []
+      const frameOptions = frames
+        .map((frame) => {
+          const imageUrl = resolveImageUrl(frame)
+          if (!imageUrl) return null
+          return {
+            id: `${panel.id}:frame:${frame.id}`,
+            label: `分镜 ${globalPanelNumber} · F${frame.frameIndex + 1}${frame.frameRole ? ` · ${frame.frameRole}` : ''}`,
+            imageUrl,
+          }
+        })
+        .filter((option): option is PreviousPanelImageOption => option !== null)
+      if (frameOptions.length > 0) return frameOptions
+
+      const imageUrl = resolveImageUrl(panel)
+      if (!imageUrl) return []
+      return [{
+        id: `${panel.id}:panel`,
+        label: `分镜 ${globalPanelNumber} · 主图`,
+        imageUrl,
+      }]
+    }
+
+    for (const storyboard of sortedStoryboards) {
+      const panels = getTextPanels(storyboard)
+      const startIndex = storyboardStartIndex[storyboard.id] || 0
+      for (let index = 0; index < panels.length; index += 1) {
+        const panel = panels[index]
+        if (storyboard.id === editingPanel.storyboardId && index === editingPanel.panelIndex) {
+          return previousOptions
+        }
+        const options = collectPanelImages(panel, startIndex + index + 1)
+        if (options.length > 0) {
+          previousOptions = options
+        }
+      }
+    }
+    return []
+  }, [editingPanel, getTextPanels, sortedStoryboards, storyboardStartIndex])
+
   const { aiDataRuntime, handleSaveAIData } = useStoryboardAiDataRuntime({
     aiDataPanel,
     localStoryboards,
@@ -123,6 +195,7 @@ export function useStoryboardModalRuntime({
     videoRatio,
     editingPanel,
     imageEditDefaults,
+    imageEditPreviousPanelImageOptions,
     handleEditSubmit,
     closeImageEditModal: () => setEditingPanel(null),
 

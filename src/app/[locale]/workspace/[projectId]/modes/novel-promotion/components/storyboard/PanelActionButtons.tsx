@@ -12,17 +12,27 @@ import { AppIcon } from '@/components/ui/icons'
 interface PanelActionButtonsProps {
     onInsertPanel: () => void
     onDuplicatePanel?: () => void | Promise<void>
+    onMergeWithNextPanel?: () => void | Promise<void>
     onVariant: () => void
+    onToggleUsePreviousPanelTail?: () => void | Promise<void>
     disabled?: boolean
     hasImage: boolean // 原镜头是否有图片（没图片不能做变体）
+    isUsingPreviousPanelTail?: boolean
+    canUsePreviousPanelTail?: boolean
+    previousPanelTailDisabled?: boolean
 }
 
 export default function PanelActionButtons({
     onInsertPanel,
     onDuplicatePanel,
+    onMergeWithNextPanel,
     onVariant,
+    onToggleUsePreviousPanelTail,
     disabled,
-    hasImage
+    hasImage,
+    isUsingPreviousPanelTail = false,
+    canUsePreviousPanelTail = false,
+    previousPanelTailDisabled = false,
 }: PanelActionButtonsProps) {
     const t = useTranslations('storyboard')
     const baseButtonClass = `
@@ -38,6 +48,14 @@ export default function PanelActionButtons({
     `
     const disabledButtonClass = `
         bg-[var(--glass-bg-muted)] text-[var(--glass-text-tertiary)] cursor-not-allowed
+    `
+    const referenceReadyButtonClass = `
+        border-[var(--glass-tone-info-fg)] bg-[var(--glass-tone-info-bg)] text-[var(--glass-tone-info-fg)]
+        shadow-[var(--glass-shadow-md)] hover:-translate-y-0.5 hover:bg-[var(--glass-tone-info-bg)]
+    `
+    const activeButtonClass = `
+        border-[var(--glass-tone-success-fg)] bg-[var(--glass-tone-success-fg)] text-white
+        shadow-[var(--glass-shadow-md)]
     `
 
     return (
@@ -89,6 +107,69 @@ export default function PanelActionButtons({
                         ${disabled ? 'hidden' : ''}
                     `}>
                         {t('panelActions.duplicatePanel')}
+                    </span>
+                </button>
+            ) : null}
+
+            {/* 合并到下一分镜按钮 */}
+            {onMergeWithNextPanel ? (
+                <button
+                    onClick={() => void onMergeWithNextPanel()}
+                    disabled={disabled}
+                    className={`
+                        ${baseButtonClass}
+                        ${disabled ? disabledButtonClass : enabledButtonClass}
+                    `}
+                    title={t('panelActions.mergeWithNext')}
+                >
+                    <AppIcon name="clapperboard" className="w-4 h-4" />
+
+                    <span className={`
+                        absolute -top-8 left-1/2 -translate-x-1/2
+                        px-2 py-1 text-xs text-white bg-[var(--glass-overlay)] rounded
+                        opacity-0 group-hover:opacity-100
+                        transition-opacity duration-200
+                        whitespace-nowrap pointer-events-none
+                        ${disabled ? 'hidden' : ''}
+                    `}>
+                        {t('panelActions.mergePanelGroup')}
+                    </span>
+                </button>
+            ) : null}
+
+            {onToggleUsePreviousPanelTail ? (
+                <button
+                    onClick={() => void onToggleUsePreviousPanelTail()}
+                    disabled={previousPanelTailDisabled || !canUsePreviousPanelTail}
+                    className={`
+                        ${baseButtonClass}
+                        ${previousPanelTailDisabled || !canUsePreviousPanelTail
+                            ? disabledButtonClass
+                            : isUsingPreviousPanelTail
+                                ? activeButtonClass
+                                : referenceReadyButtonClass}
+                    `}
+                    title={
+                        !canUsePreviousPanelTail
+                            ? t('panelActions.usePreviousTailUnavailable')
+                            : isUsingPreviousPanelTail
+                                ? t('panelActions.usePreviousTailEnabled')
+                                : t('panelActions.usePreviousTailDisabled')
+                    }
+                >
+                    <AppIcon name="link" className="w-4 h-4" />
+
+                    <span className={`
+                        absolute -top-8 left-1/2 -translate-x-1/2
+                        px-2 py-1 text-xs text-white bg-[var(--glass-overlay)] rounded
+                        opacity-0 group-hover:opacity-100
+                        transition-opacity duration-200
+                        whitespace-nowrap pointer-events-none
+                        ${previousPanelTailDisabled || !canUsePreviousPanelTail ? 'hidden' : ''}
+                    `}>
+                        {isUsingPreviousPanelTail
+                            ? t('panelActions.usePreviousTailEnabled')
+                            : t('panelActions.usePreviousTail')}
                     </span>
                 </button>
             ) : null}

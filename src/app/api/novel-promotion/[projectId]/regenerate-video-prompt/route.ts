@@ -152,9 +152,7 @@ export const POST = apiHandler(async (
     throw new Error('请先在项目设置中配置分析模型')
   }
 
-  const duration = field === 'groupVideoPrompt'
-    ? panel.groupDurationSec || panel.duration || null
-    : panel.duration || panel.groupDurationSec || null
+  const duration = panel.duration || panel.groupDurationSec || null
   const contextPayload = {
     id: panel.id,
     panelIndex: panel.panelIndex,

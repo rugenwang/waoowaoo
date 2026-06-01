@@ -220,6 +220,7 @@ model NovelPromotionPanel {
   sceneType         String?
   candidateImages   String?                   @db.Text
   linkedToNextPanel Boolean                   @default(false)
+  usePreviousPanelTailAsReference Boolean     @default(false)
   lipSyncTaskId     String?
   lipSyncVideoUrl   String?
   lipSyncVideoMediaId String?

@@ -82,7 +82,7 @@ export default function ImageSection({
 
   const cancelTask = useCancelTask(projectId)
   const taskStateMap = useTaskTargetStateMap(projectId, [
-    { targetType: 'NovelPromotionPanel', targetId: panelId, types: ['image_panel'] },
+    { targetType: 'NovelPromotionPanel', targetId: panelId, types: ['image_panel', 'modify_asset_image'] },
   ])
   const taskState = taskStateMap.getState('NovelPromotionPanel', panelId)
   const runningTaskId = taskState?.runningTaskId || null
@@ -240,6 +240,7 @@ export default function ImageSection({
           panelId={panelId}
           imageUrl={imageUrl}
           previousImageUrl={previousImageUrl}
+          downloadFileName={`storyboard-panel-${globalPanelNumber}`}
           isSubmittingPanelImageTask={isSubmittingPanelImageTask}
           isModifying={isModifying}
           onRegeneratePanelImage={onRegeneratePanelImage}

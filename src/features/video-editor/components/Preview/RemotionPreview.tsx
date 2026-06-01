@@ -104,8 +104,8 @@ export const RemotionPreview: React.FC<RemotionPreviewProps> = ({
         const player = playerRef.current
         if (!player) return
 
-        // 避免循环更新：只有当帧差距大于 1 时才 seek
-        if (Math.abs(currentFrame - lastSyncedFrame.current) > 1) {
+        // 外部拖动时间轴/选帧滑杆时需要精确 seek 到每一帧；循环由 externalSeekTargetRef 和暂停态过滤保护。
+        if (Math.abs(currentFrame - lastSyncedFrame.current) >= 1) {
             externalSeekTargetRef.current = currentFrame
             player.seekTo(currentFrame)
             lastSyncedFrame.current = currentFrame

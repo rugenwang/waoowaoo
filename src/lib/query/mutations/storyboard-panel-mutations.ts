@@ -331,6 +331,54 @@ export function useDeleteProjectPanelFrame(projectId: string) {
     })
 }
 
+export function useInsertProjectPanelFrame(projectId: string) {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: async (payload: {
+            panelId?: string
+            frameId?: string
+            placement?: 'before' | 'after'
+            imagePrompt?: string
+        }) => {
+            return await requestJsonWithError<{
+                success: boolean
+                panelId: string
+                panelMode: 'single' | 'group'
+                imageUrl: string | null
+                groupDurationSec: number | null
+                groupVideoPrompt: string | null
+                groupPlanJson: string | null
+                frames: Array<{
+                    id: string
+                    panelId: string
+                    frameIndex: number
+                    frameTimeSec: number
+                    frameRole: string | null
+                    dependencyFrameIds: string | null
+                    imagePrompt: string | null
+                    videoPrompt: string | null
+                    promptJson: string | null
+                    referencePolicy: string | null
+                    imageUrl: string | null
+                    imageMediaId: string | null
+                    generationStatus: string | null
+                    errorMessage: string | null
+                    createdAt?: string
+                    updatedAt?: string
+                }>
+            }>(`/api/novel-promotion/${projectId}/panel-frame`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            }, '插入关键帧失败')
+        },
+        onSettled: async () => {
+            await invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+            await queryClient.invalidateQueries({ queryKey: ['episode-data', projectId], exact: false })
+        },
+    })
+}
+
 export function useSplitProjectPanelFrame(projectId: string) {
     const queryClient = useQueryClient()
     return useMutation({
@@ -354,6 +402,31 @@ export function useSplitProjectPanelFrame(projectId: string) {
     })
 }
 
+export function useMergeProjectPanelWithNext(projectId: string) {
+    const queryClient = useQueryClient()
+    return useMutation({
+        mutationFn: async (payload: { panelId: string }) => {
+            return await requestJsonWithError<{
+                success: boolean
+                panelId: string
+                mergedPanelId: string
+                storyboardId: string
+                panelCount: number
+                frameCount: number
+            }>(`/api/novel-promotion/${projectId}/merge-panels`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            }, '合并分镜失败')
+        },
+        onSettled: async () => {
+            await invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+            await invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            await queryClient.invalidateQueries({ queryKey: ['episode-data', projectId], exact: false })
+        },
+    })
+}
+
 /**
  * 修改镜头图片（storyboard）
  */
@@ -364,12 +437,13 @@ export function useModifyProjectStoryboardImage(projectId: string) {
         mutationFn: async (payload: {
             storyboardId: string
             panelIndex: number
+            panelId?: string
             modifyPrompt: string
             extraImageUrls: string[]
             selectedAssets: Array<{
                 id: string
                 name: string
-                type: 'character' | 'location'
+                type: 'character' | 'location' | 'prop'
                 imageUrl: string | null
                 appearanceId?: number
                 appearanceName?: string
@@ -380,6 +454,39 @@ export function useModifyProjectStoryboardImage(projectId: string) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             }, '修改失败')
+        },
+        onMutate: (payload) => {
+            if (!payload.panelId) return
+            upsertTaskTargetOverlay(queryClient, {
+                projectId,
+                targetType: 'NovelPromotionPanel',
+                targetId: payload.panelId,
+                runningTaskType: 'modify_asset_image',
+                intent: 'modify',
+            })
+        },
+        onSuccess: (data, payload) => {
+            if (!payload.panelId) return
+            const result = data as { async?: boolean; taskId?: unknown; status?: unknown }
+            const taskId = typeof result?.taskId === 'string' ? result.taskId.trim() : ''
+            if (!result?.async || !taskId) return
+            upsertTaskTargetOverlay(queryClient, {
+                projectId,
+                targetType: 'NovelPromotionPanel',
+                targetId: payload.panelId,
+                phase: result.status === 'processing' ? 'processing' : 'queued',
+                runningTaskId: taskId,
+                runningTaskType: 'modify_asset_image',
+                intent: 'modify',
+            })
+        },
+        onError: (_error, payload) => {
+            if (!payload.panelId) return
+            clearTaskTargetOverlay(queryClient, {
+                projectId,
+                targetType: 'NovelPromotionPanel',
+                targetId: payload.panelId,
+            })
         },
         onSettled: () => {
             invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
@@ -434,6 +541,44 @@ export function useUpdateProjectPanel(projectId: string) {
                 storyboardId,
                 panelIndex,
                 patch,
+            })
+        },
+        onSettled: () => {
+            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            void queryClient.invalidateQueries({ queryKey: ['episode-data', projectId], exact: false })
+        },
+    })
+}
+
+export function useUpdateProjectPanelPreviousTailReference(projectId: string) {
+    const queryClient = useQueryClient()
+
+    return useMutation({
+        mutationFn: async (payload: {
+            panelId: string
+            storyboardId: string
+            panelIndex: number
+            usePreviousPanelTailAsReference: boolean
+        }) =>
+            await requestJsonWithError(
+                `/api/novel-promotion/${projectId}/panel`,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        panelId: payload.panelId,
+                        usePreviousPanelTailAsReference: payload.usePreviousPanelTailAsReference,
+                    }),
+                },
+                '更新沿用上一分镜尾帧开关失败',
+            ),
+        onMutate: (payload) => {
+            patchEpisodePanelsCache(queryClient, projectId, {
+                storyboardId: payload.storyboardId,
+                panelIndex: payload.panelIndex,
+                patch: {
+                    usePreviousPanelTailAsReference: payload.usePreviousPanelTailAsReference,
+                },
             })
         },
         onSettled: () => {

@@ -2,10 +2,12 @@
 
 import { useState } from "react"
 import { signIn } from "next-auth/react"
+import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import Navbar from "@/components/Navbar"
 import { Link, useRouter } from '@/i18n/navigation'
 import { buildAuthenticatedHomeTarget } from '@/lib/home/default-route'
+import { resolveSafePostLoginTarget } from '@/lib/auth/redirect-target'
 
 export default function SignIn() {
   const [username, setUsername] = useState("")
@@ -13,6 +15,7 @@ export default function SignIn() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const router = useRouter()
+  const searchParams = useSearchParams()
   const t = useTranslations('auth')
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -32,7 +35,7 @@ export default function SignIn() {
       } else if (result?.error) {
         setError(t('loginFailed'))
       } else {
-        router.push(buildAuthenticatedHomeTarget())
+        router.push(resolveSafePostLoginTarget(searchParams?.get('next')))
         router.refresh()
       }
     } catch {

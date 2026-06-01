@@ -57,6 +57,7 @@ export function usePanelImageRegeneration({
           uiKey: `panel-${panelId}`,
           label: `分镜：镜头 ${panelId.slice(0, 6)}`,
           submit: async () => {
+            setSubmittingPanelImageIds((previous) => new Set(previous).add(panelId))
             const data = await regeneratePanelMutation.mutateAsync({ panelId, count }) as any
             const taskId = String((data as any)?.taskId || '')
             return { taskId }
@@ -65,11 +66,21 @@ export function usePanelImageRegeneration({
             if (onSilentRefresh) await onSilentRefresh()
             refreshEpisode()
             refreshStoryboards()
+            setSubmittingPanelImageIds((previous) => {
+              const next = new Set(previous)
+              next.delete(panelId)
+              return next
+            })
           },
           onFail: async () => {
             if (onSilentRefresh) await onSilentRefresh()
             refreshEpisode()
             refreshStoryboards()
+            setSubmittingPanelImageIds((previous) => {
+              const next = new Set(previous)
+              next.delete(panelId)
+              return next
+            })
           },
         })
         return null

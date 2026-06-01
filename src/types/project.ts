@@ -181,6 +181,7 @@ export interface NovelPromotionPanel {
   imagePrompt: string | null
   imageUrl: string | null
   candidateImages?: string | null
+  usePreviousPanelTailAsReference?: boolean
   media?: MediaRef | null
   imageHistory: string | null
   videoPrompt: string | null

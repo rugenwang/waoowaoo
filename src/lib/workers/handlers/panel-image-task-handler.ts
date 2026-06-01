@@ -27,6 +27,11 @@ import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { clearTaskExternalId } from '@/lib/task/service'
 import { buildPanelAiDataJson } from '@/lib/novel-promotion/panel-ai-data-json'
 import { parseLocationAvailableSlots } from '@/lib/location-available-slots'
+import {
+  parsePanelFrameDependencyPlan,
+  withPreviousTailDependency,
+} from '@/lib/novel-promotion/panel-tail-reference'
+import { loadPreviousPanelTailImageInfo } from '@/lib/novel-promotion/previous-panel-tail'
 
 type PromptRecord = Record<string, unknown>
 type PromptCharacter = { name?: unknown; appearance?: unknown; slot?: unknown; reference_description?: unknown }
@@ -39,11 +44,6 @@ type PanelFrameForGeneration = {
   imagePrompt: string | null
   videoPrompt: string | null
   imageUrl?: string | null
-}
-
-type FrameDependencyPlan = {
-  frameIndexes: number[]
-  previousTail: boolean
 }
 
 function parseJsonUnknown(raw: string | null | undefined): unknown | null {
@@ -201,6 +201,7 @@ export function buildPanelStructuredPrompt(params: {
   aspectRatio: string
   styleText: string
   context: ReturnType<typeof buildPanelPromptContext>
+  usesPreviousTail?: boolean
 }): string {
   const shot = (params.context as { shot?: PromptRecord }).shot || {}
   const shotType = String(shot.shot_type || '').trim()
@@ -319,8 +320,12 @@ export function buildPanelStructuredPrompt(params: {
       shotType || cameraMove ? `Shot: ${[shotType, cameraMove].filter(Boolean).join(', ')}` : '',
       imagePrompt ? `Static image prompt: ${imagePrompt}` : '',
       description ? `Description: ${description}` : '',
-      location ? `Location: ${location}` : '',
-      locationReferenceText ? `Location reference: ${locationReferenceText}` : '',
+      location
+        ? (params.usesPreviousTail
+          ? `Scene continuity: strictly reuse FP, the first reference image, as the actual environment; current location text "${location}" is story context only and must not override FP.`
+          : `Location: ${location}`)
+        : '',
+      !params.usesPreviousTail && locationReferenceText ? `Location reference: ${locationReferenceText}` : '',
       characterLines,
       propLines,
       referencePriority ? `Reference priority: ${referencePriority}` : '',
@@ -361,29 +366,6 @@ function buildPanelDescriptionPrompt(params: {
   return params.styleText ? `${clean}，${params.styleText}` : clean
 }
 
-function parseDependencyFramePlan(raw: string | null | undefined): FrameDependencyPlan {
-  if (!raw) return { frameIndexes: [], previousTail: false }
-  try {
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return { frameIndexes: [], previousTail: false }
-    const frameIndexes: number[] = []
-    let previousTail = false
-    for (const item of parsed) {
-      if (typeof item === 'string' && item.trim().toUpperCase() === 'FP') {
-        previousTail = true
-        continue
-      }
-      const value = typeof item === 'number' ? item : typeof item === 'string' ? Number(item) : NaN
-      if (Number.isFinite(value) && value >= 0) {
-        frameIndexes.push(Math.floor(value))
-      }
-    }
-    return { frameIndexes, previousTail }
-  } catch {
-    return { frameIndexes: [], previousTail: false }
-  }
-}
-
 function uniqueStrings(values: string[]): string[] {
   const seen = new Set<string>()
   const result: string[] = []
@@ -407,12 +389,28 @@ function uniqueNumbers(values: number[]): number[] {
   return result
 }
 
+async function markPanelFrameGenerationFailed(frameId: string | null | undefined, message: string) {
+  if (!frameId) return
+  try {
+    await prisma.novelPromotionPanelFrame.update({
+      where: { id: frameId },
+      data: {
+        generationStatus: 'failed',
+        errorMessage: message,
+      },
+    })
+  } catch {
+    // Best-effort cleanup so a worker-side validation error does not leave the card spinning.
+  }
+}
+
 function buildFrameReferencePlan(params: {
   frame: PanelFrameForGeneration
   generatedByFrameIndex: Map<number, string>
   previousTailImageUrl?: string | null
+  dependencyFrameIds?: string | null
 }) {
-  const dependencyPlan = parseDependencyFramePlan(params.frame.dependencyFrameIds)
+  const dependencyPlan = parsePanelFrameDependencyPlan(params.dependencyFrameIds ?? params.frame.dependencyFrameIds)
   const dependencyIndexes = uniqueNumbers(dependencyPlan.frameIndexes)
   const frameReferenceIndexes = params.frame.frameIndex > 0
     ? (dependencyIndexes.length > 0 ? dependencyIndexes : [Math.max(0, params.frame.frameIndex - 1)])
@@ -552,8 +550,12 @@ function buildPanelFramePrompt(params: {
     : [
       `画面比例：${params.aspectRatio}`,
       shotType || cameraMove ? `镜头：${[shotType, cameraMove].filter(Boolean).join('，')}` : '',
-      location ? `场景：${location}` : '',
-      locationReferenceText ? `场景参考：${locationReferenceText}` : '',
+      location
+        ? (params.usesPreviousTail
+          ? `场景连续性：实际环境必须严格沿用第一张参考图 FP；当前地点文字“${location}”只作为剧情上下文，不能覆盖 FP 场景。`
+          : `场景：${location}`)
+        : '',
+      !params.usesPreviousTail && locationReferenceText ? `场景参考：${locationReferenceText}` : '',
       characters ? `角色：${characters}` : '',
       props ? `道具：${props}` : '',
       referencePriority ? `参考优先级：${referencePriority}` : '',
@@ -607,6 +609,35 @@ export function buildStoryboardHardConstraints(params: {
     hasRefs ? '- 有参考图时必须严格匹配：角色资产图锁定身份/服装/发型；上一帧参考图锁定连续性；场景资产图锁定空间结构/光线/可站位置；道具资产图锁定道具外观。禁止原样复制参考图姿势/构图；参考图上的文字标签仅供识别，禁止画入图中。' : null,
     style ? `- 风格必须与参考一致：${style}` : null,
   ].filter(Boolean).join('\n')
+}
+
+function buildPreviousTailReferenceHardRule(locale: TaskJobData['locale']): string {
+  if (locale === 'en') {
+    return [
+      'PREVIOUS-PANEL TAIL REFERENCE (must follow):',
+      '- The FIRST reference image is FP, the previous panel tail frame.',
+      '- The current image must naturally continue from FP as the opening state of this panel.',
+      '- Character appearance MUST strictly follow FP and character asset references: same identity, face, hairstyle, makeup, outfit style, clothing color, fabric layers, accessories, body silhouette, and relative position continuity.',
+      '- The scene/background MUST strictly follow FP: keep the same environment, spatial layout, architecture/background structures, furniture, furnishings, interior decor, wall/floor materials, doors/windows, tables/chairs/cabinets, lamps, key objects, light direction, color mood, weather/time-of-day, depth relationship, and overall atmosphere from the first reference image.',
+      '- Do not replace, add, remove, rearrange, or redesign furniture and set dressing from FP unless the current panel explicitly says a specific object moved.',
+      '- If the current panel location/scene text conflicts with FP, FP wins. Treat current location text only as story context, never as permission to change the FP environment.',
+      '- Do not redesign, replace, or freely reinterpret the FP scene. Only adjust the camera framing slightly when the current panel description requires it.',
+      '- Preserve FP continuity for character identity, outfit, hairstyle, prop state, spatial relationship, lighting direction, color mood, and story state.',
+      '- Do not ignore FP, but also do not copy FP exactly; create the next coherent still frame based on the current panel description.',
+    ].join('\n')
+  }
+  return [
+    '【上一分镜尾帧 FP 参考规则 - 必须遵守】',
+    '- 第 1 张参考图是 FP，即上一分镜的尾帧。',
+    '- 当前图片必须自然承接 FP，作为当前分镜的开场状态。',
+    '- 人物必须严格按照 FP 和角色资产参考图：保持同一身份、脸型五官、发型、妆容、服装款式、服装颜色、面料层次、配饰、体型轮廓和相对位置连续性。',
+    '- 场景/背景必须严格按照 FP：保持第 1 张参考图里的同一环境、空间布局、建筑/背景结构、家具、陈设、室内装饰、墙面/地面材质、门窗、桌椅柜、灯具、关键物体、光线方向、色调、天气/时间、前后景关系和整体氛围。',
+    '- 禁止替换、增删、重排或重新设计 FP 中的家具和场景陈设；除非当前分镜明确写了某个物体发生移动。',
+    '- 如果当前分镜的场景/地点文字与 FP 不一致，必须以 FP 为准；当前场景文字只能作为剧情上下文，不能作为改变 FP 环境的依据。',
+    '- 禁止重新设计、替换或自由发挥 FP 的场景；除非当前分镜描述明确要求，只允许轻微调整取景范围和构图。',
+    '- 必须延续 FP 中的人物身份、服装发型、道具状态、空间关系、光线方向、色调氛围和剧情状态。',
+    '- 不能忽略 FP，也不能原样复制 FP；要结合当前分镜描述生成顺滑衔接后的当前静态画面。',
+  ].join('\n')
 }
 
 export function cleanupRefinedPrompt(raw: string): string {
@@ -674,16 +705,82 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   })
 
   if (!panel) throw new Error('Panel not found')
+  let panelUsesPreviousTailAsReference = Boolean(
+    (panel as { usePreviousPanelTailAsReference?: boolean }).usePreviousPanelTailAsReference,
+  )
 
   const projectData = await resolveNovelData(job.data.projectId)
   const modelConfig = await getProjectModels(job.data.projectId, job.data.userId)
   const modelKey = modelConfig.storyboardModel
   if (!modelKey) throw new Error('Storyboard model not configured')
   const parsedStoryboardModel = parseModelKeyStrict(modelKey)
+  const sortedFrames = Array.isArray(panel.frames)
+    ? [...panel.frames].sort((left, right) => left.frameIndex - right.frameIndex)
+    : []
+  const isPanelGroup = panel.panelMode === 'group' || sortedFrames.length > 1
+  const isMultiFrameGroup = isPanelGroup && sortedFrames.length > 1
+  const targetFrame = isMultiFrameGroup && targetFrameId
+    ? sortedFrames.find((frame) => frame.id === targetFrameId)
+    : null
+  if (isMultiFrameGroup && targetFrameId && !targetFrame) {
+    throw new Error('Target frame not found')
+  }
+  const framesNeedingGenerationForPreviousTailCheck = isMultiFrameGroup
+    ? (targetFrame ? [targetFrame] : sortedFrames.filter((frame) => !(typeof frame.imageUrl === 'string' && frame.imageUrl.trim())))
+    : []
+  const needsPreviousTailReference =
+    isMultiFrameGroup
+      ? framesNeedingGenerationForPreviousTailCheck.some((frame) => parsePanelFrameDependencyPlan(
+        withPreviousTailDependency(
+          frame.dependencyFrameIds,
+          panelUsesPreviousTailAsReference,
+          frame.frameIndex,
+        ),
+      ).previousTail)
+      : panelUsesPreviousTailAsReference
 
   const candidateCount = clampCount(payload.candidateCount ?? payload.count, 1, 4, 1)
-  const refs = await collectPanelReferenceImages(projectData, panel)
-  const normalizedRefs = await normalizeReferenceImagesForGeneration(refs)
+  const panelReferenceImages = await collectPanelReferenceImages(projectData, panel)
+  const panelReferenceImagesWithoutLocation = needsPreviousTailReference
+    ? await collectPanelReferenceImages(projectData, panel, { includeLocationReference: false })
+    : panelReferenceImages
+  const previousTailInfo = needsPreviousTailReference
+    ? await loadPreviousPanelTailImageInfo({
+      storyboardId: panel.storyboardId,
+      panelIndex: panel.panelIndex,
+    })
+    : null
+  let previousTailImageUrl = previousTailInfo?.imageUrl || null
+  if (needsPreviousTailReference && previousTailInfo && !previousTailInfo.previousPanelExists) {
+    if (panelUsesPreviousTailAsReference) {
+      await prisma.novelPromotionPanel.update({
+        where: { id: panel.id },
+        data: { usePreviousPanelTailAsReference: false },
+      })
+      panelUsesPreviousTailAsReference = false
+    }
+    previousTailImageUrl = null
+  } else if (needsPreviousTailReference && !previousTailImageUrl) {
+    const message = '当前分镜首帧需要参考上一分镜尾帧，但上一分镜还没有可用尾帧图片'
+    await markPanelFrameGenerationFailed(targetFrame?.id, message)
+    throw new Error(message)
+  }
+  const panelReferenceImagesForSinglePanel = !isMultiFrameGroup && previousTailImageUrl
+    ? panelReferenceImagesWithoutLocation
+    : panelReferenceImages
+  const singlePanelRefs = uniqueStrings([
+    ...(!isMultiFrameGroup && previousTailImageUrl
+      ? [toSignedUrlIfCos(previousTailImageUrl, 3600) || previousTailImageUrl]
+      : []),
+    ...panelReferenceImagesForSinglePanel,
+  ])
+  const normalizedRefs = await normalizeReferenceImagesForGeneration(singlePanelRefs)
+  const normalizedPanelRefs = isMultiFrameGroup
+    ? await normalizeReferenceImagesForGeneration(uniqueStrings(panelReferenceImages))
+    : normalizedRefs
+  const normalizedPanelRefsWithoutLocation = isMultiFrameGroup
+    ? await normalizeReferenceImagesForGeneration(uniqueStrings(panelReferenceImagesWithoutLocation))
+    : normalizedRefs
 
   const logger = createScopedLogger({
     module: 'worker.panel-image',
@@ -699,13 +796,19 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       panelId,
       modelKey,
       candidateCount,
-      referenceImagesRawCount: refs.length,
+      referenceImagesRawCount: panelReferenceImages.length,
+      referenceImagesEffectiveRawCount: singlePanelRefs.length,
       referenceImagesNormalizedCount: normalizedRefs.length,
-      rawUrls: refs.map((u) => u.substring(0, 100)),
+      referenceImageLabels: [
+        ...(!isMultiFrameGroup && previousTailImageUrl ? ['FP(previous-panel-tail)'] : []),
+        ...panelReferenceImagesForSinglePanel.map((_, index) => `asset-${index + 1}`),
+      ],
+      rawUrls: singlePanelRefs.map((u) => u.substring(0, 100)),
       normalizedUrls: normalizedRefs.map((u) => u.substring(0, 100)),
       panelCharacters: panel.characters,
       panelLocation: panel.location,
       artStyle: modelConfig.artStyle,
+      usePreviousPanelTailAsReference: panelUsesPreviousTailAsReference,
     },
   })
 
@@ -755,6 +858,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
         aspectRatio,
         styleText: artStyle || '',
         context: promptContext,
+        usesPreviousTail: !isMultiFrameGroup && !!previousTailImageUrl,
       })
     } else {
       // 非本地模型仍沿用模板（模板内部会引用 storyboard_text_json_input）
@@ -773,12 +877,6 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     modelConfig.localStoryboardPromptRefineEnabled === true
     && !!modelConfig.analysisModel
 
-  const sortedFrames = Array.isArray(panel.frames)
-    ? [...panel.frames].sort((left, right) => left.frameIndex - right.frameIndex)
-    : []
-  const isPanelGroup = panel.panelMode === 'group' || sortedFrames.length > 1
-
-  const isMultiFrameGroup = isPanelGroup && sortedFrames.length > 1
   const refinedOrRawPrompt = !isMultiFrameGroup && shouldRefinePrompt ? await (async () => {
     try {
       const strength = modelConfig.localStoryboardPromptRefineLevel || 'medium'
@@ -870,23 +968,6 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   if (isMultiFrameGroup) {
     const generatedByFrameIndex = new Map<number, string>()
     const generatedUrls: string[] = []
-    const previousPanel = await prisma.novelPromotionPanel.findFirst({
-      where: {
-        storyboardId: panel.storyboardId,
-        panelIndex: { lt: panel.panelIndex },
-      },
-      orderBy: { panelIndex: 'desc' },
-      include: {
-        frames: { orderBy: { frameIndex: 'desc' }, take: 1 },
-      },
-    })
-    const previousTailImageUrl = previousPanel?.frames?.[0]?.imageUrl || previousPanel?.imageUrl || null
-    const targetFrame = targetFrameId
-      ? sortedFrames.find((frame) => frame.id === targetFrameId)
-      : null
-    if (targetFrameId && !targetFrame) {
-      throw new Error('Target frame not found')
-    }
     const existingGeneratedFrames = sortedFrames.filter((frame) => {
       if (targetFrameId && frame.id === targetFrameId) return false
       return typeof frame.imageUrl === 'string' && frame.imageUrl.trim()
@@ -919,9 +1000,17 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       : sortedFrames.filter((frame) => !(shouldResumePartialGroup && frame.imageUrl))
 
     for (const frame of targetFrame ? framesToGenerate : []) {
-      const dependencyPlan = parseDependencyFramePlan(frame.dependencyFrameIds)
+      const dependencyPlan = parsePanelFrameDependencyPlan(
+        withPreviousTailDependency(
+          frame.dependencyFrameIds,
+          panelUsesPreviousTailAsReference,
+          frame.frameIndex,
+        ),
+      )
       if (dependencyPlan.previousTail && !previousTailImageUrl) {
-        throw new Error(`F${frame.frameIndex + 1} 需要参考上一分镜尾帧 FP，但上一分镜还没有可用尾帧图片`)
+        const message = `F${frame.frameIndex + 1} 需要参考上一分镜尾帧 FP，但上一分镜还没有可用尾帧图片`
+        await markPanelFrameGenerationFailed(frame.id, message)
+        throw new Error(message)
       }
       for (const dependencyIndex of dependencyPlan.frameIndexes) {
         if (!generatedByFrameIndex.get(dependencyIndex)) {
@@ -946,23 +1035,39 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       })
 
       try {
-      const frameReferencePlan = buildFrameReferencePlan({ frame, generatedByFrameIndex, previousTailImageUrl })
+      const runtimeDependencyFrameIds = withPreviousTailDependency(
+        frame.dependencyFrameIds,
+        panelUsesPreviousTailAsReference,
+        frame.frameIndex,
+      )
+      const frameReferencePlan = buildFrameReferencePlan({
+        frame,
+        generatedByFrameIndex,
+        previousTailImageUrl,
+        dependencyFrameIds: runtimeDependencyFrameIds,
+      })
       const dependencyUrls = frameReferencePlan.urls
         .map((value) => toSignedUrlIfCos(value, 3600))
         .filter((value): value is string => Boolean(value))
       const normalizedFrameReferenceRefs = dependencyUrls.length > 0
         ? await normalizeReferenceImagesForGeneration(dependencyUrls)
         : []
+      const panelAssetRefs = frameReferencePlan.usesPreviousTail
+        ? normalizedPanelRefsWithoutLocation
+        : normalizedPanelRefs
       const normalizedFrameRefs = uniqueStrings([
         ...normalizedFrameReferenceRefs,
-        ...normalizedRefs,
+        ...panelAssetRefs,
       ])
-      const frameHardConstraints = buildStoryboardHardConstraints({
-        locale: job.data.locale,
-        aspectRatio,
-        styleText: artStyle || '',
-        referenceImagesCount: normalizedFrameRefs.length,
-      })
+      const frameHardConstraints = [
+        frameReferencePlan.usesPreviousTail ? buildPreviousTailReferenceHardRule(job.data.locale) : '',
+        buildStoryboardHardConstraints({
+          locale: job.data.locale,
+          aspectRatio,
+          styleText: artStyle || '',
+          referenceImagesCount: normalizedFrameRefs.length,
+        }),
+      ].filter(Boolean).join('\n\n')
       const frameBasePrompt = buildPanelFramePrompt({
         locale: job.data.locale,
         aspectRatio,
@@ -1093,6 +1198,11 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
           prompt: framePrompt,
           options: {
             referenceImages: normalizedFrameRefs,
+            referenceImageLabels: [
+              ...(frameReferencePlan.usesPreviousTail ? ['FP(previous-panel-tail)'] : []),
+              ...frameReferencePlan.frameReferenceIndexes.map((index) => `F${index + 1}`),
+              ...panelAssetRefs.map((_, index) => `asset-${index + 1}`),
+            ],
             aspectRatio,
           },
           allowTaskExternalIdResume: false,
@@ -1165,8 +1275,12 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     }
   }
 
-  const finalPrompt = hardConstraints
-    ? `${withAnimeStyle}\n\n${hardConstraints}`
+  const finalConstraints = [
+    !isMultiFrameGroup && previousTailImageUrl ? buildPreviousTailReferenceHardRule(job.data.locale) : '',
+    hardConstraints,
+  ].filter(Boolean).join('\n\n')
+  const finalPrompt = finalConstraints
+    ? `${withAnimeStyle}\n\n${finalConstraints}`
     : withAnimeStyle
 
   logger.info({
@@ -1192,6 +1306,10 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       prompt: finalPrompt,
       options: {
         referenceImages: normalizedRefs,
+        referenceImageLabels: [
+          ...(!isMultiFrameGroup && previousTailImageUrl ? ['FP(previous-panel-tail)'] : []),
+          ...panelReferenceImagesForSinglePanel.map((_, index) => `asset-${index + 1}`),
+        ],
         aspectRatio,
       },
       // 单个任务内会串行生成多候选，若允许按 task.externalId 续接会复用上一候选外部任务结果。

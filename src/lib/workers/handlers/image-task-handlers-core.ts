@@ -314,6 +314,14 @@ export async function handleModifyAssetImageTask(job: Job<TaskJobData>) {
     const requiredReference = await normalizeToBase64ForGeneration(currentUrl)
     const extraReferenceInputs: string[] = []
 
+    if (Array.isArray(payload.extraImageUrls)) {
+      for (const url of payload.extraImageUrls) {
+        if (typeof url === 'string' && url.trim().length > 0) {
+          extraReferenceInputs.push(url.trim())
+        }
+      }
+    }
+
     const selectedAssets = Array.isArray(payload.selectedAssets)
       ? payload.selectedAssets
       : []
@@ -322,14 +330,6 @@ export async function handleModifyAssetImageTask(job: Job<TaskJobData>) {
       const assetImage = (asset as AnyObj).imageUrl
       if (typeof assetImage === 'string' && assetImage.trim()) {
         extraReferenceInputs.push(assetImage.trim())
-      }
-    }
-
-    if (Array.isArray(payload.extraImageUrls)) {
-      for (const url of payload.extraImageUrls) {
-        if (typeof url === 'string' && url.trim().length > 0) {
-          extraReferenceInputs.push(url.trim())
-        }
       }
     }
 

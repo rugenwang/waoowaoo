@@ -249,7 +249,16 @@ export function findCharacterByName<T extends { name: string }>(characters: T[],
   return undefined
 }
 
-export async function collectPanelReferenceImages(projectData: NovelProjectData, panel: PanelLike) {
+interface CollectPanelReferenceImagesOptions {
+  includeLocationReference?: boolean
+}
+
+export async function collectPanelReferenceImages(
+  projectData: NovelProjectData,
+  panel: PanelLike,
+  options: CollectPanelReferenceImagesOptions = {},
+) {
+  const includeLocationReference = options.includeLocationReference !== false
   const refs: string[] = []
 
   const sketch = toSignedUrlIfCos(panel.sketchImageUrl, 3600)
@@ -277,7 +286,7 @@ export async function collectPanelReferenceImages(projectData: NovelProjectData,
     if (signed) refs.push(signed)
   }
 
-  if (panel.location) {
+  if (includeLocationReference && panel.location) {
     const location = (projectData.locations || []).find((loc) => (loc.assetKind || 'location') !== 'prop' && loc.name.toLowerCase() === panel.location!.toLowerCase())
     if (location) {
       const images = location.images || []

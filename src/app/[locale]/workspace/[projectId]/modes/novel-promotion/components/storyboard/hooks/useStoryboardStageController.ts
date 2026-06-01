@@ -6,6 +6,7 @@ import {
   NovelPromotionClip,
   Character,
   Location,
+  Prop,
 } from '@/types/project'
 import { useProjectAssets } from '@/lib/query/hooks/useProjectAssets'
 import {
@@ -43,6 +44,7 @@ export function useStoryboardStageController({
   const { data: assets } = useProjectAssets(projectId)
   const characters: Character[] = useMemo(() => assets?.characters ?? [], [assets?.characters])
   const locations: Location[] = useMemo(() => assets?.locations ?? [], [assets?.locations])
+  const props: Prop[] = useMemo(() => assets?.props ?? [], [assets?.props])
 
   const { taskAwareStoryboards } = useStoryboardTaskAwareStoryboards({
     projectId,
@@ -104,7 +106,9 @@ export function useStoryboardStageController({
     removePropFromPanel,
     insertPanel,
     duplicatePanel,
+    mergePanelWithNext,
     splitPanelFrame,
+    updatePanelPreviousTailReference,
   } = panelOps
 
   const variantOps = usePanelVariant({
@@ -177,6 +181,7 @@ export function useStoryboardStageController({
     clips,
     characters,
     locations,
+    props,
     localStoryboards,
     sortedStoryboards,
     submittingPanelImageIds,
@@ -207,7 +212,7 @@ export function useStoryboardStageController({
     localStoryboards, setLocalStoryboards, sortedStoryboards, expandedClips, toggleExpandedClip,
     getClipInfo, getTextPanels, getPanelEditData, updatePanelEdit, formatClipTitle, totalPanels, storyboardStartIndex,
     savingPanels, deletingPanelIds, saveStateByPanel, hasUnsavedByPanel, submittingStoryboardTextIds, addingStoryboardGroup, movingClipId, insertingAfterPanelId,
-    savePanelWithData, addPanel, deletePanel, deleteStoryboard, regenerateStoryboardText, addStoryboardGroup, moveStoryboardGroup, insertPanel, duplicatePanel, splitPanelFrame,
+    savePanelWithData, addPanel, deletePanel, deleteStoryboard, regenerateStoryboardText, addStoryboardGroup, moveStoryboardGroup, insertPanel, duplicatePanel, mergePanelWithNext, splitPanelFrame, updatePanelPreviousTailReference,
     submittingVariantPanelId, generatePanelVariant,
     submittingStoryboardIds, submittingPanelImageIds, selectingCandidateIds,
     editingPanel, setEditingPanel, modifyingPanels, isDownloadingImages, previewImage, setPreviewImage,

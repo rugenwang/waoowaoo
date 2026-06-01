@@ -14,6 +14,7 @@ import { useRefineProjectStoryboardPrompt, useRegenerateProjectVideoPrompt, useU
 import { useTaskTargetStateMap } from '@/lib/query/hooks/useTaskTargetStateMap'
 import { shouldShowError } from '@/lib/error-utils'
 import { extractErrorMessage } from '@/lib/errors/extract'
+import { downloadRemoteFile } from '@/lib/media/download-remote-file'
 import { toDisplayImageUrl } from '@/lib/media/image-url'
 import type { NovelPromotionPanelFrame } from '@/types/project'
 
@@ -63,6 +64,7 @@ interface PanelCardProps {
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
+  onInsertFrame?: (payload: { panelId?: string; frameId?: string; placement?: 'before' | 'after' }) => void | Promise<void>
   onDeleteFrame?: (panelId: string, frameId: string) => void | Promise<void>
   onSplitFrame?: (frameId: string, placement: 'before' | 'after') => void | Promise<void>
   onOpenEditModal: () => void
@@ -75,8 +77,11 @@ interface PanelCardProps {
   onPreviewImage?: (url: string) => void  // 放大预览图片
   onInsertAfter?: () => void  // 在此镜头后插入
   onDuplicatePanel?: () => void | Promise<void> // 复制到下一分镜
+  onMergePanelWithNext?: () => void | Promise<void> // 合并下一分镜为分镜组
+  onToggleUsePreviousPanelTail?: (enabled: boolean) => void | Promise<void>
   onVariant?: () => void  // 生成镜头变体
   isInsertDisabled?: boolean  // 插入按钮是否禁用
+  hasPreviousPanel?: boolean
   previousPanelImageOptions?: PreviousPanelImageOption[]
 }
 
@@ -91,8 +96,10 @@ function PanelFrameGrid({
   onRegenerateFrameImage,
   onUpdateFrameTime,
   onUpdateFramePrompt,
+  onInsertFrame,
   onDeleteFrame,
   onSplitFrame,
+  usePreviousPanelTailAsReference,
 }: {
   projectId: string
   panelId: string
@@ -104,14 +111,18 @@ function PanelFrameGrid({
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
+  onInsertFrame?: (payload: { panelId?: string; frameId?: string; placement?: 'before' | 'after' }) => void | Promise<void>
   onDeleteFrame?: (panelId: string, frameId: string) => void | Promise<void>
   onSplitFrame?: (frameId: string, placement: 'before' | 'after') => void | Promise<void>
+  usePreviousPanelTailAsReference?: boolean
 }) {
+  const t = useTranslations('storyboard')
   const [isExpanded, setIsExpanded] = useState(false)
   const [frameTimeDrafts, setFrameTimeDrafts] = useState<Record<string, string>>({})
   const [framePromptDrafts, setFramePromptDrafts] = useState<Record<string, string>>({})
   const [savingFrameTimeIds, setSavingFrameTimeIds] = useState<Set<string>>(new Set())
   const [savingFramePromptIds, setSavingFramePromptIds] = useState<Set<string>>(new Set())
+  const [downloadingFrameIds, setDownloadingFrameIds] = useState<Set<string>>(new Set())
   const [splitFrameTarget, setSplitFrameTarget] = useState<NovelPromotionPanelFrame | null>(null)
   const frameTaskStateMap = useTaskTargetStateMap(
     projectId,
@@ -160,6 +171,9 @@ function PanelFrameGrid({
     ].filter(Boolean)
     if (labels.length > 0) {
       return `参考 ${labels.join('、')}`
+    }
+    if (frame.frameIndex === 0 && usePreviousPanelTailAsReference) {
+      return '参考 FP'
     }
     return frame.frameIndex === 0 ? '基础帧' : `承接 F${frame.frameIndex}`
   }
@@ -262,6 +276,15 @@ function PanelFrameGrid({
     })
   }
 
+  const handleInsertFrame = (frame: NovelPromotionPanelFrame, placement: 'before' | 'after') => {
+    if (!onInsertFrame) return
+    void Promise.resolve(onInsertFrame({ frameId: frame.id, placement })).catch((error: unknown) => {
+      if (shouldShowError(error)) {
+        alert(extractErrorMessage(error, '插入关键帧失败'))
+      }
+    })
+  }
+
   const getFramePrompt = (frame: NovelPromotionPanelFrame) => frame.imagePrompt || frame.videoPrompt || ''
 
   const getFramePromptDraft = (frame: NovelPromotionPanelFrame) => {
@@ -287,6 +310,26 @@ function PanelFrameGrid({
       input.select()
       document.execCommand('copy')
       document.body.removeChild(input)
+    }
+  }
+
+  const handleDownloadFrameImage = async (frame: NovelPromotionPanelFrame) => {
+    const imageUrl = frame.imageUrl || ''
+    if (!imageUrl || downloadingFrameIds.has(frame.id)) return
+    const sourceUrl = toDisplayImageUrl(imageUrl) || imageUrl
+    setDownloadingFrameIds((prev) => new Set(prev).add(frame.id))
+    try {
+      await downloadRemoteFile(sourceUrl, `storyboard-panel-${panelId}-F${frame.frameIndex + 1}`)
+    } catch (error: unknown) {
+      alert(t('messages.downloadFailed', {
+        error: extractErrorMessage(error, t('common.unknownError')),
+      }))
+    } finally {
+      setDownloadingFrameIds((prev) => {
+        const next = new Set(prev)
+        next.delete(frame.id)
+        return next
+      })
     }
   }
 
@@ -435,6 +478,7 @@ function PanelFrameGrid({
           const relationText = getRelationText(frame)
           const isFrameStaleProcessing = isStaleFrameProcessing(frame)
           const isFrameBusy = isFrameGenerationBusy(frame) && !isFrameStaleProcessing
+          const isFrameDownloading = downloadingFrameIds.has(frame.id)
           return (
             <div
               key={frame.id}
@@ -487,6 +531,42 @@ function PanelFrameGrid({
                       onClick={() => handleRegenerateFrame(frame)}
                     >
                       <AppIcon name="refresh" size={isVerticalRatio ? 12 : 13} className={isFrameBusy ? 'animate-spin' : undefined} />
+                    </button>
+                  ) : null}
+                  {onInsertFrame ? (
+                    <>
+                      <button
+                        type="button"
+                        className={`${isVerticalRatio ? 'h-6 w-6' : 'h-7 w-7'} inline-flex items-center justify-center rounded-full border border-white/45 bg-blue-600/85 text-white shadow-sm backdrop-blur transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60`}
+                        title={`在 F${frame.frameIndex + 1} 前插入关键帧`}
+                        aria-label={`在 F${frame.frameIndex + 1} 前插入关键帧`}
+                        disabled={isFrameBusy}
+                        onClick={() => handleInsertFrame(frame, 'before')}
+                      >
+                        <AppIcon name="plus" size={isVerticalRatio ? 12 : 13} />
+                      </button>
+                      <button
+                        type="button"
+                        className={`${isVerticalRatio ? 'h-6 w-6' : 'h-7 w-7'} inline-flex items-center justify-center rounded-full border border-white/45 bg-indigo-600/85 text-white shadow-sm backdrop-blur transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60`}
+                        title={`在 F${frame.frameIndex + 1} 后插入关键帧`}
+                        aria-label={`在 F${frame.frameIndex + 1} 后插入关键帧`}
+                        disabled={isFrameBusy}
+                        onClick={() => handleInsertFrame(frame, 'after')}
+                      >
+                        <AppIcon name="plusAlt" size={isVerticalRatio ? 12 : 13} />
+                      </button>
+                    </>
+                  ) : null}
+                  {imageUrl ? (
+                    <button
+                      type="button"
+                      className={`${isVerticalRatio ? 'h-6 w-6' : 'h-7 w-7'} inline-flex items-center justify-center rounded-full border border-white/45 bg-black/55 text-white shadow-sm backdrop-blur transition hover:bg-black/70 disabled:cursor-not-allowed disabled:opacity-60`}
+                      title={`下载 F${frame.frameIndex + 1} 原图`}
+                      aria-label={`下载 F${frame.frameIndex + 1} 原图`}
+                      disabled={isFrameDownloading}
+                      onClick={() => void handleDownloadFrameImage(frame)}
+                    >
+                      <AppIcon name={isFrameDownloading ? 'refresh' : 'download'} size={isVerticalRatio ? 12 : 13} className={isFrameDownloading ? 'animate-spin' : undefined} />
                     </button>
                   ) : null}
                   {onUploadFrameImage ? (
@@ -622,6 +702,16 @@ function PanelFrameGrid({
                         <span className="rounded-full bg-[var(--glass-bg-muted)] px-2 py-0.5">{frame.frameRole || '关键状态'}</span>
                         <span className="rounded-full border border-[var(--glass-stroke-subtle)] px-2 py-0.5">{getRelationText(frame)}</span>
                         {renderFrameTimeControl(frame)}
+                        {frame.imageUrl ? (
+                          <button
+                            type="button"
+                            className="rounded-full border border-[var(--glass-stroke-subtle)] px-2 py-0.5 text-[var(--glass-text-secondary)] transition hover:border-[var(--glass-tone-info-fg)] hover:text-[var(--glass-tone-info-fg)] disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={downloadingFrameIds.has(frame.id)}
+                            onClick={() => void handleDownloadFrameImage(frame)}
+                          >
+                            {downloadingFrameIds.has(frame.id) ? '下载中...' : '下载原图'}
+                          </button>
+                        ) : null}
                         {onDeleteFrame ? (
                           <button
                             type="button"
@@ -641,6 +731,26 @@ function PanelFrameGrid({
                           >
                             拆出
                           </button>
+                        ) : null}
+                        {onInsertFrame ? (
+                          <>
+                            <button
+                              type="button"
+                              className="rounded-full border border-blue-300/50 px-2 py-0.5 text-blue-500 transition hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={isFrameGenerationBusy(frame) && !isStaleFrameProcessing(frame)}
+                              onClick={() => handleInsertFrame(frame, 'before')}
+                            >
+                              前插
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-full border border-indigo-300/50 px-2 py-0.5 text-indigo-500 transition hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={isFrameGenerationBusy(frame) && !isStaleFrameProcessing(frame)}
+                              onClick={() => handleInsertFrame(frame, 'after')}
+                            >
+                              后插
+                            </button>
+                          </>
                         ) : null}
                         <button
                           type="button"
@@ -766,6 +876,7 @@ export default function PanelCard({
   onRegenerateFrameImage,
   onUpdateFrameTime,
   onUpdateFramePrompt,
+  onInsertFrame,
   onDeleteFrame,
   onSplitFrame,
   onOpenEditModal,
@@ -778,8 +889,11 @@ export default function PanelCard({
   onPreviewImage,
   onInsertAfter,
   onDuplicatePanel,
+  onMergePanelWithNext,
+  onToggleUsePreviousPanelTail,
   onVariant,
   isInsertDisabled,
+  hasPreviousPanel = false,
   previousPanelImageOptions = [],
 }: PanelCardProps) {
   const t = useTranslations('storyboard')
@@ -789,6 +903,8 @@ export default function PanelCard({
   const updatePanelVideoPrompt = useUpdateProjectPanelVideoPrompt(projectId)
   const [refinedStoryboardPrompt, setRefinedStoryboardPrompt] = useState<string | null>(null)
   const [isDuplicatingPanel, setIsDuplicatingPanel] = useState(false)
+  const [isMergingPanel, setIsMergingPanel] = useState(false)
+  const [isTogglingPreviousPanelTail, setIsTogglingPreviousPanelTail] = useState(false)
   const [videoPromptModalOpen, setVideoPromptModalOpen] = useState(false)
   const [videoPromptRequirement, setVideoPromptRequirement] = useState('')
   const [videoPromptCandidate, setVideoPromptCandidate] = useState<string | null>(null)
@@ -797,8 +913,9 @@ export default function PanelCard({
     | { type: 'frame'; frameId: string; label: string }
     | null
   >(null)
+  const canTogglePreviousPanelTail = Boolean(onToggleUsePreviousPanelTail)
   const panelFrames = Array.isArray(panel.frames) ? panel.frames : []
-  const displayDurationSec = panel.groupDurationSec ?? panelData.duration ?? panel.duration ?? null
+  const displayDurationSec = panel.duration ?? panel.groupDurationSec ?? panelData.duration ?? null
   const videoPromptField = panel.panelMode === 'group' ? 'groupVideoPrompt' : 'videoPrompt'
 
   const handleRefineStoryboardPrompt = async () => {
@@ -847,6 +964,20 @@ export default function PanelCard({
       .finally(() => setIsDuplicatingPanel(false))
   }
 
+  const handleMergePanelWithNext = () => {
+    if (!onMergePanelWithNext || isMergingPanel) return
+    const confirmed = window.confirm('确定把当前分镜和下一分镜合并为一个分镜组吗？合并后下一分镜会成为组内后续关键帧，并从列表中移除。')
+    if (!confirmed) return
+    setIsMergingPanel(true)
+    void Promise.resolve(onMergePanelWithNext())
+      .catch((error: unknown) => {
+        if (shouldShowError(error)) {
+          alert(extractErrorMessage(error, '合并分镜失败'))
+        }
+      })
+      .finally(() => setIsMergingPanel(false))
+  }
+
   const handleUsePreviousPanelImage = async (option: PreviousPanelImageOption) => {
     try {
       if (previousImagePickerTarget?.type === 'frame') {
@@ -862,6 +993,27 @@ export default function PanelCard({
         alert(extractErrorMessage(error, '替换图片失败'))
       }
     }
+  }
+
+  const handleToggleUsePreviousPanelTail = () => {
+    if (!onToggleUsePreviousPanelTail || isTogglingPreviousPanelTail) return
+    setIsTogglingPreviousPanelTail(true)
+    void Promise.resolve(onToggleUsePreviousPanelTail(!panel.usePreviousPanelTailAsReference))
+      .catch((error: unknown) => {
+        if (shouldShowError(error)) {
+          alert(extractErrorMessage(error, '更新沿用上一分镜尾帧开关失败'))
+        }
+      })
+      .finally(() => setIsTogglingPreviousPanelTail(false))
+  }
+
+  const handleInsertFrameFromSinglePanel = () => {
+    if (!onInsertFrame) return
+    void Promise.resolve(onInsertFrame({ panelId: panel.id, placement: 'after' })).catch((error: unknown) => {
+      if (shouldShowError(error)) {
+        alert(extractErrorMessage(error, '插入关键帧失败'))
+      }
+    })
   }
 
   const currentVideoPrompt = videoPromptField === 'groupVideoPrompt'
@@ -983,18 +1135,37 @@ export default function PanelCard({
           onRegenerateFrameImage={onRegenerateFrameImage}
           onUpdateFrameTime={onUpdateFrameTime}
           onUpdateFramePrompt={onUpdateFramePrompt}
+          onInsertFrame={onInsertFrame}
           onDeleteFrame={onDeleteFrame}
           onSplitFrame={onSplitFrame}
+          usePreviousPanelTailAsReference={panel.usePreviousPanelTailAsReference}
         />
+        {onInsertFrame && panelFrames.length <= 1 ? (
+          <div className="border-t border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-surface)] px-3 py-2">
+            <button
+              type="button"
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[var(--glass-tone-info-fg)] bg-[var(--glass-tone-info-bg)] px-3 py-2 text-xs font-medium text-[var(--glass-tone-info-fg)] transition hover:bg-[var(--glass-bg-muted)]"
+              onClick={handleInsertFrameFromSinglePanel}
+            >
+              <AppIcon name="plus" size={13} />
+              <span>插入关键帧并转为分镜组</span>
+            </button>
+          </div>
+        ) : null}
         {/* 插入分镜/镜头变体按钮 - 在图片区域右侧垂直居中 */}
-        {(onInsertAfter || onDuplicatePanel || onVariant) && (
+        {(onInsertAfter || onDuplicatePanel || onMergePanelWithNext || onToggleUsePreviousPanelTail || onVariant) && (
           <div className="absolute -right-[22px] top-1/2 -translate-y-1/2 z-50">
             <PanelActionButtons
               onInsertPanel={onInsertAfter || (() => { })}
               onDuplicatePanel={onDuplicatePanel ? handleDuplicatePanel : undefined}
+              onMergeWithNextPanel={onMergePanelWithNext ? handleMergePanelWithNext : undefined}
+              onToggleUsePreviousPanelTail={onToggleUsePreviousPanelTail ? handleToggleUsePreviousPanelTail : undefined}
               onVariant={onVariant || (() => { })}
-              disabled={isInsertDisabled || isDuplicatingPanel}
+              disabled={isInsertDisabled || isDuplicatingPanel || isMergingPanel || isTogglingPreviousPanelTail}
               hasImage={!!imageUrl}
+              isUsingPreviousPanelTail={panel.usePreviousPanelTailAsReference}
+              canUsePreviousPanelTail={canTogglePreviousPanelTail}
+              previousPanelTailDisabled={isTogglingPreviousPanelTail}
             />
           </div>
         )}

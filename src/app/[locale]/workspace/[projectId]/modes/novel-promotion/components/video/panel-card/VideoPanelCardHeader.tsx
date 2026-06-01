@@ -106,6 +106,10 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
     ? panel.frames.filter((frame) => typeof frame.imageUrl === 'string' && frame.imageUrl.trim())
     : []
   const showGroupFrames = groupFrames.length > 1
+  const durationSec = panel.textPanel?.duration ?? panel.groupDurationSec ?? null
+  const normalizedDuration = typeof durationSec === 'number' && Number.isFinite(durationSec) && durationSec > 0
+    ? Math.round(durationSec * 100) / 100
+    : null
   const [frameTimeDrafts, setFrameTimeDrafts] = useState<Record<string, string>>({})
 
   const getFrameTimeDraft = (frame: NovelPromotionPanelFrame) => {
@@ -182,9 +186,17 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
          <AppIcon name="playCircle" className="w-16 h-16 text-[var(--glass-text-tertiary)]" />
        )}
 
-       {/* 镜头编号 */}
-       <div className="absolute top-2 left-2 bg-[var(--glass-overlay)] text-white px-2 py-0.5 rounded text-xs font-medium">
-         {panelIndex + 1}
+       {/* 镜头编号和时长 */}
+       <div className="absolute top-2 left-2 flex items-center gap-1.5">
+         <span className="glass-chip glass-chip-neutral px-2 py-0.5 text-xs font-medium">
+           {panelIndex + 1}
+         </span>
+         {normalizedDuration !== null ? (
+           <span className="inline-flex items-center gap-1 rounded-full border border-white/55 bg-black/70 px-2.5 py-1 text-xs font-bold text-white shadow-[0_4px_14px_rgba(0,0,0,0.35)] backdrop-blur">
+             <AppIcon name="clock" className="h-3 w-3" />
+             {normalizedDuration}s
+           </span>
+         ) : null}
        </div>
 
        {showGroupFrames && (

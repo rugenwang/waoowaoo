@@ -33,6 +33,12 @@ function toStructuredJsonField(value: unknown, fieldName: string): string | null
   }
 }
 
+function parseOptionalBooleanField(value: unknown): boolean | undefined {
+  if (value === undefined) return undefined
+  if (typeof value === 'boolean') return value
+  throw new ApiError('INVALID_PARAMS')
+}
+
 /**
  * POST /api/novel-promotion/[projectId]/panel
  * 新增一个 Panel
@@ -65,6 +71,7 @@ export const POST = apiHandler(async (
     videoPrompt,
     groupVideoPrompt,
     firstLastFramePrompt,
+    usePreviousPanelTailAsReference,
   } = body
 
   if (!storyboardId) {
@@ -109,6 +116,9 @@ export const POST = apiHandler(async (
       videoPrompt: videoPrompt ?? null,
       groupVideoPrompt: groupVideoPrompt ?? null,
       firstLastFramePrompt: firstLastFramePrompt ?? null,
+      ...(parseOptionalBooleanField(usePreviousPanelTailAsReference) !== undefined
+        ? { usePreviousPanelTailAsReference: parseOptionalBooleanField(usePreviousPanelTailAsReference) }
+        : {}),
     }
   })
 
@@ -250,7 +260,17 @@ export const PATCH = apiHandler(async (
   const panelModel = prisma.novelPromotionPanel as unknown as {
     create: (args: { data: Record<string, unknown> }) => Promise<unknown>
   }
-  const { panelId, storyboardId, panelIndex, videoPrompt, groupVideoPrompt, firstLastFramePrompt, duration } = body
+  const {
+    panelId,
+    storyboardId,
+    panelIndex,
+    videoPrompt,
+    groupVideoPrompt,
+    firstLastFramePrompt,
+    duration,
+    usePreviousPanelTailAsReference,
+  } = body
+  const nextUsePreviousPanelTailAsReference = parseOptionalBooleanField(usePreviousPanelTailAsReference)
 
   // 🔥 方式1：通过 panelId 直接更新（优先）
   if (panelId) {
@@ -268,11 +288,15 @@ export const PATCH = apiHandler(async (
       groupVideoPrompt?: string | null
       firstLastFramePrompt?: string | null
       duration?: number | null
+      usePreviousPanelTailAsReference?: boolean
     } = {}
     if (videoPrompt !== undefined) updateData.videoPrompt = videoPrompt
     if (groupVideoPrompt !== undefined) updateData.groupVideoPrompt = groupVideoPrompt
     if (firstLastFramePrompt !== undefined) updateData.firstLastFramePrompt = firstLastFramePrompt
     if (duration !== undefined) updateData.duration = parseNullableIntField(duration)
+    if (nextUsePreviousPanelTailAsReference !== undefined) {
+      updateData.usePreviousPanelTailAsReference = nextUsePreviousPanelTailAsReference
+    }
 
     await prisma.novelPromotionPanel.update({
       where: { id: panelId },
@@ -302,6 +326,7 @@ export const PATCH = apiHandler(async (
     groupVideoPrompt?: string | null
     firstLastFramePrompt?: string | null
     duration?: number | null
+    usePreviousPanelTailAsReference?: boolean
   } = {}
   if (videoPrompt !== undefined) {
     updateData.videoPrompt = videoPrompt
@@ -314,6 +339,9 @@ export const PATCH = apiHandler(async (
   }
   if (duration !== undefined) {
     updateData.duration = parseNullableIntField(duration)
+  }
+  if (nextUsePreviousPanelTailAsReference !== undefined) {
+    updateData.usePreviousPanelTailAsReference = nextUsePreviousPanelTailAsReference
   }
 
   // 尝试更新 Panel
@@ -381,7 +409,9 @@ export const PUT = apiHandler(async (
     firstLastFramePrompt,
     actingNotes,  // 演技指导数据
     photographyRules,  // 单镜头摄影规则
+    usePreviousPanelTailAsReference,
   } = body
+  const nextUsePreviousPanelTailAsReference = parseOptionalBooleanField(usePreviousPanelTailAsReference)
 
   if (!storyboardId || panelIndex === undefined) {
     throw new ApiError('INVALID_PARAMS')
@@ -413,6 +443,7 @@ export const PUT = apiHandler(async (
     firstLastFramePrompt?: string | null
     actingNotes?: string | null
     photographyRules?: string | null
+    usePreviousPanelTailAsReference?: boolean
   } = {}
   if (panelNumber !== undefined) updateData.panelNumber = panelNumber
   if (shotType !== undefined) updateData.shotType = shotType
@@ -428,6 +459,9 @@ export const PUT = apiHandler(async (
   if (videoPrompt !== undefined) updateData.videoPrompt = videoPrompt
   if (groupVideoPrompt !== undefined) updateData.groupVideoPrompt = groupVideoPrompt
   if (firstLastFramePrompt !== undefined) updateData.firstLastFramePrompt = firstLastFramePrompt
+  if (nextUsePreviousPanelTailAsReference !== undefined) {
+    updateData.usePreviousPanelTailAsReference = nextUsePreviousPanelTailAsReference
+  }
   // JSON 字段存为规范化 JSON 字符串
   if (actingNotes !== undefined) {
     updateData.actingNotes = toStructuredJsonField(actingNotes, 'actingNotes')
@@ -470,6 +504,9 @@ export const PUT = apiHandler(async (
         duration: duration ?? null,
         videoPrompt: videoPrompt ?? null,
         firstLastFramePrompt: firstLastFramePrompt ?? null,
+        ...(nextUsePreviousPanelTailAsReference !== undefined
+          ? { usePreviousPanelTailAsReference: nextUsePreviousPanelTailAsReference }
+          : {}),
         actingNotes: actingNotes !== undefined ? toStructuredJsonField(actingNotes, 'actingNotes') : null,
         photographyRules: photographyRules !== undefined ? toStructuredJsonField(photographyRules, 'photographyRules') : null,
       }

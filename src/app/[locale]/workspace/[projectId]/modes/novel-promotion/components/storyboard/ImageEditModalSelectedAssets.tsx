@@ -55,6 +55,8 @@ export default function ImageEditModalSelectedAssets({
                   <div className="w-full h-full bg-[var(--glass-bg-muted)] rounded-lg flex items-center justify-center text-[var(--glass-text-tertiary)] text-xs">
                     {asset.type === 'character' ? (
                       <AppIcon name="user" className="h-4 w-4" />
+                    ) : asset.type === 'prop' ? (
+                      <AppIcon name="package" className="h-4 w-4" />
                     ) : (
                       <AppIcon name="imageAlt" className="h-4 w-4" />
                     )}

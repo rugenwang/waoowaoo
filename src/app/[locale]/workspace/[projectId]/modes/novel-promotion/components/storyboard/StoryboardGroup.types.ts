@@ -53,8 +53,15 @@ export interface StoryboardGroupProps {
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
+  onInsertFrame?: (payload: { panelId?: string; frameId?: string; placement?: 'before' | 'after' }) => void | Promise<void>
   onDeleteFrame?: (panelId: string, frameId: string) => void | Promise<void>
   onSplitFrame?: (frameId: string, placement: 'before' | 'after') => void | Promise<void>
+  onToggleUsePreviousPanelTailReference: (payload: {
+    panelId: string
+    storyboardId: string
+    panelIndex: number
+    usePreviousPanelTailAsReference: boolean
+  }) => Promise<void>
   onOpenEditModal: (panelIndex: number) => void
   onOpenAIDataModal: (panelIndex: number) => void
   getPanelCandidates: (panel: NovelPromotionPanel) => { candidates: string[]; selectedIndex: number } | null
@@ -66,6 +73,7 @@ export interface StoryboardGroupProps {
   movingClipId: string | null
   onInsertPanel: (storyboardId: string, insertAfterPanelId: string, userInput: string) => Promise<void>
   onDuplicatePanel: (panelId: string) => Promise<void>
+  onMergePanelWithNext: (panelId: string) => Promise<void>
   insertingAfterPanelId: string | null
   projectId: string
   episodeId: string

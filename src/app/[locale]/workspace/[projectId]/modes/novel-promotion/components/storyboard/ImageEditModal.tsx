@@ -1,7 +1,7 @@
 'use client'
 import { useTranslations } from 'next-intl'
 import { useState, useRef, useCallback } from 'react'
-import { Character, Location } from '@/types/project'
+import { Character, Location, Prop } from '@/types/project'
 import { useProjectAssets } from '@/lib/query/hooks/useProjectAssets'
 import { SelectedAsset } from './hooks/useImageGeneration'
 import ImagePreviewModal from '@/components/ui/ImagePreviewModal'
@@ -9,10 +9,13 @@ import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import ImageEditModalSelectedAssets from './ImageEditModalSelectedAssets'
 import ImageEditModalAssetPicker from './ImageEditModalAssetPicker'
 import { AppIcon } from '@/components/ui/icons'
+import { toDisplayImageUrl } from '@/lib/media/image-url'
+import type { PreviousPanelImageOption } from './PanelCard'
 
 interface ImageEditModalProps {
   projectId: string
   defaultAssets: SelectedAsset[]
+  previousPanelImageOptions?: PreviousPanelImageOption[]
   onSubmit: (prompt: string, images: string[], assets: SelectedAsset[]) => void
   onClose: () => void
 }
@@ -20,6 +23,7 @@ interface ImageEditModalProps {
 export default function ImageEditModal({
   projectId,
   defaultAssets,
+  previousPanelImageOptions = [],
   onSubmit,
   onClose,
 }: ImageEditModalProps) {
@@ -28,6 +32,7 @@ export default function ImageEditModal({
   const { data: assets } = useProjectAssets(projectId)
   const characters: Character[] = assets?.characters ?? []
   const locations: Location[] = assets?.locations ?? []
+  const props: Prop[] = assets?.props ?? []
 
   const [editPrompt, setEditPrompt] = useState('')
   const [editImages, setEditImages] = useState<string[]>([])
@@ -71,6 +76,15 @@ export default function ImageEditModal({
 
   const removeImage = (index: number) => {
     setEditImages((previous) => previous.filter((_, imageIndex) => imageIndex !== index))
+  }
+
+  const togglePreviousPanelImage = (imageUrl: string) => {
+    setEditImages((previous) => {
+      if (previous.includes(imageUrl)) {
+        return previous.filter((item) => item !== imageUrl)
+      }
+      return [imageUrl, ...previous]
+    })
   }
 
   const handleAddAsset = (asset: SelectedAsset) => {
@@ -121,6 +135,50 @@ export default function ImageEditModal({
             onPreviewImage={setPreviewImage}
             onRemoveAsset={handleRemoveAsset}
           />
+
+          {previousPanelImageOptions.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-[var(--glass-text-secondary)] mb-2">
+                上一分镜图片 <span className="text-[var(--glass-text-tertiary)] font-normal">可多选，作为本次编辑参考图</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+                {previousPanelImageOptions.map((option) => {
+                  const selected = editImages.includes(option.imageUrl)
+                  const displayUrl = toDisplayImageUrl(option.imageUrl) || option.imageUrl
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => togglePreviousPanelImage(option.imageUrl)}
+                      className={`group overflow-hidden rounded-lg border text-left transition ${
+                        selected
+                          ? 'border-[var(--glass-tone-info-fg)] ring-2 ring-[var(--glass-focus-ring)]'
+                          : 'border-[var(--glass-stroke-subtle)] hover:border-[var(--glass-stroke-focus)]'
+                      }`}
+                      title={selected ? '已选中，点击取消' : '点击加入编辑参考图'}
+                    >
+                      <div className="relative aspect-video bg-[var(--glass-bg-muted)]">
+                        <MediaImageWithLoading
+                          src={displayUrl}
+                          alt={option.label}
+                          containerClassName="h-full w-full"
+                          className="h-full w-full object-cover"
+                        />
+                        <span className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          selected ? 'bg-[var(--glass-tone-info-fg)] text-white' : 'bg-black/55 text-white opacity-0 group-hover:opacity-100'
+                        }`}>
+                          {selected ? '已选' : '选择'}
+                        </span>
+                      </div>
+                      <div className="line-clamp-1 px-2 py-1.5 text-xs text-[var(--glass-text-secondary)]">
+                        {option.label}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-[var(--glass-text-secondary)] mb-2">
@@ -182,6 +240,7 @@ export default function ImageEditModal({
         isOpen={showAssetPicker}
         characters={characters}
         locations={locations}
+        props={props}
         selectedAssets={selectedAssets}
         onClose={() => setShowAssetPicker(false)}
         onAddAsset={handleAddAsset}

@@ -6,6 +6,7 @@ const prismaMock = vi.hoisted(() => ({
   novelPromotionPanel: {
     findUnique: vi.fn(),
     findFirst: vi.fn(),
+    findMany: vi.fn(),
     update: vi.fn(async () => ({})),
   },
   novelPromotionPanelFrame: {
@@ -124,6 +125,8 @@ function buildJob(payload: Record<string, unknown>, targetId = 'panel-1'): Job<T
 describe('worker panel-image-task-handler behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sharedMock.collectPanelReferenceImages.mockImplementation(async () => ['https://signed.example/ref-1.png'])
+    outboundMock.normalizeReferenceImagesForGeneration.mockImplementation(async (..._args: unknown[]) => ['normalized-ref-1'])
 
     prismaMock.novelPromotionPanel.findUnique.mockResolvedValue({
       id: 'panel-1',
@@ -146,6 +149,7 @@ describe('worker panel-image-task-handler behavior', () => {
       frames: [],
     })
     prismaMock.novelPromotionPanel.findFirst.mockResolvedValue(null)
+    prismaMock.novelPromotionPanel.findMany.mockResolvedValue([])
 
     utilsMock.resolveImageSourceFromGeneration
       .mockResolvedValueOnce('generated-source-1')
@@ -227,6 +231,84 @@ describe('worker panel-image-task-handler behavior', () => {
       expect.anything(),
       expect.objectContaining({
         prompt: expect.stringContaining('同一张脸'),
+      }),
+    )
+  })
+
+  it('previous-tail reference -> sends FP as the first reference rule and label', async () => {
+    prismaMock.novelPromotionPanel.findUnique.mockResolvedValueOnce({
+      id: 'panel-2',
+      storyboardId: 'storyboard-2',
+      panelIndex: 0,
+      shotType: 'medium shot',
+      cameraMove: 'static',
+      description: 'new panel opening',
+      imagePrompt: 'new panel opening prompt',
+      videoPrompt: 'dramatic',
+      location: 'Old Town',
+      characters: '[]',
+      props: null,
+      srtSegment: null,
+      photographyRules: null,
+      actingNotes: null,
+      sketchImageUrl: null,
+      imageUrl: null,
+      panelMode: 'single',
+      usePreviousPanelTailAsReference: true,
+      frames: [],
+    })
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce({
+      id: 'panel-2',
+      storyboard: { episodeId: 'episode-1' },
+    })
+    prismaMock.novelPromotionPanel.findMany.mockResolvedValueOnce([
+      {
+        id: 'panel-1',
+        panelIndex: 0,
+        panelMode: 'group',
+        imageUrl: 'cos/prev-cover.png',
+        storyboard: {
+          id: 'storyboard-1',
+          clip: { id: 'clip-1', createdAt: new Date('2026-01-01T00:00:00Z') },
+        },
+        frames: [
+          { frameIndex: 0, imageUrl: 'cos/prev-f1.png' },
+          { frameIndex: 1, imageUrl: 'cos/prev-tail.png' },
+        ],
+      },
+      {
+        id: 'panel-2',
+        panelIndex: 0,
+        panelMode: 'single',
+        imageUrl: null,
+        storyboard: {
+          id: 'storyboard-2',
+          clip: { id: 'clip-2', createdAt: new Date('2026-01-01T00:01:00Z') },
+        },
+        frames: [],
+      },
+    ])
+    outboundMock.normalizeReferenceImagesForGeneration.mockImplementation(async (...args: unknown[]) => {
+      const refs = Array.isArray(args[0]) ? args[0] as string[] : []
+      return refs.map((ref) => `normalized:${ref}`)
+    })
+    utilsMock.resolveImageSourceFromGeneration.mockResolvedValueOnce('generated-source-fp')
+    utilsMock.uploadImageSourceToCos.mockResolvedValueOnce('cos/panel-fp.png')
+
+    await handlePanelImageTask(buildJob({ candidateCount: 1 }, 'panel-2'))
+
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.stringContaining('第 1 张参考图是 FP'),
+        options: expect.objectContaining({
+          referenceImages: expect.arrayContaining([
+            'normalized:signed:cos/prev-tail.png',
+          ]),
+          referenceImageLabels: expect.arrayContaining([
+            'FP(previous-panel-tail)',
+          ]),
+        }),
       }),
     )
   })
@@ -355,6 +437,250 @@ describe('worker panel-image-task-handler behavior', () => {
         errorMessage: null,
       },
     })
+  })
+
+  it('single panel with previous-tail flag -> prepends previous panel tail reference', async () => {
+    sharedMock.collectPanelReferenceImages.mockImplementation(async (...args: unknown[]) => {
+      const options = args[2] as { includeLocationReference?: boolean } | undefined
+      if (options?.includeLocationReference === false) {
+        return ['https://signed.example/ref-character.png', 'https://signed.example/ref-prop.png']
+      }
+      return [
+        'https://signed.example/ref-character.png',
+        'https://signed.example/ref-location.png',
+        'https://signed.example/ref-prop.png',
+      ]
+    })
+    outboundMock.normalizeReferenceImagesForGeneration.mockImplementation(async (...args: unknown[]) => {
+      const refs = Array.isArray(args[0]) ? args[0] as string[] : []
+      return refs.map((ref) => `normalized:${ref}`)
+    })
+    prismaMock.novelPromotionPanel.findUnique.mockResolvedValueOnce({
+      id: 'panel-1',
+      storyboardId: 'storyboard-1',
+      panelIndex: 1,
+      shotType: 'close-up',
+      cameraMove: 'static',
+      description: 'hero close-up',
+      imagePrompt: 'panel anchor prompt',
+      videoPrompt: 'dramatic',
+      location: 'Old Town',
+      characters: JSON.stringify([{ name: 'Hero', appearance: 'default' }]),
+      props: null,
+      srtSegment: '台词片段',
+      photographyRules: null,
+      actingNotes: null,
+      sketchImageUrl: null,
+      imageUrl: null,
+      panelMode: 'single',
+      usePreviousPanelTailAsReference: true,
+      frames: [],
+    })
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce({
+      id: 'panel-1',
+      storyboard: { episodeId: 'episode-1' },
+    })
+    prismaMock.novelPromotionPanel.findMany.mockResolvedValueOnce([
+      {
+        id: 'panel-0',
+        panelIndex: 0,
+        panelMode: 'single',
+        imageUrl: 'cos/previous-panel-main.png',
+        storyboard: {
+          id: 'storyboard-1',
+          clip: { id: 'clip-1', createdAt: new Date('2026-01-01T00:00:00Z') },
+        },
+        frames: [],
+      },
+      {
+        id: 'panel-1',
+        panelIndex: 1,
+        panelMode: 'single',
+        imageUrl: null,
+        storyboard: {
+          id: 'storyboard-1',
+          clip: { id: 'clip-1', createdAt: new Date('2026-01-01T00:00:00Z') },
+        },
+        frames: [],
+      },
+    ])
+
+    await handlePanelImageTask(buildJob({ candidateCount: 1 }))
+
+    expect(sharedMock.collectPanelReferenceImages).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: 'panel-1' }),
+      { includeLocationReference: false },
+    )
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        options: expect.objectContaining({
+          referenceImages: [
+            'normalized:signed:cos/previous-panel-main.png',
+            'normalized:https://signed.example/ref-character.png',
+            'normalized:https://signed.example/ref-prop.png',
+          ],
+        }),
+      }),
+    )
+  })
+
+  it('group generation with previous-tail flag -> only the first frame receives previous tail reference', async () => {
+    utilsMock.resolveImageSourceFromGeneration.mockReset()
+    utilsMock.uploadImageSourceToCos.mockReset()
+    sharedMock.collectPanelReferenceImages.mockImplementation(async (...args: unknown[]) => {
+      const options = args[2] as { includeLocationReference?: boolean } | undefined
+      if (options?.includeLocationReference === false) {
+        return ['https://signed.example/ref-character.png', 'https://signed.example/ref-prop.png']
+      }
+      return [
+        'https://signed.example/ref-character.png',
+        'https://signed.example/ref-location.png',
+        'https://signed.example/ref-prop.png',
+      ]
+    })
+    outboundMock.normalizeReferenceImagesForGeneration.mockImplementation(async (...args: unknown[]) => {
+      const refs = Array.isArray(args[0]) ? args[0] as string[] : []
+      return refs.map((ref) => `normalized:${ref}`)
+    })
+
+    prismaMock.novelPromotionPanel.findUnique.mockResolvedValueOnce({
+      id: 'panel-1',
+      storyboardId: 'storyboard-1',
+      panelIndex: 2,
+      shotType: 'medium',
+      cameraMove: 'push-in',
+      description: 'group scene',
+      imagePrompt: null,
+      videoPrompt: 'group motion',
+      groupVideoPrompt: 'group video prompt',
+      location: 'Old Town',
+      characters: '[]',
+      srtSegment: null,
+      photographyRules: null,
+      actingNotes: null,
+      sketchImageUrl: null,
+      imageUrl: null,
+      panelMode: 'group',
+      usePreviousPanelTailAsReference: true,
+      frames: [
+        {
+          id: 'frame-1',
+          frameIndex: 0,
+          frameTimeSec: 0,
+          frameRole: 'hero',
+          dependencyFrameIds: null,
+          imagePrompt: 'frame 1 prompt',
+          videoPrompt: null,
+          imageUrl: null,
+        },
+        {
+          id: 'frame-2',
+          frameIndex: 1,
+          frameTimeSec: 4,
+          frameRole: 'continuity',
+          dependencyFrameIds: '[0]',
+          imagePrompt: 'frame 2 prompt',
+          videoPrompt: null,
+          imageUrl: null,
+        },
+      ],
+    })
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce({
+      id: 'panel-1',
+      storyboard: { episodeId: 'episode-1' },
+    })
+    prismaMock.novelPromotionPanel.findMany.mockResolvedValueOnce([
+      {
+        id: 'panel-0',
+        panelIndex: 1,
+        panelMode: 'group',
+        imageUrl: 'cos/previous-group-cover.png',
+        storyboard: {
+          id: 'storyboard-1',
+          clip: { id: 'clip-1', createdAt: new Date('2026-01-01T00:00:00Z') },
+        },
+        frames: [{ frameIndex: 2, imageUrl: 'cos/previous-group-tail.png' }],
+      },
+      {
+        id: 'panel-1',
+        panelIndex: 2,
+        panelMode: 'group',
+        imageUrl: null,
+        storyboard: {
+          id: 'storyboard-1',
+          clip: { id: 'clip-1', createdAt: new Date('2026-01-01T00:00:00Z') },
+        },
+        frames: [],
+      },
+    ])
+
+    utilsMock.resolveImageSourceFromGeneration
+      .mockResolvedValueOnce('generated-frame-source-1')
+      .mockResolvedValueOnce('generated-frame-source-2')
+    utilsMock.uploadImageSourceToCos
+      .mockResolvedValueOnce('cos/frame-1.png')
+      .mockResolvedValueOnce('cos/frame-2.png')
+
+    await handlePanelImageTask(buildJob({ candidateCount: 1 }))
+
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.objectContaining({
+        options: expect.objectContaining({
+          referenceImages: [
+            'normalized:signed:cos/previous-group-tail.png',
+            'normalized:https://signed.example/ref-character.png',
+            'normalized:https://signed.example/ref-prop.png',
+          ],
+        }),
+      }),
+    )
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({
+        options: expect.objectContaining({
+          referenceImages: [
+            'normalized:signed:cos/frame-1.png',
+            'normalized:https://signed.example/ref-character.png',
+            'normalized:https://signed.example/ref-location.png',
+            'normalized:https://signed.example/ref-prop.png',
+          ],
+        }),
+      }),
+    )
+  })
+
+  it('previous-tail flag without available previous tail -> throws explicit error', async () => {
+    prismaMock.novelPromotionPanel.findUnique.mockResolvedValueOnce({
+      id: 'panel-1',
+      storyboardId: 'storyboard-1',
+      panelIndex: 1,
+      shotType: 'close-up',
+      cameraMove: 'static',
+      description: 'hero close-up',
+      imagePrompt: 'panel anchor prompt',
+      videoPrompt: 'dramatic',
+      location: 'Old Town',
+      characters: JSON.stringify([{ name: 'Hero', appearance: 'default' }]),
+      props: null,
+      srtSegment: '台词片段',
+      photographyRules: null,
+      actingNotes: null,
+      sketchImageUrl: null,
+      imageUrl: null,
+      panelMode: 'single',
+      usePreviousPanelTailAsReference: true,
+      frames: [],
+    })
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce(null)
+
+    await expect(handlePanelImageTask(buildJob({ candidateCount: 1 }))).rejects.toThrow(
+      '当前分镜首帧需要参考上一分镜尾帧，但上一分镜还没有可用尾帧图片',
+    )
   })
 
   it('target frame regeneration -> only regenerates selected frame and uses generated dependencies', async () => {

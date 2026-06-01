@@ -1,18 +1,21 @@
 'use client'
 import { logInfo as _ulogInfo } from '@/lib/logging/core'
 import { useTranslations } from 'next-intl'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { AppIcon } from '@/components/ui/icons'
 import ImageGenerationInlineCountButton from '@/components/image-generation/ImageGenerationInlineCountButton'
 import { getImageGenerationCountOptions } from '@/lib/image-generation/count'
 import { useImageGenerationCount } from '@/lib/image-generation/use-image-generation-count'
 import { AI_EDIT_BUTTON_CLASS, AI_EDIT_ICON_CLASS } from '@/components/ui/ai-edit-style'
 import AISparklesIcon from '@/components/ui/icons/AISparklesIcon'
+import { downloadRemoteFile } from '@/lib/media/download-remote-file'
+import { toDisplayImageUrl } from '@/lib/media/image-url'
 
 interface ImageSectionActionButtonsProps {
   panelId: string
   imageUrl: string | null
   previousImageUrl?: string | null
+  downloadFileName?: string
   isSubmittingPanelImageTask: boolean
   isModifying: boolean
   onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean) => void
@@ -28,6 +31,7 @@ export default function ImageSectionActionButtons({
   panelId,
   imageUrl,
   previousImageUrl,
+  downloadFileName,
   isSubmittingPanelImageTask,
   isModifying,
   onRegeneratePanelImage,
@@ -41,6 +45,21 @@ export default function ImageSectionActionButtons({
   const t = useTranslations('storyboard')
   const { count, setCount } = useImageGenerationCount('storyboard-candidates')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [isDownloading, setIsDownloading] = useState(false)
+
+  const handleDownloadOriginal = async () => {
+    if (!imageUrl || isDownloading) return
+    const sourceUrl = toDisplayImageUrl(imageUrl) || imageUrl
+    setIsDownloading(true)
+    try {
+      await downloadRemoteFile(sourceUrl, downloadFileName || `storyboard-panel-${panelId}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('common.unknownError')
+      alert(t('messages.downloadFailed', { error: message }))
+    } finally {
+      setIsDownloading(false)
+    }
+  }
 
   return (
     <>
@@ -108,13 +127,24 @@ export default function ImageSectionActionButtons({
               </>
             )}
             {imageUrl && (
-              <button
-                onClick={onOpenEditModal}
-                className={`glass-btn-base h-6 w-6 rounded-full flex items-center justify-center transition-all active:scale-95 ${AI_EDIT_BUTTON_CLASS} ${isSubmittingPanelImageTask || isModifying ? 'opacity-75' : ''}`}
-                title={t('image.editImage')}
-              >
-                <AISparklesIcon className={`w-2.5 h-2.5 ${AI_EDIT_ICON_CLASS}`} />
-              </button>
+              <>
+                <button
+                  onClick={() => void handleDownloadOriginal()}
+                  disabled={isDownloading}
+                  className={`glass-btn-base glass-btn-secondary h-6 w-6 rounded-full flex items-center justify-center transition-all active:scale-95 disabled:opacity-60 ${isSubmittingPanelImageTask || isModifying ? 'opacity-75' : ''}`}
+                  title={isDownloading ? t('image.downloadingOriginal') : t('image.downloadOriginal')}
+                  aria-label={isDownloading ? t('image.downloadingOriginal') : t('image.downloadOriginal')}
+                >
+                  <AppIcon name={isDownloading ? 'refresh' : 'download'} className={`w-2.5 h-2.5 ${isDownloading ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  onClick={onOpenEditModal}
+                  className={`glass-btn-base h-6 w-6 rounded-full flex items-center justify-center transition-all active:scale-95 ${AI_EDIT_BUTTON_CLASS} ${isSubmittingPanelImageTask || isModifying ? 'opacity-75' : ''}`}
+                  title={t('image.editImage')}
+                >
+                  <AISparklesIcon className={`w-2.5 h-2.5 ${AI_EDIT_ICON_CLASS}`} />
+                </button>
+              </>
             )}
 
             {previousImageUrl && onUndo && (

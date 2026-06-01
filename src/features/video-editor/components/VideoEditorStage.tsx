@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl'
 
 import React, { useEffect, useMemo, useState } from 'react'
 import { AppIcon } from '@/components/ui/icons'
+import ImagePreviewModal from '@/components/ui/ImagePreviewModal'
 import { useEditorState } from '../hooks/useEditorState'
 import { createProjectFromPanels, useEditorActions } from '../hooks/useEditorActions'
 import type { VideoEditorProject } from '../types/editor.types'
@@ -19,6 +20,19 @@ import { Timeline } from './Timeline'
 import { TransitionPicker, TransitionType } from './TransitionPicker'
 
 type EditorToneMode = 'soft' | 'light' | 'dark'
+
+type ClipFramePreview = {
+    clipId: string
+    trimFrom: number
+    trimTo: number
+    firstFrameUrl: string
+    lastFrameUrl: string | null
+}
+
+type ClipRegenerateNotice = {
+    tone: 'info' | 'success' | 'error'
+    message: string
+}
 
 interface VideoEditorStageProps {
     projectId: string
@@ -114,6 +128,12 @@ export function VideoEditorStage({
     const [clipRegeneratePrompt, setClipRegeneratePrompt] = useState('')
     const [clipRegenerateFrameMode, setClipRegenerateFrameMode] = useState<PartialRegenerateFrameMode>('first-last')
     const [isRegeneratingClip, setIsRegeneratingClip] = useState(false)
+    const [isLoadingClipFramePreview, setIsLoadingClipFramePreview] = useState(false)
+    const [clipFramePreview, setClipFramePreview] = useState<ClipFramePreview | null>(null)
+    const [previewImage, setPreviewImage] = useState<string | null>(null)
+    const [clipRegenerateFirstLocalFrame, setClipRegenerateFirstLocalFrame] = useState<number | null>(null)
+    const [clipRegenerateLastLocalFrame, setClipRegenerateLastLocalFrame] = useState<number | null>(null)
+    const [clipRegenerateNotice, setClipRegenerateNotice] = useState<ClipRegenerateNotice | null>(null)
 
     const totalDuration = calculateTimelineDuration(project.timeline)
     const totalTime = framesToTime(totalDuration, project.config.fps)
@@ -139,9 +159,43 @@ export function VideoEditorStage({
         )
     )
     const isSelectedClipEditorGenerated = Boolean(selectedClip?.metadata.regeneratedFromClipId)
-    const selectedClipRegenerateRange = selectedClip
+    const selectedClipRegenerateBaseRange = selectedClip
         ? resolvePartialRegenerateFrameRange(selectedClip, project.config.fps)
         : null
+    const selectedClipRegenerateMaxLocalFrame = selectedClipRegenerateBaseRange
+        ? Math.max(0, selectedClipRegenerateBaseRange.durationInFrames - 1)
+        : 0
+    const selectedClipRegenerateFirstLocalFrame = selectedClipRegenerateBaseRange
+        ? Math.max(0, Math.min(selectedClipRegenerateMaxLocalFrame, Math.round(clipRegenerateFirstLocalFrame ?? 0)))
+        : 0
+    const selectedClipRegenerateLastLocalFrame = selectedClipRegenerateBaseRange
+        ? Math.max(
+            selectedClipRegenerateFirstLocalFrame,
+            Math.min(selectedClipRegenerateMaxLocalFrame, Math.round(clipRegenerateLastLocalFrame ?? selectedClipRegenerateMaxLocalFrame)),
+        )
+        : 0
+    const selectedClipRegenerateRange = selectedClipRegenerateBaseRange
+        ? {
+            ...selectedClipRegenerateBaseRange,
+            trimFrom: selectedClipRegenerateBaseRange.trimFrom + selectedClipRegenerateFirstLocalFrame,
+            trimTo: selectedClipRegenerateBaseRange.trimFrom + selectedClipRegenerateLastLocalFrame + 1,
+            durationInFrames: Math.max(1, selectedClipRegenerateLastLocalFrame - selectedClipRegenerateFirstLocalFrame + 1),
+            firstFrame: selectedClipRegenerateBaseRange.trimFrom + selectedClipRegenerateFirstLocalFrame,
+            lastFrame: selectedClipRegenerateBaseRange.trimFrom + selectedClipRegenerateLastLocalFrame,
+            durationSeconds: Math.max(
+                0.1,
+                (selectedClipRegenerateLastLocalFrame - selectedClipRegenerateFirstLocalFrame + 1) / project.config.fps,
+            ),
+        }
+        : null
+    const activeClipFramePreview = useMemo(() => {
+        if (!selectedClip || !selectedClipRegenerateRange || !clipFramePreview) return null
+        const matches =
+            clipFramePreview.clipId === selectedClip.id
+            && clipFramePreview.trimFrom === selectedClipRegenerateRange.trimFrom
+            && clipFramePreview.trimTo === selectedClipRegenerateRange.trimTo
+        return matches ? clipFramePreview : null
+    }, [clipFramePreview, selectedClip, selectedClipRegenerateRange])
     const generatedSourceCount = useMemo(
         () => sourcePanels.filter((panel) => panel.lipSyncVideoUrl || panel.videoUrl).length,
         [sourcePanels],
@@ -180,6 +234,12 @@ export function VideoEditorStage({
         setPromptDraft(selectedClip?.metadata.videoPrompt || '')
         setClipRegeneratePrompt(selectedClip?.metadata.videoPrompt || selectedClip?.metadata.description || '')
         setClipRegenerateFrameMode('first-last')
+        setClipRegenerateFirstLocalFrame(0)
+        setClipRegenerateLastLocalFrame(selectedClip
+            ? Math.max(0, resolvePartialRegenerateFrameRange(selectedClip, project.config.fps).durationInFrames - 1)
+            : null)
+        setClipFramePreview(null)
+        setClipRegenerateNotice(null)
     }, [selectedClip?.id, selectedClip?.metadata.description, selectedClip?.metadata.videoPrompt])
 
     const handleSave = async () => {
@@ -354,24 +414,48 @@ export function VideoEditorStage({
         setStatusMessage('已提交该片段重新生成，完成后可点击“同步成片片段”刷新时间线素材')
     }
 
+    const seekSelectedClipLocalFrame = (localFrame: number) => {
+        if (!selectedComputedClip) return
+        seek(selectedComputedClip.startFrame + Math.max(0, Math.round(localFrame)))
+    }
+
+    const updateClipRegenerateFirstLocalFrame = (frame: number) => {
+        const nextFrame = Math.max(0, Math.min(selectedClipRegenerateMaxLocalFrame, Math.round(frame)))
+        setClipRegenerateFirstLocalFrame(nextFrame)
+        setClipRegenerateLastLocalFrame((previous) => Math.max(nextFrame, previous ?? selectedClipRegenerateMaxLocalFrame))
+        setClipFramePreview(null)
+        seekSelectedClipLocalFrame(nextFrame)
+    }
+
+    const updateClipRegenerateLastLocalFrame = (frame: number) => {
+        const nextFrame = Math.max(0, Math.min(selectedClipRegenerateMaxLocalFrame, Math.round(frame)))
+        setClipRegenerateLastLocalFrame(Math.max(selectedClipRegenerateFirstLocalFrame, nextFrame))
+        setClipFramePreview(null)
+        seekSelectedClipLocalFrame(Math.max(selectedClipRegenerateFirstLocalFrame, nextFrame))
+    }
+
     const handleRegenerateClipPartial = async () => {
         if (!selectedClip || isRegeneratingClip) return
         const prompt = clipRegeneratePrompt.trim()
         if (!prompt) {
+            setClipRegenerateNotice({ tone: 'error', message: '请先填写剪辑局部重生成提示词' })
             setStatusMessage('请先填写剪辑局部重生成提示词')
             return
         }
         if (!defaultVideoModel) {
+            setClipRegenerateNotice({ tone: 'error', message: '请先在项目配置中选择生视频模型' })
             setStatusMessage('请先在项目配置中选择生视频模型')
             return
         }
         if (!selectedClip.src) {
+            setClipRegenerateNotice({ tone: 'error', message: '当前片段没有可用视频素材，无法局部重生成' })
             setStatusMessage('当前片段没有可用视频素材，无法局部重生成')
             return
         }
 
-        const range = resolvePartialRegenerateFrameRange(selectedClip, project.config.fps)
+        const range = selectedClipRegenerateRange ?? resolvePartialRegenerateFrameRange(selectedClip, project.config.fps)
         setIsRegeneratingClip(true)
+        setClipRegenerateNotice({ tone: 'info', message: '生成中：正在截取首尾帧并调用视频模型，请等待返回结果。' })
         setStatusMessage('正在截取当前片段首尾帧并局部重生成...')
         try {
             const response = await fetch(`/api/novel-promotion/${projectId}/editor/regenerate-clip`, {
@@ -421,12 +505,72 @@ export function VideoEditorStage({
                 timeline: insertClipAfter(previous.timeline, selectedClip.id, newClip),
             }))
             selectClip(newClip.id)
+            setClipRegenerateNotice({ tone: 'success', message: '生成成功：新片段已插入到当前片段后面，并已自动选中新片段。' })
             setStatusMessage('局部重生成完成，已插入到当前片段后面')
         } catch (error) {
             _ulogError('Partial clip regeneration failed:', error)
-            setStatusMessage(error instanceof Error ? error.message : '片段局部重生成失败')
+            const message = error instanceof Error ? error.message : '片段局部重生成失败'
+            setClipRegenerateNotice({ tone: 'error', message: `生成失败：${message}` })
+            setStatusMessage(message)
         } finally {
             setIsRegeneratingClip(false)
+        }
+    }
+
+    const handlePreviewClipPartialFrames = async () => {
+        if (!selectedClip || isLoadingClipFramePreview) return
+        if (!selectedClip.src) {
+            setStatusMessage('当前片段没有可用视频素材，无法预览首尾帧')
+            return
+        }
+
+        const range = selectedClipRegenerateRange ?? resolvePartialRegenerateFrameRange(selectedClip, project.config.fps)
+        setIsLoadingClipFramePreview(true)
+        setStatusMessage('正在截取局部重生成首尾帧预览...')
+        try {
+            const response = await fetch(`/api/novel-promotion/${projectId}/editor/clip-frames`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    src: selectedClip.src,
+                    fps: project.config.fps,
+                    durationInFrames: range.durationInFrames,
+                    trim: {
+                        from: range.trimFrom,
+                        to: range.trimTo,
+                    },
+                    frameMode: 'first-last',
+                }),
+            })
+            if (!response.ok) {
+                const text = await response.text().catch(() => '')
+                let message = text || '首尾帧预览失败'
+                try {
+                    const parsed = JSON.parse(text) as { message?: string; error?: string }
+                    message = parsed.message || parsed.error || message
+                } catch {
+                    // keep raw response text
+                }
+                throw new Error(message)
+            }
+            const data = await response.json() as {
+                firstFrameUrl?: string
+                lastFrameUrl?: string | null
+            }
+            if (!data.firstFrameUrl) throw new Error('首尾帧预览未返回首帧图片')
+            setClipFramePreview({
+                clipId: selectedClip.id,
+                trimFrom: range.trimFrom,
+                trimTo: range.trimTo,
+                firstFrameUrl: data.firstFrameUrl,
+                lastFrameUrl: data.lastFrameUrl || null,
+            })
+            setStatusMessage('已生成局部重生成首尾帧预览')
+        } catch (error) {
+            _ulogError('Clip frame preview failed:', error)
+            setStatusMessage(error instanceof Error ? error.message : '首尾帧预览失败')
+        } finally {
+            setIsLoadingClipFramePreview(false)
         }
     }
 
@@ -933,13 +1077,132 @@ export function VideoEditorStage({
                                     ))}
                                 </div>
                                 {selectedClipRegenerateRange && (
-                                    <p style={{ margin: '8px 0 0 0', fontSize: 11, lineHeight: 1.5, color: 'var(--glass-text-tertiary)' }}>
-                                        生成范围：{framesToTime(selectedClipRegenerateRange.trimFrom, project.config.fps)}
-                                        {' - '}
-                                        {framesToTime(selectedClipRegenerateRange.trimTo, project.config.fps)}
-                                        {' · '}
-                                        {selectedClipRegenerateRange.durationSeconds.toFixed(1)}s
-                                    </p>
+                                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                        {([
+                                            {
+                                                label: '首帧位置',
+                                                value: selectedClipRegenerateFirstLocalFrame,
+                                                onChange: updateClipRegenerateFirstLocalFrame,
+                                            },
+                                            {
+                                                label: '尾帧位置',
+                                                value: selectedClipRegenerateLastLocalFrame,
+                                                onChange: updateClipRegenerateLastLocalFrame,
+                                            },
+                                        ] as const).map((item) => (
+                                            <div key={item.label}>
+                                                <div style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'space-between',
+                                                    gap: 8,
+                                                    marginBottom: 4,
+                                                    fontSize: 11,
+                                                    color: 'var(--glass-text-secondary)',
+                                                }}>
+                                                    <span>{item.label}：{framesToTime(item.value, project.config.fps)}</span>
+                                                    <input
+                                                        type="number"
+                                                        min={0}
+                                                        max={Number((selectedClipRegenerateMaxLocalFrame / project.config.fps).toFixed(2))}
+                                                        step={0.1}
+                                                        value={Number((item.value / project.config.fps).toFixed(2))}
+                                                        onChange={(event) => item.onChange(Number(event.target.value) * project.config.fps)}
+                                                        style={{
+                                                            width: 70,
+                                                            borderRadius: 6,
+                                                            border: '1px solid var(--glass-stroke-base)',
+                                                            background: 'var(--glass-bg-muted)',
+                                                            color: 'var(--glass-text-primary)',
+                                                            padding: '3px 6px',
+                                                            fontSize: 11,
+                                                        }}
+                                                    />
+                                                </div>
+                                                <input
+                                                    type="range"
+                                                    min={0}
+                                                    max={selectedClipRegenerateMaxLocalFrame}
+                                                    step={1}
+                                                    value={item.value}
+                                                    onChange={(event) => item.onChange(Number(event.target.value))}
+                                                    style={{ width: '100%' }}
+                                                />
+                                            </div>
+                                        ))}
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => updateClipRegenerateFirstLocalFrame(selectedClipLocalFrame)}
+                                                className="glass-btn-base glass-btn-secondary px-2 py-1.5 text-[11px]"
+                                                title="把当前播放头位置设为首帧"
+                                            >
+                                                当前切点设首帧
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => updateClipRegenerateLastLocalFrame(selectedClipLocalFrame)}
+                                                className="glass-btn-base glass-btn-secondary px-2 py-1.5 text-[11px]"
+                                                title="把当前播放头位置设为尾帧"
+                                            >
+                                                当前切点设尾帧
+                                            </button>
+                                        </div>
+                                        <p style={{ margin: 0, fontSize: 11, lineHeight: 1.5, color: 'var(--glass-text-tertiary)' }}>
+                                            生成范围：{framesToTime(selectedClipRegenerateRange.trimFrom, project.config.fps)}
+                                            {' - '}
+                                            {framesToTime(selectedClipRegenerateRange.trimTo, project.config.fps)}
+                                            {' · '}
+                                            {selectedClipRegenerateRange.durationSeconds.toFixed(1)}s
+                                        </p>
+                                    </div>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => { void handlePreviewClipPartialFrames() }}
+                                    disabled={!selectedClip.src || isLoadingClipFramePreview}
+                                    className="glass-btn-base glass-btn-secondary mt-3 w-full px-3 py-2 text-xs disabled:opacity-50"
+                                    title="只截取当前选中片段的首尾帧用于预览，不会触发生视频"
+                                >
+                                    {isLoadingClipFramePreview ? '预览截取中...' : '预览首尾帧'}
+                                </button>
+                                {activeClipFramePreview && (
+                                    <div style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: activeClipFramePreview.lastFrameUrl ? '1fr 1fr' : '1fr',
+                                        gap: 8,
+                                        marginTop: 8,
+                                    }}>
+                                        {[
+                                            { label: '首帧', imageUrl: activeClipFramePreview.firstFrameUrl },
+                                            ...(activeClipFramePreview.lastFrameUrl ? [{ label: '尾帧', imageUrl: activeClipFramePreview.lastFrameUrl }] : []),
+                                        ].map(({ label, imageUrl }) => (
+                                            <button
+                                                key={label}
+                                                type="button"
+                                                onClick={() => setPreviewImage(imageUrl)}
+                                                className="group relative overflow-hidden rounded-lg border border-[var(--glass-stroke-base)] bg-black p-0 text-left"
+                                                title={`放大预览${label}`}
+                                            >
+                                                <img
+                                                    src={imageUrl}
+                                                    alt={label}
+                                                    style={{
+                                                        display: 'block',
+                                                        width: '100%',
+                                                        aspectRatio: '16 / 9',
+                                                        objectFit: 'cover',
+                                                    }}
+                                                />
+                                                <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                                                    {label}
+                                                </span>
+                                                <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/25 group-hover:opacity-100">
+                                                    <AppIcon name="imagePreview" className="h-5 w-5" />
+                                                </span>
+                                            </button>
+                                        ))}
+                                    </div>
                                 )}
                                 <button
                                     type="button"
@@ -950,6 +1213,38 @@ export function VideoEditorStage({
                                 >
                                     {isRegeneratingClip ? '局部生成中...' : '局部重生成并插入'}
                                 </button>
+                                {clipRegenerateNotice && (
+                                    <div
+                                        style={{
+                                            marginTop: 8,
+                                            borderRadius: 8,
+                                            border: `1px solid ${
+                                                clipRegenerateNotice.tone === 'success'
+                                                    ? 'var(--glass-tone-success-fg)'
+                                                    : clipRegenerateNotice.tone === 'error'
+                                                        ? 'var(--glass-tone-danger-fg)'
+                                                        : 'var(--glass-tone-info-fg)'
+                                            }`,
+                                            background:
+                                                clipRegenerateNotice.tone === 'success'
+                                                    ? 'var(--glass-tone-success-bg)'
+                                                    : clipRegenerateNotice.tone === 'error'
+                                                        ? 'var(--glass-tone-danger-bg)'
+                                                        : 'var(--glass-tone-info-bg)',
+                                            color:
+                                                clipRegenerateNotice.tone === 'success'
+                                                    ? 'var(--glass-tone-success-fg)'
+                                                    : clipRegenerateNotice.tone === 'error'
+                                                        ? 'var(--glass-tone-danger-fg)'
+                                                        : 'var(--glass-tone-info-fg)',
+                                            padding: '8px 10px',
+                                            fontSize: 11,
+                                            lineHeight: 1.5,
+                                        }}
+                                    >
+                                        {clipRegenerateNotice.message}
+                                    </div>
+                                )}
                             </div>
 
                             {/* 转场设置 */}
@@ -1009,6 +1304,12 @@ export function VideoEditorStage({
                     onSeek={seek}
                 />
             </div>
+            {previewImage && (
+                <ImagePreviewModal
+                    imageUrl={previewImage}
+                    onClose={() => setPreviewImage(null)}
+                />
+            )}
         </div>
     )
 }

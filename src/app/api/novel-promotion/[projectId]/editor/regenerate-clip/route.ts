@@ -6,13 +6,21 @@ import path from 'path'
 import { NextRequest } from 'next/server'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
-import { getProjectModelConfig } from '@/lib/config-service'
+import { getProjectModelConfig, resolveProjectModelCapabilityGenerationOptions } from '@/lib/config-service'
 import { generateVideo } from '@/lib/generator-api'
+import { pollAsyncTask } from '@/lib/async-poll'
 import { processMediaResult } from '@/lib/media-process'
 import { ensureMediaObjectFromStorageKey, resolveStorageKeyFromMediaValue } from '@/lib/media/service'
 import { getObjectBuffer, toFetchableUrl } from '@/lib/storage'
+import type { GenerateResult } from '@/lib/generators/base'
 
 type FrameMode = 'first' | 'first-last'
+
+const DEFAULT_POLL_INTERVAL_MS = Number.parseInt(process.env.WORKER_EXTERNAL_POLL_MS || '3000', 10)
+const DEFAULT_LOCAL_VIDEO_POLL_TIMEOUT_MS = Number.parseInt(
+  process.env.WORKER_LOCAL_VIDEO_TIMEOUT_MS || String(6 * 60 * 60 * 1000),
+  10,
+)
 
 interface RegenerateClipRequest {
   src?: string
@@ -64,7 +72,53 @@ function frameToSeconds(frame: number, fps: number): string {
 }
 
 function toFrameDataUrl(buffer: Buffer): string {
-  return `data:image/jpeg;base64,${buffer.toString('base64')}`
+  return `data:image/png;base64,${buffer.toString('base64')}`
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function resolveAsyncExternalId(result: GenerateResult): string | null {
+  if (typeof result.externalId === 'string' && result.externalId.trim()) return result.externalId.trim()
+  return null
+}
+
+async function waitForGeneratedVideo(input: {
+  result: GenerateResult
+  userId: string
+}): Promise<{ videoUrl: string; downloadHeaders?: Record<string, string> }> {
+  if (input.result.videoUrl) {
+    return { videoUrl: input.result.videoUrl }
+  }
+
+  const externalId = resolveAsyncExternalId(input.result)
+  if (!externalId) {
+    throw new Error(input.result.error || '视频生成未返回视频地址或异步任务ID')
+  }
+
+  const timeoutMs = externalId.startsWith('LOCAL:VIDEO:')
+    ? DEFAULT_LOCAL_VIDEO_POLL_TIMEOUT_MS
+    : Number.parseInt(process.env.WORKER_EXTERNAL_TIMEOUT_MS || String(20 * 60 * 1000), 10)
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    const status = await pollAsyncTask(externalId, input.userId)
+    if (status.status === 'completed') {
+      const videoUrl = status.resultUrl || status.videoUrl
+      if (!videoUrl) throw new Error(`视频任务已完成但没有返回视频地址：${externalId}`)
+      return {
+        videoUrl,
+        ...(status.downloadHeaders ? { downloadHeaders: status.downloadHeaders } : {}),
+      }
+    }
+    if (status.status === 'failed') {
+      throw new Error(status.error || `视频异步任务失败：${externalId}`)
+    }
+    await sleep(DEFAULT_POLL_INTERVAL_MS)
+  }
+
+  throw new Error(`视频异步任务等待超时：${externalId}`)
 }
 
 function normalizeGenerationOptions(raw: unknown): Record<string, string | number | boolean> {
@@ -119,14 +173,16 @@ export const POST = apiHandler(async (
   const lastFrame = Math.max(trimFrom, trimFrom + durationFrames - 1)
   const frameMode: FrameMode = body.frameMode === 'first' ? 'first' : 'first-last'
   const durationSeconds = Math.max(0.1, durationFrames / fps)
+  const generationDurationSeconds = Math.max(1, Math.ceil(durationSeconds))
+  const generationDurationFrames = Math.max(1, Math.round(generationDurationSeconds * fps))
 
   const workDir = path.join(os.tmpdir(), `waoo-editor-regenerate-${randomUUID()}`)
   await mkdir(workDir, { recursive: true })
 
   try {
     const inputPath = path.join(workDir, 'input.mp4')
-    const firstFramePath = path.join(workDir, 'first.jpg')
-    const lastFramePath = path.join(workDir, 'last.jpg')
+    const firstFramePath = path.join(workDir, 'first.png')
+    const lastFramePath = path.join(workDir, 'last.png')
     await writeFile(inputPath, await downloadVideoBuffer(src))
 
     await runFfmpeg([
@@ -134,7 +190,6 @@ export const POST = apiHandler(async (
       '-ss', frameToSeconds(firstFrame, fps),
       '-i', inputPath,
       '-frames:v', '1',
-      '-q:v', '2',
       firstFramePath,
     ], workDir)
 
@@ -144,7 +199,6 @@ export const POST = apiHandler(async (
         '-ss', frameToSeconds(lastFrame, fps),
         '-i', inputPath,
         '-frames:v', '1',
-        '-q:v', '2',
         lastFramePath,
       ], workDir)
     }
@@ -153,12 +207,30 @@ export const POST = apiHandler(async (
     const lastFrameDataUrl = frameMode === 'first-last'
       ? toFrameDataUrl(await readFile(lastFramePath))
       : null
-    const generationOptions = normalizeGenerationOptions(body.generationOptions)
-    if (generationOptions.duration === undefined) {
-      generationOptions.duration = Math.max(1, Math.round(durationSeconds))
-    }
-    if (generationOptions.fps === undefined) {
-      generationOptions.fps = fps
+    const requestedGenerationMode = lastFrameDataUrl ? 'firstlastframe' : 'normal'
+    const runtimeGenerationOptions = normalizeGenerationOptions(body.generationOptions)
+    runtimeGenerationOptions.duration = generationDurationSeconds
+    runtimeGenerationOptions.fps = fps
+    runtimeGenerationOptions.generationMode = requestedGenerationMode
+    const capabilityRuntimeOptions = { ...runtimeGenerationOptions }
+    delete capabilityRuntimeOptions.fps
+
+    let generationOptions: Record<string, string | number | boolean>
+    try {
+      const resolvedCapabilityOptions = await resolveProjectModelCapabilityGenerationOptions({
+        projectId,
+        userId: session.user.id,
+        modelType: 'video',
+        modelKey: videoModel,
+        runtimeSelections: capabilityRuntimeOptions,
+      })
+      generationOptions = {
+        ...resolvedCapabilityOptions,
+        fps,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`视频参数不支持：${message}`)
     }
 
     const result = await generateVideo(session.user.id, videoModel, firstFrameDataUrl, {
@@ -166,31 +238,38 @@ export const POST = apiHandler(async (
       prompt,
       ...(modelConfig.videoRatio ? { aspectRatio: modelConfig.videoRatio } : {}),
       ...(lastFrameDataUrl
-        ? { generationMode: 'firstlastframe', lastFrameImageUrl: lastFrameDataUrl }
-        : { generationMode: 'normal' }),
+        ? { generationMode: requestedGenerationMode, lastFrameImageUrl: lastFrameDataUrl }
+        : { generationMode: requestedGenerationMode }),
     })
 
     if (!result.success || !result.videoUrl) {
-      throw new Error(result.error || '视频生成失败')
+      if (!result.success) throw new Error(result.error || '视频生成失败')
     }
+    const generatedVideo = await waitForGeneratedVideo({
+      result,
+      userId: session.user.id,
+    })
 
     const storageKey = await processMediaResult({
-      source: result.videoUrl,
+      source: generatedVideo.videoUrl,
       type: 'video',
       keyPrefix: 'editor-regenerate-clip',
       targetId: projectId,
+      ...(generatedVideo.downloadHeaders ? { downloadHeaders: generatedVideo.downloadHeaders } : {}),
     })
     const mediaRef = await ensureMediaObjectFromStorageKey(storageKey, {
       mimeType: 'video/mp4',
-      durationMs: Math.round(durationSeconds * 1000),
+      durationMs: Math.round(generationDurationSeconds * 1000),
     })
 
     return Response.json({
       success: true,
       videoUrl: mediaRef.url,
       storageKey,
-      durationInFrames: durationFrames,
-      durationSeconds,
+      durationInFrames: generationDurationFrames,
+      durationSeconds: generationDurationSeconds,
+      sourceDurationInFrames: durationFrames,
+      sourceDurationSeconds: durationSeconds,
       frameMode,
       prompt,
     })

@@ -43,8 +43,15 @@ interface StoryboardPanelListProps {
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
+  onInsertFrame?: (payload: { panelId?: string; frameId?: string; placement?: 'before' | 'after' }) => void | Promise<void>
   onDeleteFrame?: (panelId: string, frameId: string) => void | Promise<void>
   onSplitFrame?: (frameId: string, placement: 'before' | 'after') => void | Promise<void>
+  onToggleUsePreviousPanelTailReference: (payload: {
+    panelId: string
+    storyboardId: string
+    panelIndex: number
+    usePreviousPanelTailAsReference: boolean
+  }) => Promise<void>
   onOpenEditModal: (panelIndex: number) => void
   onOpenAIDataModal: (panelIndex: number) => void
   onSelectPanelCandidateIndex: (panelId: string, index: number) => void
@@ -54,6 +61,7 @@ interface StoryboardPanelListProps {
   onPreviewImage: (url: string) => void
   onInsertAfter: (panelIndex: number) => void
   onDuplicatePanel: (panelId: string) => Promise<void>
+  onMergePanelWithNext: (panelId: string) => Promise<void>
   onVariant: (panelIndex: number) => void
   isInsertDisabled: (panelId: string) => boolean
   previousPanelImageOptionsByPanelId?: Record<string, PreviousPanelImageOption[]>
@@ -92,8 +100,10 @@ export default function StoryboardPanelList({
   onRegenerateFrameImage,
   onUpdateFrameTime,
   onUpdateFramePrompt,
+  onInsertFrame,
   onDeleteFrame,
   onSplitFrame,
+  onToggleUsePreviousPanelTailReference,
   onOpenEditModal,
   onOpenAIDataModal,
   onSelectPanelCandidateIndex,
@@ -103,6 +113,7 @@ export default function StoryboardPanelList({
   onPreviewImage,
   onInsertAfter,
   onDuplicatePanel,
+  onMergePanelWithNext,
   onVariant,
   isInsertDisabled,
   previousPanelImageOptionsByPanelId,
@@ -144,6 +155,8 @@ export default function StoryboardPanelList({
         const panelFailedError = taskError?.message || null
         const panelData = getPanelEditData(panel)
         const panelCandidateData = getPanelCandidates(panel as unknown as NovelPromotionPanel)
+        const previousPanelImageOptions = previousPanelImageOptionsByPanelId?.[panel.id] || []
+        const hasPreviousPanel = globalPanelNumber > 1 || previousPanelImageOptions.length > 0
 
         return (
           <div
@@ -185,8 +198,17 @@ export default function StoryboardPanelList({
               onRegenerateFrameImage={onRegenerateFrameImage}
               onUpdateFrameTime={onUpdateFrameTime}
               onUpdateFramePrompt={onUpdateFramePrompt}
+              onInsertFrame={onInsertFrame}
               onDeleteFrame={onDeleteFrame}
               onSplitFrame={onSplitFrame}
+              onToggleUsePreviousPanelTail={(enabled) =>
+                onToggleUsePreviousPanelTailReference({
+                  panelId: panel.id,
+                  storyboardId,
+                  panelIndex: panel.panelIndex,
+                  usePreviousPanelTailAsReference: enabled,
+                })
+              }
               onOpenEditModal={() => onOpenEditModal(index)}
               onOpenAIDataModal={() => onOpenAIDataModal(index)}
               onSelectCandidateIndex={onSelectPanelCandidateIndex}
@@ -196,9 +218,11 @@ export default function StoryboardPanelList({
               onPreviewImage={onPreviewImage}
               onInsertAfter={() => onInsertAfter(index)}
               onDuplicatePanel={() => onDuplicatePanel(panel.id)}
+              onMergePanelWithNext={index < textPanels.length - 1 ? () => onMergePanelWithNext(panel.id) : undefined}
               onVariant={() => onVariant(index)}
               isInsertDisabled={isInsertDisabled(panel.id)}
-              previousPanelImageOptions={previousPanelImageOptionsByPanelId?.[panel.id] || []}
+              hasPreviousPanel={hasPreviousPanel}
+              previousPanelImageOptions={previousPanelImageOptions}
             />
           </div>
         )

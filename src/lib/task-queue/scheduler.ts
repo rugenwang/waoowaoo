@@ -22,7 +22,7 @@ export function resolveQueueLaneFromTaskType(
   allowParallelStoryboardVideo = false,
 ): TaskQueueLane {
   if (!allowParallelStoryboardVideo) return 'global'
-  if (taskType === 'image_panel' || taskType === 'panel_variant') return 'storyboard'
+  if (taskType === 'image_panel' || taskType === 'panel_variant' || taskType === 'modify_asset_image') return 'storyboard'
   if (taskType === 'video_panel' || taskType === 'lip_sync') return 'video'
   return 'global'
 }

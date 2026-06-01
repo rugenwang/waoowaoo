@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback } from 'react'
-import { Character, Location, NovelPromotionClip, NovelPromotionStoryboard } from '@/types/project'
+import { Character, Location, NovelPromotionClip, NovelPromotionStoryboard, Prop } from '@/types/project'
 import { PanelEditData } from '../../PanelEditForm'
 import { SelectedAsset } from './useImageGeneration'
 import { StoryboardPanel } from './useStoryboardState'
@@ -12,6 +12,7 @@ interface UseStoryboardPanelAssetActionsProps {
   clips: NovelPromotionClip[]
   characters: Character[]
   locations: Location[]
+  props: Prop[]
   localStoryboards: NovelPromotionStoryboard[]
   sortedStoryboards: NovelPromotionStoryboard[]
   submittingPanelImageIds: Set<string>
@@ -81,6 +82,7 @@ export function useStoryboardPanelAssetActions({
   clips,
   characters,
   locations,
+  props,
   localStoryboards,
   sortedStoryboards,
   submittingPanelImageIds,
@@ -103,8 +105,8 @@ export function useStoryboardPanelAssetActions({
 }: UseStoryboardPanelAssetActionsProps) {
   const getDefaultAssetsForClip = useCallback(
     (clipId: string): SelectedAsset[] =>
-      buildDefaultAssetsForClip({ clipId, clips, characters, locations }),
-    [characters, clips, locations],
+      buildDefaultAssetsForClip({ clipId, clips, characters, locations, props }),
+    [characters, clips, locations, props],
   )
 
   const handleEditSubmit = useCallback(

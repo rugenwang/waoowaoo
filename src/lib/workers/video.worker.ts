@@ -106,11 +106,11 @@ function resolvePanelDurationSec(panel: PanelRecord, generationOptions: VideoOpt
   if (typeof generationOptions.duration === 'number' && Number.isFinite(generationOptions.duration) && generationOptions.duration > 0) {
     return generationOptions.duration
   }
-  if (typeof panel.groupDurationSec === 'number' && Number.isFinite(panel.groupDurationSec) && panel.groupDurationSec > 0) {
-    return panel.groupDurationSec
-  }
   if (typeof panel.duration === 'number' && Number.isFinite(panel.duration) && panel.duration > 0) {
     return panel.duration
+  }
+  if (typeof panel.groupDurationSec === 'number' && Number.isFinite(panel.groupDurationSec) && panel.groupDurationSec > 0) {
+    return panel.groupDurationSec
   }
   return 4
 }
@@ -270,10 +270,10 @@ async function handleVideoPanelTask(job: Job<TaskJobData>) {
   const generationOptions = extractGenerationOptions(payload)
   // 分镜级时长兜底：如果请求未携带 duration，则使用面板本身的 duration（秒）
   if (generationOptions.duration === undefined) {
-    const panelDuration = typeof panel.groupDurationSec === 'number' && Number.isFinite(panel.groupDurationSec)
-      ? panel.groupDurationSec
-      : typeof panel.duration === 'number' && Number.isFinite(panel.duration)
-        ? panel.duration
+    const panelDuration = typeof panel.duration === 'number' && Number.isFinite(panel.duration)
+      ? panel.duration
+      : typeof panel.groupDurationSec === 'number' && Number.isFinite(panel.groupDurationSec)
+        ? panel.groupDurationSec
         : null
     if (panelDuration !== null) {
       generationOptions.duration = panelDuration

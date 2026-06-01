@@ -10,7 +10,7 @@ import StoryboardToolbar from './StoryboardToolbar'
 import StoryboardCanvas from './StoryboardCanvas'
 import { useStoryboardStageController } from './hooks/useStoryboardStageController'
 import { useStoryboardModalRuntime } from './hooks/useStoryboardModalRuntime'
-import { useDeleteProjectPanelFrame, useUpdateProjectPanelFramePrompt, useUpdateProjectPanelFrameTime } from '@/lib/query/hooks'
+import { useDeleteProjectPanelFrame, useInsertProjectPanelFrame, useUpdateProjectPanelFramePrompt, useUpdateProjectPanelFrameTime } from '@/lib/query/hooks'
 import { toDisplayImageUrl } from '@/lib/media/image-url'
 
 interface StoryboardStageProps {
@@ -73,7 +73,9 @@ export default function StoryboardStage({
     moveStoryboardGroup,
     insertPanel,
     duplicatePanel,
+    mergePanelWithNext,
     splitPanelFrame,
+    updatePanelPreviousTailReference,
 
     submittingVariantPanelId,
     generatePanelVariant,
@@ -133,6 +135,8 @@ export default function StoryboardStage({
     projectId,
     videoRatio,
     localStoryboards,
+    sortedStoryboards,
+    storyboardStartIndex,
     editingPanel,
     setEditingPanel,
     assetPickerPanel,
@@ -157,6 +161,7 @@ export default function StoryboardStage({
   const updatePanelFrameTimeMutation = useUpdateProjectPanelFrameTime(projectId)
   const updatePanelFramePromptMutation = useUpdateProjectPanelFramePrompt(projectId)
   const deletePanelFrameMutation = useDeleteProjectPanelFrame(projectId)
+  const insertPanelFrameMutation = useInsertProjectPanelFrame(projectId)
   const updatePanelFrameTime = async (frameId: string, frameTimeSec: number) => {
     const result = await updatePanelFrameTimeMutation.mutateAsync({ frameId, frameTimeSec })
     setLocalStoryboards((prev) =>
@@ -212,6 +217,32 @@ export default function StoryboardStage({
               : frame,
           ),
         })),
+      })),
+    )
+  }
+  const insertPanelFrame = async (payload: { panelId?: string; frameId?: string; placement?: 'before' | 'after' }) => {
+    const result = await insertPanelFrameMutation.mutateAsync(payload)
+    const nextImageUrl = toDisplayImageUrl(result.imageUrl) || result.imageUrl
+    const nextFrames = result.frames.map((frame) => ({
+      ...frame,
+      imageUrl: toDisplayImageUrl(frame.imageUrl) || frame.imageUrl,
+    }))
+    setLocalStoryboards((prev) =>
+      prev.map((storyboard) => ({
+        ...storyboard,
+        panels: storyboard.panels?.map((panel) => {
+          if (panel.id !== result.panelId) return panel
+          return {
+            ...panel,
+            panelMode: result.panelMode,
+            imageUrl: nextImageUrl,
+            groupDurationSec: result.groupDurationSec,
+            groupVideoPrompt: result.groupVideoPrompt,
+            groupPlanJson: result.groupPlanJson,
+            candidateImages: null,
+            frames: nextFrames,
+          }
+        }),
       })),
     )
   }
@@ -289,8 +320,10 @@ export default function StoryboardStage({
           }}
           onUpdateFrameTime={updatePanelFrameTime}
           onUpdateFramePrompt={updatePanelFramePrompt}
+          onInsertFrame={insertPanelFrame}
           onDeleteFrame={deletePanelFrame}
           onSplitFrame={splitPanelFrame}
+          onToggleUsePreviousPanelTailReference={updatePanelPreviousTailReference}
           onOpenEditModal={(storyboardId, panelIndex) => setEditingPanel({ storyboardId, panelIndex })}
           onOpenAIDataModal={(storyboardId, panelIndex) => setAIDataPanel({ storyboardId, panelIndex })}
           getPanelCandidates={getPanelCandidates}
@@ -300,6 +333,7 @@ export default function StoryboardStage({
 
           onInsertPanel={insertPanel}
           onDuplicatePanel={duplicatePanel}
+          onMergePanelWithNext={mergePanelWithNext}
           onPanelVariant={generatePanelVariant}
           addStoryboardGroup={addStoryboardGroup}
           addingStoryboardGroup={addingStoryboardGroup}
@@ -310,6 +344,7 @@ export default function StoryboardStage({
           <ImageEditModal
             projectId={modalRuntime.projectId}
             defaultAssets={modalRuntime.imageEditDefaults}
+            previousPanelImageOptions={modalRuntime.imageEditPreviousPanelImageOptions}
             onSubmit={modalRuntime.handleEditSubmit}
             onClose={modalRuntime.closeImageEditModal}
           />

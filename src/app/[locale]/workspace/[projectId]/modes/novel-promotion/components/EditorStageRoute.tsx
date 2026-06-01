@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '@/lib/api-fetch'
-import { createProjectFromPanels, VideoEditorStage, type VideoEditorProject } from '@/features/video-editor'
+import { createProjectFromPanels, reconcileProjectWithPanels, VideoEditorStage, type VideoEditorProject } from '@/features/video-editor'
 import { useWorkspaceProvider } from '../WorkspaceProvider'
 import { useWorkspaceStageRuntime } from '../WorkspaceStageRuntimeContext'
 import { useWorkspaceEpisodeStageData } from '../hooks/useWorkspaceEpisodeStageData'
@@ -53,7 +53,9 @@ export default function EditorStageRoute() {
         const data = response.ok ? await response.json() : null
         const savedProject = data?.projectData as VideoEditorProject | null | undefined
         if (!cancelled) {
-          setInitialProject(savedProject || createProjectFromPanels(episodeId, sourcePanels))
+          setInitialProject(savedProject
+            ? reconcileProjectWithPanels(savedProject, sourcePanels)
+            : createProjectFromPanels(episodeId, sourcePanels))
         }
       } finally {
         if (!cancelled) setLoading(false)

@@ -3,10 +3,12 @@
 import type { PanelEditData } from '../../PanelEditForm'
 import {
   useDuplicateProjectPanel,
+  useMergeProjectPanelWithNext,
   useRefreshEpisodeData,
   useRefreshProjectAssets,
   useRefreshStoryboards,
   useSplitProjectPanelFrame,
+  useUpdateProjectPanelPreviousTailReference,
 } from '@/lib/query/hooks'
 import { usePanelCrudActions } from './usePanelCrudActions'
 import { usePanelInsertActions } from './usePanelInsertActions'
@@ -27,7 +29,9 @@ export function usePanelOperations({
   const refreshEpisode = useRefreshEpisodeData(projectId, episodeId)
   const refreshStoryboards = useRefreshStoryboards(episodeId)
   const duplicatePanelMutation = useDuplicateProjectPanel(projectId)
+  const mergePanelWithNextMutation = useMergeProjectPanelWithNext(projectId)
   const splitPanelFrameMutation = useSplitProjectPanelFrame(projectId)
+  const updatePanelPreviousTailReferenceMutation = useUpdateProjectPanelPreviousTailReference(projectId)
 
   const panelCrud = usePanelCrudActions({
     projectId,
@@ -53,9 +57,27 @@ export function usePanelOperations({
     refreshStoryboards()
   }
 
+  const mergePanelWithNext = async (panelId: string) => {
+    await mergePanelWithNextMutation.mutateAsync({ panelId })
+    await onRefresh()
+    refreshEpisode()
+    refreshStoryboards()
+  }
+
   const splitPanelFrame = async (frameId: string, placement: 'before' | 'after') => {
     await splitPanelFrameMutation.mutateAsync({ frameId, placement })
     await onRefresh()
+    refreshEpisode()
+    refreshStoryboards()
+  }
+
+  const updatePanelPreviousTailReference = async (payload: {
+    panelId: string
+    storyboardId: string
+    panelIndex: number
+    usePreviousPanelTailAsReference: boolean
+  }) => {
+    await updatePanelPreviousTailReferenceMutation.mutateAsync(payload)
     refreshEpisode()
     refreshStoryboards()
   }
@@ -87,6 +109,8 @@ export function usePanelOperations({
     removePropFromPanel: panelCrud.removePropFromPanel,
     insertPanel: panelInsert.insertPanel,
     duplicatePanel,
+    mergePanelWithNext,
     splitPanelFrame,
+    updatePanelPreviousTailReference,
   }
 }

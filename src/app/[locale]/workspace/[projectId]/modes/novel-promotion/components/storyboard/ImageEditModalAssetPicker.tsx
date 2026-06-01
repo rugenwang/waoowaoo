@@ -1,6 +1,6 @@
 'use client'
 
-import type { Character, Location } from '@/types/project'
+import type { Character, Location, Prop } from '@/types/project'
 import { useTranslations } from 'next-intl'
 import { toDisplayImageUrl } from '@/lib/media/image-url'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
@@ -11,6 +11,7 @@ interface ImageEditModalAssetPickerProps {
   isOpen: boolean
   characters: Character[]
   locations: Location[]
+  props: Prop[]
   selectedAssets: SelectedAsset[]
   onClose: () => void
   onAddAsset: (asset: SelectedAsset) => void
@@ -22,6 +23,7 @@ export default function ImageEditModalAssetPicker({
   isOpen,
   characters,
   locations,
+  props,
   selectedAssets,
   onClose,
   onAddAsset,
@@ -167,6 +169,70 @@ export default function ImageEditModalAssetPicker({
                       )}
                       <div className="absolute bottom-0 left-0 right-0 bg-[var(--glass-overlay)] text-white text-xs p-1 truncate">
                         {location.name}
+                      </div>
+                      {isSelected && (
+                        <div className="absolute top-1 right-1 w-5 h-5 bg-[var(--glass-accent-from)] text-white rounded-full flex items-center justify-center">
+                          <AppIcon name="checkXs" className="h-3 w-3" />
+                        </div>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {props.length > 0 && (
+            <div className="mt-4">
+              <h5 className="text-sm font-medium text-[var(--glass-text-secondary)] mb-2 flex items-center gap-1.5">
+                <AppIcon name="package" className="h-4 w-4 text-[var(--glass-text-tertiary)]" />
+                <span>{t('prompts.prop')}</span>
+              </h5>
+
+              <div className="grid grid-cols-4 gap-2">
+                {props.map((prop) => {
+                  const isSelected = selectedAssets.some((asset) => asset.id === prop.id && asset.type === 'prop')
+                  const selectedImage = prop.selectedImageId
+                    ? prop.images?.find((image) => image.id === prop.selectedImageId)
+                    : prop.images?.find((image) => image.isSelected) || prop.images?.find((image) => image.imageUrl) || prop.images?.[0]
+                  const imageUrl = selectedImage?.imageUrl
+                  const displayImageUrl = toDisplayImageUrl(imageUrl || null)
+
+                  return (
+                    <button
+                      key={prop.id}
+                      onClick={() => {
+                        if (isSelected) {
+                          onRemoveAsset(prop.id, 'prop')
+                        } else {
+                          onAddAsset({
+                            id: prop.id,
+                            name: prop.name,
+                            type: 'prop',
+                            imageUrl: imageUrl ?? null,
+                          })
+                        }
+                      }}
+                      className={`relative aspect-[3/2] rounded-lg overflow-hidden border-2 ${isSelected ? 'border-[var(--glass-stroke-focus)]' : 'border-transparent'}`}
+                    >
+                      {displayImageUrl ? (
+                        <MediaImageWithLoading
+                          src={displayImageUrl}
+                          alt={prop.name}
+                          containerClassName="w-full h-full"
+                          className="w-full h-full object-cover cursor-zoom-in"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onPreviewImage(imageUrl || null)
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-[var(--glass-bg-muted)] flex items-center justify-center text-[var(--glass-text-tertiary)]">
+                          <AppIcon name="package" className="h-7 w-7" />
+                        </div>
+                      )}
+                      <div className="absolute bottom-0 left-0 right-0 bg-[var(--glass-overlay)] text-white text-xs p-1 truncate">
+                        {prop.name}
                       </div>
                       {isSelected && (
                         <div className="absolute top-1 right-1 w-5 h-5 bg-[var(--glass-accent-from)] text-white rounded-full flex items-center justify-center">

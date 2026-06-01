@@ -29,7 +29,7 @@ import { usePanelImageDownload } from './usePanelImageDownload'
 export interface SelectedAsset {
   id: string
   name: string
-  type: 'character' | 'location'
+  type: 'character' | 'location' | 'prop'
   imageUrl: string | null
   appearanceId?: number
   appearanceName?: string
@@ -139,6 +139,7 @@ export function useStoryboardImageGeneration({
   })
 
   const { modifyPanelImage } = usePanelImageModification({
+    projectId,
     localStoryboards,
     setLocalStoryboards,
     modifyPanelMutation,
@@ -423,7 +424,6 @@ export function useStoryboardImageGeneration({
 
   const regeneratePanelFrameImage = useCallback(async (panelId: string, frameId: string) => {
     if (taskQueue.enabled) {
-      markPanelFrameGenerationState(panelId, frameId, 'processing')
       taskQueue.enqueue({
         id: `storyboard-frame:${frameId}:${Date.now()}`,
         group: 'storyboard',
@@ -436,6 +436,7 @@ export function useStoryboardImageGeneration({
         uiKey: `panel-frame-${frameId}`,
         label: `关键帧：${frameId.slice(0, 6)}`,
         submit: async () => {
+          markPanelFrameGenerationState(panelId, frameId, 'processing')
           const data = await regeneratePanelFrameMutation.mutateAsync({ panelId, frameId }) as { taskId?: string }
           return { taskId: String(data?.taskId || '') }
         },
@@ -447,6 +448,7 @@ export function useStoryboardImageGeneration({
           ])
         },
         onFail: async () => {
+          markPanelFrameGenerationState(panelId, frameId, 'failed')
           await Promise.all([
             onSilentRefresh ? onSilentRefresh() : Promise.resolve(),
             refreshEpisode(),

@@ -64,8 +64,15 @@ interface StoryboardCanvasProps {
   onRegenerateFrameImage?: (panelId: string, frameId: string) => void | Promise<void>
   onUpdateFrameTime?: (frameId: string, frameTimeSec: number) => void | Promise<void>
   onUpdateFramePrompt?: (frameId: string, imagePrompt: string) => void | Promise<void>
+  onInsertFrame?: (payload: { panelId?: string; frameId?: string; placement?: 'before' | 'after' }) => void | Promise<void>
   onDeleteFrame?: (panelId: string, frameId: string) => void | Promise<void>
   onSplitFrame?: (frameId: string, placement: 'before' | 'after') => void | Promise<void>
+  onToggleUsePreviousPanelTailReference: (payload: {
+    panelId: string
+    storyboardId: string
+    panelIndex: number
+    usePreviousPanelTailAsReference: boolean
+  }) => Promise<void>
   onOpenEditModal: (storyboardId: string, panelIndex: number) => void
   onOpenAIDataModal: (storyboardId: string, panelIndex: number) => void
   getPanelCandidates: (panel: NovelPromotionPanel) => { candidates: string[]; selectedIndex: number } | null
@@ -74,6 +81,7 @@ interface StoryboardCanvasProps {
   onCancelPanelCandidate: (panelId: string) => void
   onInsertPanel: (storyboardId: string, insertAfterPanelId: string, userInput: string) => Promise<void>
   onDuplicatePanel: (panelId: string) => Promise<void>
+  onMergePanelWithNext: (panelId: string) => Promise<void>
   onPanelVariant: (
     sourcePanelId: string,
     storyboardId: string,
@@ -134,8 +142,10 @@ export default function StoryboardCanvas({
   onRegenerateFrameImage,
   onUpdateFrameTime,
   onUpdateFramePrompt,
+  onInsertFrame,
   onDeleteFrame,
   onSplitFrame,
+  onToggleUsePreviousPanelTailReference,
   onOpenEditModal,
   onOpenAIDataModal,
   getPanelCandidates,
@@ -144,6 +154,7 @@ export default function StoryboardCanvas({
   onCancelPanelCandidate,
   onInsertPanel,
   onDuplicatePanel,
+  onMergePanelWithNext,
   onPanelVariant,
   addStoryboardGroup,
   addingStoryboardGroup,
@@ -155,22 +166,44 @@ export default function StoryboardCanvas({
     let previousOptions: PreviousPanelImageOption[] = []
 
     const collectPanelImages = (panel: StoryboardPanel, globalPanelNumber: number): PreviousPanelImageOption[] => {
+      const resolveImageUrl = (value: {
+        imageUrl?: string | null
+        imageMedia?: { url?: string | null; publicId?: string | null; storageKey?: string | null } | null
+        media?: { url?: string | null; publicId?: string | null; storageKey?: string | null } | null
+      }) => {
+        const imageUrl = typeof value.imageUrl === 'string' ? value.imageUrl.trim() : ''
+        if (imageUrl) return imageUrl
+        const imageMediaUrl = typeof value.imageMedia?.url === 'string' ? value.imageMedia.url.trim() : ''
+        if (imageMediaUrl) return imageMediaUrl
+        const imageMediaPublicId = typeof value.imageMedia?.publicId === 'string' ? value.imageMedia.publicId.trim() : ''
+        if (imageMediaPublicId) return imageMediaPublicId
+        const imageMediaStorageKey = typeof value.imageMedia?.storageKey === 'string' ? value.imageMedia.storageKey.trim() : ''
+        if (imageMediaStorageKey) return imageMediaStorageKey
+        const mediaUrl = typeof value.media?.url === 'string' ? value.media.url.trim() : ''
+        if (mediaUrl) return mediaUrl
+        const mediaPublicId = typeof value.media?.publicId === 'string' ? value.media.publicId.trim() : ''
+        if (mediaPublicId) return mediaPublicId
+        const mediaStorageKey = typeof value.media?.storageKey === 'string' ? value.media.storageKey.trim() : ''
+        return mediaStorageKey
+      }
       const frames = Array.isArray(panel.frames)
         ? [...panel.frames].sort((left, right) => left.frameIndex - right.frameIndex)
         : []
       const frameOptions = frames
-        .filter((frame) => typeof frame.imageUrl === 'string' && frame.imageUrl.trim())
-        .map((frame) => ({
-          id: `${panel.id}:frame:${frame.id}`,
-          label: `分镜 ${globalPanelNumber} · F${frame.frameIndex + 1}${frame.frameRole ? ` · ${frame.frameRole}` : ''}`,
-          imageUrl: frame.imageUrl!.trim(),
-        }))
+        .map((frame) => {
+          const imageUrl = resolveImageUrl(frame)
+          if (!imageUrl) return null
+          return {
+            id: `${panel.id}:frame:${frame.id}`,
+            label: `分镜 ${globalPanelNumber} · F${frame.frameIndex + 1}${frame.frameRole ? ` · ${frame.frameRole}` : ''}`,
+            imageUrl,
+          }
+        })
+        .filter((option): option is PreviousPanelImageOption => option !== null)
 
       if (frameOptions.length > 0) return frameOptions
 
-      const imageUrl = typeof panel.imageUrl === 'string' && panel.imageUrl.trim()
-        ? panel.imageUrl.trim()
-        : ''
+      const imageUrl = resolveImageUrl(panel)
       if (!imageUrl) return []
       return [{
         id: `${panel.id}:panel`,
@@ -262,8 +295,10 @@ export default function StoryboardCanvas({
               onRegenerateFrameImage={onRegenerateFrameImage}
               onUpdateFrameTime={onUpdateFrameTime}
               onUpdateFramePrompt={onUpdateFramePrompt}
+              onInsertFrame={onInsertFrame}
               onDeleteFrame={onDeleteFrame}
               onSplitFrame={onSplitFrame}
+              onToggleUsePreviousPanelTailReference={onToggleUsePreviousPanelTailReference}
               onOpenEditModal={(panelIndex) => onOpenEditModal(storyboard.id, panelIndex)}
               onOpenAIDataModal={(panelIndex) => onOpenAIDataModal(storyboard.id, panelIndex)}
               getPanelCandidates={getPanelCandidates}
@@ -274,6 +309,7 @@ export default function StoryboardCanvas({
               movingClipId={movingClipId}
               onInsertPanel={onInsertPanel}
               onDuplicatePanel={onDuplicatePanel}
+              onMergePanelWithNext={onMergePanelWithNext}
               insertingAfterPanelId={insertingAfterPanelId}
               projectId={projectId}
               episodeId={episodeId}

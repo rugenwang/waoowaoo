@@ -68,6 +68,9 @@ export const queueRedis = singleton.queue || (singleton.queue = createQueueRedis
 export function createSubscriber() {
   const client = new Redis({
     ...buildBaseConfig(),
+    // Subscriber connections must not run normal ready-check commands such as INFO.
+    // Otherwise Redis can reject them after the connection enters subscriber mode.
+    enableReadyCheck: false,
     maxRetriesPerRequest: null,
   })
   onConnectLog('sub', client)

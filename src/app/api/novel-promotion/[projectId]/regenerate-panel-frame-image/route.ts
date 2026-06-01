@@ -9,22 +9,12 @@ import { withTaskUiPayload } from '@/lib/task/ui-payload'
 import { getProjectModelConfig, resolveProjectModelCapabilityGenerationOptions } from '@/lib/config-service'
 import { resolveModelSelection } from '@/lib/api-config'
 import { prisma } from '@/lib/prisma'
-
-function parseDependencyFrameIds(raw: string | null | undefined): number[] {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((item) => {
-        const value = typeof item === 'number' ? item : typeof item === 'string' ? Number(item) : NaN
-        return Number.isFinite(value) ? Math.floor(value) : null
-      })
-      .filter((item): item is number => item !== null && item >= 0)
-  } catch {
-    return []
-  }
-}
+import {
+  parsePanelFrameDependencyPlan,
+  serializePanelFrameDependencyPlan,
+  withPreviousTailDependency,
+} from '@/lib/novel-promotion/panel-tail-reference'
+import { loadPreviousPanelTailImageInfo } from '@/lib/novel-promotion/previous-panel-tail'
 
 function hasFrameImage(frame: { imageUrl?: string | null; imageMediaId?: string | null } | null | undefined) {
   return Boolean(
@@ -80,9 +70,18 @@ export const POST = apiHandler(async (
   if (panelIdFromBody && panelIdFromBody !== frame.panelId) {
     throw new ApiError('INVALID_PARAMS')
   }
+  const panelUsesPreviousTailAsReference = Boolean(
+    (frame.panel as { usePreviousPanelTailAsReference?: boolean }).usePreviousPanelTailAsReference,
+  )
 
   const frameByIndex = new Map(frame.panel.frames.map((item) => [item.frameIndex, item]))
-  const missingDependencyIndexes = parseDependencyFrameIds(frame.dependencyFrameIds)
+  let runtimeDependencyFrameIds = withPreviousTailDependency(
+    frame.dependencyFrameIds,
+    panelUsesPreviousTailAsReference,
+    frame.frameIndex,
+  )
+  let dependencyPlan = parsePanelFrameDependencyPlan(runtimeDependencyFrameIds)
+  const missingDependencyIndexes = dependencyPlan.frameIndexes
     .filter((dependencyIndex) => !hasFrameImage(frameByIndex.get(dependencyIndex)))
 
   if (missingDependencyIndexes.length > 0) {
@@ -92,6 +91,35 @@ export const POST = apiHandler(async (
       missingFrameIndexes: missingDependencyIndexes,
       message: `请先生成关联帧 ${missingLabels}，再重新生成 F${frame.frameIndex + 1}`,
     })
+  }
+
+  if (dependencyPlan.previousTail) {
+    const previousTailInfo = await loadPreviousPanelTailImageInfo({
+      storyboardId: frame.panel.storyboardId,
+      panelIndex: frame.panel.panelIndex,
+    })
+    if (!previousTailInfo.previousPanelExists) {
+      dependencyPlan = {
+        ...dependencyPlan,
+        previousTail: false,
+      }
+      runtimeDependencyFrameIds = serializePanelFrameDependencyPlan(dependencyPlan)
+      await prisma.novelPromotionPanelFrame.update({
+        where: { id: frame.id },
+        data: { dependencyFrameIds: runtimeDependencyFrameIds },
+      })
+      if (frame.frameIndex === 0 && panelUsesPreviousTailAsReference) {
+        await prisma.novelPromotionPanel.update({
+          where: { id: frame.panelId },
+          data: { usePreviousPanelTailAsReference: false },
+        })
+      }
+    } else if (!previousTailInfo.imageUrl) {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'PREVIOUS_PANEL_TAIL_NOT_READY',
+        message: `F${frame.frameIndex + 1} 需要参考上一分镜尾帧 FP，但上一分镜还没有可用尾帧图片`,
+      })
+    }
   }
 
   const projectModelConfig = await getProjectModelConfig(projectId, session.user.id)
