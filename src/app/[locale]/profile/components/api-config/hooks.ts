@@ -88,10 +88,11 @@ export function mergeProvidersForDisplay(
             const providerBaseUrl = providerKey === 'minimax'
                 ? matchedPreset.baseUrl
                 : (savedProvider.baseUrl || matchedPreset.baseUrl)
+            const hasLocalBaseUrl = providerKey === 'local' && !!providerBaseUrl
             merged.push({
                 ...matchedPreset,
                 apiKey,
-                hasApiKey: apiKey.length > 0,
+                hasApiKey: hasLocalBaseUrl || apiKey.length > 0,
                 hidden: savedProvider.hidden === true,
                 baseUrl: providerBaseUrl,
                 apiMode: savedProvider.apiMode,
@@ -112,7 +113,7 @@ export function mergeProvidersForDisplay(
         merged.push({
             ...presetProvider,
             apiKey: '',
-            hasApiKey: false,
+            hasApiKey: presetProvider.id === 'local' && !!presetProvider.baseUrl,
             hidden: false,
         })
     }
@@ -243,7 +244,11 @@ export function useProviders(): UseProvidersReturn {
         name: resolvePresetProviderName(provider.id, provider.name, locale),
     }))
     const [providers, setProviders] = useState<Provider[]>(
-        presetProviders.map((provider) => ({ ...provider, apiKey: '', hasApiKey: false })),
+        presetProviders.map((provider) => ({
+            ...provider,
+            apiKey: '',
+            hasApiKey: provider.id === 'local' && !!provider.baseUrl,
+        })),
     )
     const [models, setModels] = useState<CustomModel[]>(
         PRESET_MODELS.map((model) => {

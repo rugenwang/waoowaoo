@@ -11,7 +11,7 @@ interface VoiceDesignDialogProps {
   speaker: string
   hasExistingVoice?: boolean
   onClose: () => void
-  onSave: (voiceId: string, audioBase64: string) => void
+  onSave: (voiceId: string, audioBase64: string, voicePrompt?: string) => void
   projectId: string
 }
 

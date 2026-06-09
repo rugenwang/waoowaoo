@@ -173,3 +173,65 @@ export function useUpdateProjectPanelDuration(projectId: string) {
     },
   })
 }
+
+export function useExtractProjectPanelVocals(projectId: string) {
+  return useMutation({
+    mutationFn: async (payload: {
+      panelId: string
+      startSec: number
+      endSec: number
+    }) =>
+      await requestJsonWithError<{
+        success: boolean
+        audioKey: string
+        audioUrl: string
+        mediaId: string
+        dialogueTaskId?: string
+        startSec: number
+        endSec: number
+      }>(
+        `/api/novel-promotion/${projectId}/panel-dubbing/extract-vocals`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+        '提取人声失败',
+      ),
+  })
+}
+
+export function useCloneProjectPanelDubbing(projectId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (payload: {
+      panelId: string
+      mode: 'video-vocal' | 'character-voice'
+      text: string
+      promptText?: string
+      sourceAudioKey?: string
+      characterId?: string
+    }) =>
+      await requestJsonWithError<{
+        success: boolean
+        audioKey: string
+        audioUrl: string
+        mediaId: string
+        sourceType: string
+        meta?: Record<string, unknown>
+      }>(
+        `/api/novel-promotion/${projectId}/panel-dubbing/clone`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+        '视频配音失败',
+      ),
+    onSettled: async () => {
+      await invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+      await queryClient.invalidateQueries({ queryKey: ['episode-data', projectId], exact: false })
+    },
+  })
+}

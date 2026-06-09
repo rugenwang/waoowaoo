@@ -41,7 +41,11 @@ export function mergeLocaleHeader(init?: RequestInit): RequestInit {
   if (!headers.has('Accept-Language')) {
     headers.set('Accept-Language', getPageLocale())
   }
-  return { ...init, headers }
+  return {
+    ...init,
+    headers,
+    credentials: init?.credentials ?? 'same-origin',
+  }
 }
 
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {

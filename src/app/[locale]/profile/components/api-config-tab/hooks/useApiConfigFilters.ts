@@ -20,8 +20,10 @@ const HIDDEN_PROVIDER_KEYS = new Set(['siliconflow'])
 const PROVIDER_MODEL_TYPES: Array<'llm' | 'image' | 'video' | 'audio' | 'lipsync'> = ['llm', 'image', 'video', 'audio', 'lipsync']
 const DEFAULT_AUDIO_EXCLUDED_MODEL_IDS = new Set([
   'qwen-voice-design',
+  'local/voxcpm-voice-design',
 ])
 const MODEL_PROVIDER_KEYS = [
+  'local',
   'ark',
   'google',
   'bailian',
@@ -49,6 +51,10 @@ function isAudioDefaultCandidate(model: CustomModel): boolean {
 
 function hasProviderApiKey(provider: Provider | undefined): boolean {
   if (!provider) return false
+  if (getProviderKey(provider.id) === 'local') {
+    const baseUrl = typeof provider.baseUrl === 'string' ? provider.baseUrl.trim() : ''
+    return baseUrl.length > 0
+  }
   if (provider.hasApiKey === true) return true
   const apiKey = typeof provider.apiKey === 'string' ? provider.apiKey.trim() : ''
   return apiKey.length > 0

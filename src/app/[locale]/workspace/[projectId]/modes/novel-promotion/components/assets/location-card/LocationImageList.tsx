@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
 import { resolveErrorDisplay } from '@/lib/errors/display'
 import TaskStatusOverlay from '@/components/task/TaskStatusOverlay'
@@ -8,6 +8,7 @@ import type { TaskPresentationState } from '@/lib/task/presentation'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import { AppIcon } from '@/components/ui/icons'
 import ImageGenerationSlotOverlay from '@/components/image-generation/ImageGenerationSlotOverlay'
+import { downloadRemoteFile } from '@/lib/media/download-remote-file'
 import {
   countGeneratedImageSlots,
   resolveGroupedImageSlotPhase,
@@ -52,6 +53,13 @@ type LocationImageListProps =
 
 export default function LocationImageList(props: LocationImageListProps) {
   const t = useTranslations('assets')
+  const handleDownload = (event: MouseEvent, url: string, fileName: string) => {
+    event.stopPropagation()
+    void downloadRemoteFile(url, fileName).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      alert(t('assetLibrary.downloadFailed') + (message ? `: ${message}` : ''))
+    })
+  }
 
   if (props.mode === 'selection') {
     const generatedCount = countGeneratedImageSlots(props.images)
@@ -132,22 +140,38 @@ export default function LocationImageList(props: LocationImageListProps) {
                   )}
                 </div>
 
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    if (phase !== 'generating' && phase !== 'regenerating' && img.imageUrl) {
-                      props.onSelectImage?.(props.locationId, isThisSelected ? null : img.imageIndex)
-                    }
-                  }}
-                  disabled={phase === 'generating' || phase === 'regenerating' || !img.imageUrl}
-                  className={`absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm ${isThisSelected
-                    ? 'bg-[var(--glass-tone-success-fg)] text-white'
-                    : 'bg-[var(--glass-bg-surface-strong)] hover:bg-[var(--glass-accent-from)] hover:text-white'
-                    } disabled:opacity-50`}
-                  title={isThisSelected ? t('image.cancelSelection') : t('image.useThis')}
-                >
-                  <AppIcon name="check" className="w-4 h-4" />
-                </button>
+                <div className="absolute top-2 right-2 z-20 flex items-center gap-1">
+                  {img.imageUrl && (
+                    <button
+                      onClick={(event) => handleDownload(
+                        event,
+                        img.imageUrl!,
+                        `${props.locationName}-${t('image.optionNumber', { number: img.imageIndex + 1 })}`,
+                      )}
+                      disabled={phase === 'generating' || phase === 'regenerating'}
+                      className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--glass-bg-surface-strong)] text-[var(--glass-text-secondary)] shadow-sm transition-all hover:bg-[var(--glass-accent-from)] hover:text-white disabled:opacity-50"
+                      title={t('common.download')}
+                    >
+                      <AppIcon name="download" className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (phase !== 'generating' && phase !== 'regenerating' && img.imageUrl) {
+                        props.onSelectImage?.(props.locationId, isThisSelected ? null : img.imageIndex)
+                      }
+                    }}
+                    disabled={phase === 'generating' || phase === 'regenerating' || !img.imageUrl}
+                    className={`flex h-7 w-7 items-center justify-center rounded-full shadow-sm transition-all ${isThisSelected
+                      ? 'bg-[var(--glass-tone-success-fg)] text-white'
+                      : 'bg-[var(--glass-bg-surface-strong)] hover:bg-[var(--glass-accent-from)] hover:text-white'
+                      } disabled:opacity-50`}
+                    title={isThisSelected ? t('image.cancelSelection') : t('image.useThis')}
+                  >
+                    <AppIcon name="check" className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           )
@@ -195,9 +219,19 @@ export default function LocationImageList(props: LocationImageListProps) {
         <TaskStatusOverlay state={props.displayTaskPresentation} />
       )}
       {!props.isTaskRunning && (
-        <div className="absolute top-2 left-2 flex gap-1">
+        <div className="absolute top-2 left-2 z-20 flex max-w-[calc(100%-1rem)] flex-wrap gap-1">
           {props.overlayActions}
         </div>
+      )}
+      {!props.isTaskRunning && props.currentImageUrl && (
+        <button
+          type="button"
+          onClick={(event) => handleDownload(event, props.currentImageUrl!, props.locationName)}
+          className="absolute bottom-2 right-2 z-20 flex h-7 w-7 items-center justify-center rounded-full bg-[var(--glass-bg-surface-strong)] text-[var(--glass-text-secondary)] shadow-sm transition-all hover:bg-[var(--glass-accent-from)] hover:text-white"
+          title={t('common.download')}
+        >
+          <AppIcon name="download" className="h-4 w-4" />
+        </button>
       )}
     </div>
   )

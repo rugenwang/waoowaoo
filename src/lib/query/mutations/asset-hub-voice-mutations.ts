@@ -7,6 +7,10 @@ import {
 } from './mutation-shared'
 import { invalidateGlobalVoices } from './asset-hub-mutations-shared'
 
+function resolveDesignedVoiceType(voiceId: string): string {
+  return voiceId.startsWith('local-voxcpm:') ? 'local-voxcpm' : 'qwen-designed'
+}
+
 export function useDeleteVoice() {
   const queryClient = useQueryClient()
   const invalidateVoices = () => invalidateGlobalVoices(queryClient)
@@ -80,7 +84,7 @@ export function useSaveDesignedAssetHubVoice() {
           description: null,
           folderId: payload.folderId,
           voiceId: payload.voiceId,
-          voiceType: 'qwen-designed',
+          voiceType: resolveDesignedVoiceType(payload.voiceId),
           customVoiceUrl: uploadData.key,
           voicePrompt: payload.voicePrompt,
           gender: null,

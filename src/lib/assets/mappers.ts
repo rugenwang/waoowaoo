@@ -33,8 +33,9 @@ type ProjectCharacterRecord = {
   name: string
   introduction?: string | null
   profileData?: string | null
-  voiceType?: 'custom' | 'qwen-designed' | 'uploaded' | null
+  voiceType?: 'custom' | 'qwen-designed' | 'uploaded' | 'local-voxcpm' | null
   voiceId?: string | null
+  voicePrompt?: string | null
   customVoiceUrl?: string | null
   media?: MediaRef | null
   profileConfirmed?: boolean | null
@@ -45,6 +46,9 @@ type GlobalCharacterRecord = {
   id: string
   name: string
   folderId: string | null
+  voiceId?: string | null
+  voiceType?: 'custom' | 'qwen-designed' | 'uploaded' | 'local-voxcpm' | null
+  voicePrompt?: string | null
   customVoiceUrl: string | null
   media?: MediaRef | null
   appearances: Array<{
@@ -163,6 +167,7 @@ export function mapProjectCharacterToAsset(character: ProjectCharacterRecord): C
   const normalizedVoiceType = character.voiceType === 'custom'
     || character.voiceType === 'qwen-designed'
     || character.voiceType === 'uploaded'
+    || character.voiceType === 'local-voxcpm'
     ? character.voiceType
     : null
   const variants = character.appearances.map((appearance) => {
@@ -229,6 +234,7 @@ export function mapProjectCharacterToAsset(character: ProjectCharacterRecord): C
       voiceType: normalizedVoiceType,
       voiceId: character.voiceId ?? null,
       customVoiceUrl: character.customVoiceUrl ?? null,
+      voicePrompt: character.voicePrompt ?? null,
       media: character.media ?? null,
     },
   }
@@ -236,6 +242,12 @@ export function mapProjectCharacterToAsset(character: ProjectCharacterRecord): C
 
 export function mapGlobalCharacterToAsset(character: GlobalCharacterRecord): CharacterAssetSummary {
   const registration = getAssetKindRegistration('character')
+  const normalizedVoiceType = character.voiceType === 'custom'
+    || character.voiceType === 'qwen-designed'
+    || character.voiceType === 'uploaded'
+    || character.voiceType === 'local-voxcpm'
+    ? character.voiceType
+    : null
   const variants = character.appearances.map((appearance) => {
     const imageMedias = appearance.imageMedias ?? []
     const previousImageMedias = appearance.previousImageMedias ?? []
@@ -297,9 +309,10 @@ export function mapGlobalCharacterToAsset(character: GlobalCharacterRecord): Cha
     profileTaskRefs: [],
     profileTaskState: createIdleTaskState(),
     voice: {
-      voiceType: null,
-      voiceId: null,
+      voiceType: normalizedVoiceType,
+      voiceId: character.voiceId ?? null,
       customVoiceUrl: character.customVoiceUrl,
+      voicePrompt: character.voicePrompt ?? null,
       media: character.media ?? null,
     },
   }

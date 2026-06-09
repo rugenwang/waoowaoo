@@ -5,7 +5,10 @@ import {
   validateVoicePrompt,
   type VoiceDesignInput,
 } from '@/lib/providers/bailian/voice-design'
-import { getProviderConfig } from '@/lib/api-config'
+import { getProviderConfig, getProviderKey, resolveModelSelectionOrSingle } from '@/lib/api-config'
+import { createLocalVoxCPMVoiceDesign } from '@/lib/providers/local-voxcpm/voice'
+import { prisma } from '@/lib/prisma'
+import { logInfo as _ulogInfo } from '@/lib/logging/core'
 import { reportTaskProgress } from '@/lib/workers/shared'
 import { assertTaskActive } from '@/lib/workers/utils'
 import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
@@ -46,14 +49,35 @@ export async function handleVoiceDesignTask(job: Job<TaskJobData>) {
   })
   await assertTaskActive(job, 'voice_design_submit')
 
-  const { apiKey } = await getProviderConfig(job.data.userId, 'bailian')
   const input: VoiceDesignInput = {
     voicePrompt,
     previewText,
     preferredName,
     language,
   }
-  const designed = await createVoiceDesign(input, apiKey)
+  const pref = await prisma.userPreference.findUnique({
+    where: { userId: job.data.userId },
+    select: { voiceDesignModel: true },
+  })
+  const selectedVoiceDesignModel = typeof pref?.voiceDesignModel === 'string' && pref.voiceDesignModel.trim()
+    ? pref.voiceDesignModel.trim()
+    : ''
+  const modelSelection = selectedVoiceDesignModel
+    ? await resolveModelSelectionOrSingle(job.data.userId, selectedVoiceDesignModel, 'audio')
+    : null
+  const providerId = modelSelection?.provider || 'bailian'
+  const providerKey = getProviderKey(providerId).toLowerCase()
+  const providerConfig = await getProviderConfig(job.data.userId, providerId)
+  _ulogInfo('[VoiceDesign] resolved provider:', {
+    taskId: job.id,
+    providerId,
+    providerKey,
+    modelKey: modelSelection?.modelKey || null,
+    baseUrl: providerConfig.baseUrl || null,
+  })
+  const designed = providerKey === 'local'
+    ? await createLocalVoxCPMVoiceDesign(input, providerConfig.baseUrl, providerConfig.apiKey)
+    : await createVoiceDesign(input, providerConfig.apiKey)
   if (!designed.success) {
     throw new Error(designed.error || '声音设计失败')
   }

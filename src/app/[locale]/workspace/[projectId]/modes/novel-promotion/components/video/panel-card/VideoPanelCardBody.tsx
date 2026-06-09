@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import RegenerateVideoPromptModal from '../../RegenerateVideoPromptModal'
+import PanelDubbingDialog from './PanelDubbingDialog'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapabilityDropdown'
@@ -38,6 +39,7 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
   const [isEditingDuration, setIsEditingDuration] = useState(false)
   const [editingDuration, setEditingDuration] = useState<string>('')
   const [promptModalOpen, setPromptModalOpen] = useState(false)
+  const [dubbingMode, setDubbingMode] = useState<'video-vocal' | 'character-voice' | null>(null)
   const [promptRequirement, setPromptRequirement] = useState('')
   const [promptCandidate, setPromptCandidate] = useState<string | null>(null)
   const durationSuffix = useMemo(() => t('promptModal.duration'), [t])
@@ -104,6 +106,10 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
   }
 
   const isFirstLastFrameGenerated = panel.videoGenerationMode === 'firstlastframe' && !!panel.videoUrl
+  const hasDialogueForDubbing = voiceManager.localVoiceLines.length > 0
+  const panelDubbingAudioSrc = panel.panelId
+    ? `/api/novel-promotion/${encodeURIComponent(layout.projectId)}/panel-dubbing/audio?panelId=${encodeURIComponent(panel.panelId)}&v=${encodeURIComponent(panel.dubbingAudioUrl || '')}`
+    : panel.dubbingAudioUrl || ''
   const showsIncomingLinkBadge = layout.isLastFrame && !!layout.prevPanel
   const showsOutgoingLinkBadge = layout.isLinked && !!layout.nextPanel
   const showsPromptEditor = !layout.isLastFrame || layout.isLinked
@@ -442,6 +448,39 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                       </div>
                     )}
 
+                    {hasDialogueForDubbing && (
+                      <div className="mt-2 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-2">
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          {panel.videoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setDubbingMode('video-vocal')}
+                              className="inline-flex items-center gap-1 rounded-lg bg-[var(--glass-accent-from)] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--glass-accent-to)]"
+                            >
+                              <AppIcon name="audioWave" className="h-3.5 w-3.5" />
+                              视频配音
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setDubbingMode('character-voice')}
+                            className="inline-flex items-center gap-1 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--glass-text-secondary)] transition hover:border-[var(--glass-tone-info-fg)] hover:text-[var(--glass-tone-info-fg)]"
+                          >
+                            <AppIcon name="mic" className="h-3.5 w-3.5" />
+                            角色视频配音
+                          </button>
+                        </div>
+                        {panel.dubbingAudioUrl && (
+                          <div className="space-y-1">
+                            <div className="text-[10px] text-[var(--glass-text-tertiary)]">
+                              当前配音音频{panel.dubbingSourceType === 'video-vocal' ? ' · 视频人声' : panel.dubbingSourceType === 'character-voice' ? ' · 角色音色' : ''}
+                            </div>
+                            <audio controls preload="metadata" src={panelDubbingAudioSrc} className="h-10 w-full" />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {voiceManager.localVoiceLines.length > 0 && (
                       <div className="mt-2 space-y-1">
                         {voiceManager.localVoiceLines.map((voiceLine) => {
@@ -513,6 +552,16 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
               onGenerate={() => void handleGenerateVideoPromptCandidate()}
               onUseCandidate={() => void handleUseVideoPromptCandidate()}
             />
+      {dubbingMode && (
+        <PanelDubbingDialog
+          open={!!dubbingMode}
+          mode={dubbingMode}
+          projectId={layout.projectId}
+          panel={panel}
+          voiceLines={voiceManager.localVoiceLines}
+          onClose={() => setDubbingMode(null)}
+        />
+      )}
     </div>
   )
 }

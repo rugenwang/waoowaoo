@@ -239,7 +239,7 @@
         "generateSchemesSuffix": "个声音方案",
         "schemeCountAriaLabel": "生成声音方案数量",
         "editPreviewText": "修改预览文本",
-        "generating3Schemes": "正在生成 3 个声音方案...",
+        "generating3Schemes": "正在生成声音方案...",
         "estimatedTime": "预计 15-30 秒",
         "selectScheme": "选择声音方案：",
         "schemeN": "方案 {n}",

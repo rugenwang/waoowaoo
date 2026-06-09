@@ -8,6 +8,7 @@ import type { Character, CharacterAppearance, Location } from '@/types/project'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import { AppIcon } from '@/components/ui/icons'
 import ImagePreviewModal from '@/components/ui/ImagePreviewModal'
+import { safePlayMedia } from '@/lib/media/safe-play'
 
 
 type SpotlightCharCardProps = {
@@ -63,8 +64,11 @@ export function SpotlightCharCard({
       setAudioRef(null)
     }
 
-    audio.play()
     setIsPlaying(true)
+    void safePlayMedia(audio).catch(() => {
+      setIsPlaying(false)
+      setAudioRef(null)
+    })
   }
 
   useEffect(() => {

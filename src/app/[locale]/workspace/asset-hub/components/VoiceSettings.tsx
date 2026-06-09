@@ -8,6 +8,7 @@
 import { useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { shouldShowError } from '@/lib/error-utils'
+import { safePlayMedia } from '@/lib/media/safe-play'
 import { useUploadCharacterVoice } from '@/lib/query/mutations'
 import { AppIcon } from '@/components/ui/icons'
 
@@ -60,10 +61,10 @@ export default function VoiceSettings({
             }
             const audio = new Audio(customVoiceUrl)
             audioRef.current = audio
-            audio.play()
             audio.onended = () => setIsPreviewingVoice(false)
             audio.onerror = () => setIsPreviewingVoice(false)
-            setIsPreviewingVoice(true)
+            const played = await safePlayMedia(audio)
+            setIsPreviewingVoice(played)
         } catch (error: unknown) {
             if (shouldShowError(error)) {
                 const message = error instanceof Error ? error.message : String(error)

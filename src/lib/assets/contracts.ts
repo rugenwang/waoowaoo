@@ -79,9 +79,10 @@ export type CharacterAssetSummary = BaseAssetSummary & {
   profileTaskRefs: AssetTaskRef[]
   profileTaskState: AssetTaskState
   voice: {
-    voiceType: 'custom' | 'qwen-designed' | 'uploaded' | null
+    voiceType: 'custom' | 'qwen-designed' | 'uploaded' | 'local-voxcpm' | null
     voiceId: string | null
     customVoiceUrl: string | null
+    voicePrompt?: string | null
     media: MediaRef | null
   }
 }

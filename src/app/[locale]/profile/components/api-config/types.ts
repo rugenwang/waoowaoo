@@ -163,6 +163,8 @@ export const PRESET_MODELS: PresetModel[] = [
     { modelId: 'fal-ai/kling-video/v3/pro/image-to-video', name: 'Kling 3 Pro', type: 'video', provider: 'fal' },
 
     // 音频模型
+    { modelId: 'local/voxcpm-tts', name: 'Local VoxCPM TTS', type: 'audio', provider: 'local' },
+    { modelId: 'local/voxcpm-voice-design', name: 'Local VoxCPM Voice Design', type: 'audio', provider: 'local' },
     { modelId: 'fal-ai/index-tts-2/text-to-speech', name: 'IndexTTS 2', type: 'audio', provider: 'fal' },
     { modelId: 'qwen3-tts-vd-2026-01-26', name: 'Qwen3 TTS', type: 'audio', provider: 'bailian' },
     { modelId: 'qwen-voice-design', name: 'Qwen Voice Design', type: 'audio', provider: 'bailian' },

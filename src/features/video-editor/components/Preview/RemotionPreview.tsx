@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import { Player, PlayerRef } from '@remotion/player'
 import { prefetch } from 'remotion'
 import { AppIcon } from '@/components/ui/icons'
+import { isMediaPlayInterruptedError } from '@/lib/media/safe-play'
 import { VideoComposition } from '../../remotion/VideoComposition'
 import { VideoEditorProject } from '../../types/editor.types'
 import { calculateTimelineDuration } from '../../utils/time-utils'
@@ -119,7 +120,11 @@ export const RemotionPreview: React.FC<RemotionPreviewProps> = ({
         if (!player) return
 
         if (playing) {
-            player.play()
+            void Promise.resolve(player.play()).catch((error) => {
+                if (!isMediaPlayInterruptedError(error)) {
+                    onPlayingChange?.(false)
+                }
+            })
         } else {
             player.pause()
         }

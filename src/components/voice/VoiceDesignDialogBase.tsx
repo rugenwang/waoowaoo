@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
+import { safePlayMedia } from '@/lib/media/safe-play'
 import { AppIcon } from '@/components/ui/icons'
 import VoiceDesignGeneratorSection from './VoiceDesignGeneratorSection'
 import {
@@ -21,7 +22,7 @@ interface VoiceDesignDialogBaseProps {
   speaker: string
   hasExistingVoice?: boolean
   onClose: () => void
-  onSave: (voiceId: string, audioBase64: string) => void
+  onSave: (voiceId: string, audioBase64: string, voicePrompt?: string) => void
   onDesignVoice: (payload: VoiceDesignMutationPayload) => Promise<VoiceDesignMutationResult>
 }
 
@@ -107,7 +108,7 @@ export default function VoiceDesignDialogBase({
     audioRef.current = audio
     audio.onended = () => setPlayingIndex(null)
     audio.onerror = () => setPlayingIndex(null)
-    void audio.play()
+    void safePlayMedia(audio).catch(() => setPlayingIndex(null))
   }
 
   const handleConfirmSelection = () => {
@@ -123,7 +124,7 @@ export default function VoiceDesignDialogBase({
   const doSave = () => {
     if (selectedIndex !== null && generatedVoices[selectedIndex]) {
       const voice = generatedVoices[selectedIndex]
-      onSave(voice.voiceId, voice.audioBase64)
+      onSave(voice.voiceId, voice.audioBase64, voicePrompt.trim())
       handleClose()
     }
   }

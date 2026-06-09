@@ -63,9 +63,10 @@ export interface Character {
   introduction?: string | null      // 角色介绍（叙述视角、称呼映射等）
   appearances: CharacterAppearance[]  // 独立表关联
   // 配音音色设置
-  voiceType?: 'custom' | 'qwen-designed' | 'uploaded' | null  // 音色类型
+  voiceType?: 'custom' | 'qwen-designed' | 'uploaded' | 'local-voxcpm' | null  // 音色类型
   voiceId?: string | null                 // 音色 ID 或业务标识
   customVoiceUrl?: string | null          // 自定义上传的参考音频URL
+  voicePrompt?: string | null             // AI 设计音色时的原始提示词
   media?: MediaRef | null
   // 角色档案（两阶段生成）
   profileData?: string | null             // JSON格式的角色档案

@@ -56,7 +56,7 @@ export function useTTSGeneration({
         try {
             await updateVoiceSettingsMutation.mutateAsync({
                 characterId,
-                voiceType: voiceType as 'qwen-designed' | 'uploaded' | 'custom' | null,
+                voiceType: voiceType as 'qwen-designed' | 'uploaded' | 'custom' | 'local-voxcpm' | null,
                 voiceId,
                 customVoiceUrl,
             })
@@ -79,7 +79,7 @@ export function useTTSGeneration({
     }
 
     // 保存 AI 设计的声音
-    const handleVoiceDesignSave = async (voiceId: string, audioBase64: string) => {
+    const handleVoiceDesignSave = async (voiceId: string, audioBase64: string, voicePrompt?: string) => {
         if (!voiceDesignCharacter) return
 
         try {
@@ -87,6 +87,7 @@ export function useTTSGeneration({
                 characterId: voiceDesignCharacter.id,
                 voiceId,
                 audioBase64,
+                voicePrompt,
             })
             refreshAssets()
             alert(t('tts.voiceDesignSaved', { name: voiceDesignCharacter.name }))

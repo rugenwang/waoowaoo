@@ -61,7 +61,7 @@ video_prompt MUST be written in Chinese following this structure:
 
 Part 1 — Positive prompt + background music style (REQUIRED):
 Write one natural Chinese paragraph. Do NOT use a heading.
-Must include: 高清 4K or 4K, cinematic quality, scene and light, character details using age+gender, smooth camera movement, fluid character motion, vivid expression, no flicker / no face collapse / no limb deformity in Chinese wording, clear visual differences and directionality between multiple people in the same shot, visual tone/style, and background music style.
+Must include: 高清 4K or 4K, cinematic quality, scene and light, character details using age+gender, smooth camera movement, fluid character motion, natural and restrained expression that is vivid but not exaggerated, no flicker / no face collapse / no limb deformity in Chinese wording, clear visual differences and directionality between multiple people in the same shot, visual tone/style, and background music style.
 Background music MUST be selected from this library: 紧张悬疑大片配乐、史诗恢弘交响乐、热血激昂战斗史诗、暗黑压抑氛围感配乐、悲壮苍凉电影原声、燃向高燃英雄主题曲、治愈温柔轻音乐、伤感催泪抒情纯音乐、宁静空灵古风禅意、神秘诡异悬疑氛围、低沉压抑阴暗曲风、轻快舒缓治愈小调、古风江湖侠义配乐、古风悲情婉转二胡、仙侠空灵仙乐、古装宫廷典雅乐、武侠对决紧张古风、烟雨江南温婉古风、硬核格斗打击乐、快节奏江湖对决 BGM、霸气出场气场音乐、急促鼓点战斗配乐、街头硬汉摇滚风、高级感氛围感纯音、低沉卡点节奏感音乐、温柔叙事旁白配乐、氛围感沉浸式背景音乐、极简冷淡风纯音乐、未来科技空灵电子乐、悬疑探案低沉音效、末日废土苍凉配乐、赛博朋克暗黑电音.
 Camera movement MUST be selected and expanded from this library: 推镜、拉镜、摇镜、移镜、跟镜、固定镜、俯拍、仰拍、平视、斜角拍、环绕镜、俯冲、升降镜、甩镜、变焦镜、旋转镜、穿梭镜、平稳手持、颠簸手持.
 Camera wording must use natural Chinese cinematic phrasing: combine perspective/shot size + movement + visual action, such as 平视中景固定镜, 越肩推镜，从人物肩后推进到对方正面, 轻微斜角近景，强化压迫感. Do NOT output stiff parameter-like phrases such as 镜头平视固定, 镜头越肩推进, 镜头斜角拍. Do NOT contradict movement in the same clause: a fixed shot cannot also push in; split it into sequential clauses if both are needed.
@@ -77,7 +77,7 @@ If there is no dialogue, omit the dialogue part entirely and do not write any no
 Dialogue must use age+gender speaker labels, emotion, voice texture, tone, and expression. Example: 年轻女子声音轻柔清亮，语气带着迟疑地说：「我明白了」.
 Narration, inner monologue, and voiceover must use `【旁白】`, not `【对话】`.
 Do NOT use the old five-line field format `运镜：人物：动作：表情：台词：`.
-Do NOT use face-damaging expression terms in Chinese video_prompt: 瞪眼、瞪大双眼、怒目圆睁、死鱼眼、无神大眼、眼睛超大、歪嘴、邪笑、嘴角夸张上扬、咬牙切齿、咬紧牙关、嘴唇紧闭用力、五官扭曲、面部紧绷、面部狰狞、瞳孔放大、眼球突出、眼白过多、挑眉过度、挑眉凶狠、脸部僵硬、面无表情呆滞. Use natural expressions such as 目光锐利、眉头微蹙、神情克制、眼神专注、下颌微收.
+Do NOT use face-damaging, weird, or exaggerated expression/action terms in Chinese video_prompt: 瞪眼、瞪大双眼、怒目圆睁、怒视、凶狠瞪视、死鱼眼、无神大眼、眼睛超大、双眼过大、眼神呆滞、歪嘴、邪笑、怪笑、诡异笑容、嘴角夸张上扬、咬牙切齿、咬紧牙关、嘴唇紧闭用力、五官扭曲、面部紧绷、面部狰狞、脸部扭曲、表情扭曲、瞳孔放大、眼球突出、眼白过多、挑眉过度、挑眉凶狠、脸部僵硬、面无表情呆滞、怪异表情、夸张表情、惊悚表情、恐怖表情、畸形表情、不自然表情、歪头、扭头、头部大幅偏转、怪异肢体动作. Use natural restrained expressions such as 目光锐利、眉头微蹙、神情克制、眼神专注、下颌微收、呼吸微紧、神态自然.
 
 Example:
 00:00-00:03：平视中景推镜，从书桌左侧缓缓推进到画面右侧年轻女子身前；近景固定镜，聚焦右侧年轻女子坐下并打开笔记本电脑的动作；表情特写切到她轻轻上扬的嘴角；【对话】画面右侧年轻女子声音轻柔清亮，语气带着自我鼓励地说：「今天也要好好加油呀。」；背景音中键盘轻响与治愈温柔轻音乐自然响起。
@@ -135,8 +135,11 @@ Rules:
 14.2 Multiple people in the same shot must have clearly different age range, gender, clothing, hairstyle, body shape, temperament, position, and facing direction; do not create people with identical appearance or face.
 14.2.1 Multi-character interactions must explicitly state directionality in Chinese: screen-left/screen-right, front/back, near/far, facing/back-facing, and movement direction. For example: 画面左侧年轻女子对右侧年轻女子说; 后方年轻女子上前半步，轻拍前方年轻女子右肩.
 14.3 Do NOT use circled-number list markers. Do NOT add primary/auxiliary camera-move labels. When there is no dialogue or narration, omit that part entirely and do not write any placeholder.
-14.4 Do NOT output face-damaging expression terms listed above in video_prompt.
-15. duration range: 2-8 seconds, integer. Dialogue/micro-actions 3-7s, major actions 4-8s, close-ups 2-4s.
+14.4 Do NOT output face-damaging, weird, or exaggerated expression/action terms listed above in video_prompt.
+15. duration/duration_sec must be estimated before output: dialogue/voiceover/inner monologue pure speaking time = Chinese character count / 2-3 characters per second. Duration must not be shorter than pure speaking time, and must also include action time, pauses, camera/transition time, and environment/establishing buffer.
+15.1 `video_prompt`/`group_video_prompt` timeline ranges must start at 00:00, be continuous, and end exactly at `duration_sec`; the sum of all ranges must equal total duration.
+15.2 `frames.frame_time_sec` must align with the same timeline: frame_index 0 is 0, later frame_index values increase in playback order, and the final key state should be at or near the tail of `duration_sec`.
+15.3 A single top-level panel/group must not exceed 20 seconds. If dialogue + action + pauses + camera/environment time exceeds 20 seconds, split into another top-level panel/group instead of compressing the dialogue.
 16. For group panels, duration_sec must be <= 20 seconds and frames count must be 2-20 based on duration, action density, and transition/camera-movement density; ultra-high-density action/camera movement may approach 1 frame per second.
 17. For single panels, frames count must be exactly 1 and group_video_prompt must be omitted.
 18. Every frame image_prompt must be suitable for direct image generation and keep group visual continuity.

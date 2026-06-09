@@ -38,6 +38,7 @@ export interface PanelLike {
   sketchImageUrl: string | null
   videoUrl: string | null
   lipSyncVideoUrl: string | null
+  dubbingAudioUrl?: string | null
   candidateImages: string | null
   panelImageHistory?: string | null
   imageHistory?: string | null
@@ -180,6 +181,9 @@ export function addSignedUrlsToStoryboard(storyboard: StoryboardLike) {
         lipSyncVideoUrl: dbPanel.lipSyncVideoUrl && !dbPanel.lipSyncVideoUrl.startsWith('http')
           ? getSignedUrl(dbPanel.lipSyncVideoUrl, 7200)
           : dbPanel.lipSyncVideoUrl,
+        dubbingAudioUrl: typeof dbPanel.dubbingAudioUrl === 'string' && dbPanel.dubbingAudioUrl && !dbPanel.dubbingAudioUrl.startsWith('http')
+          ? getSignedUrl(dbPanel.dubbingAudioUrl, 7200)
+          : dbPanel.dubbingAudioUrl,
         candidateImages: signedCandidateImages,
         historyCount: panelHistoryCount,
       }

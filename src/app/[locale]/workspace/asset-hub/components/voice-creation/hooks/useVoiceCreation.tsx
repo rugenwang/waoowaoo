@@ -7,6 +7,7 @@ import {
     useSaveDesignedAssetHubVoice,
     useUploadAssetHubVoice,
 } from '@/lib/query/hooks'
+import { safePlayMedia } from '@/lib/media/safe-play'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import {
     DEFAULT_VOICE_SCHEME_COUNT,
@@ -126,7 +127,7 @@ export function useVoiceCreation({ isOpen, folderId, onClose, onSuccess, initial
         audioRef.current = audio
         audio.onended = () => setPlayingIndex(null)
         audio.onerror = () => setPlayingIndex(null)
-        void audio.play()
+        void safePlayMedia(audio).catch(() => setPlayingIndex(null))
     }
 
     // 保存音色到音色库（设计模式）
@@ -220,7 +221,7 @@ export function useVoiceCreation({ isOpen, folderId, onClose, onSuccess, initial
         }
         const audio = new Audio(uploadPreviewUrl)
         audioRef.current = audio
-        audio.play()
+        void safePlayMedia(audio).catch(() => undefined)
     }
 
     // 上传文件保存

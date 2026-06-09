@@ -5,6 +5,25 @@ import { uploadObject, generateUniqueKey, getSignedUrl } from '@/lib/storage'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 
+const MAX_VOICE_ID_LENGTH = 191
+
+function resolveDesignedVoiceType(voiceId: unknown): string {
+  return typeof voiceId === 'string' && voiceId.startsWith('local-voxcpm:')
+    ? 'local-voxcpm'
+    : 'qwen-designed'
+}
+
+function normalizeVoiceId(value: unknown): string {
+  const voiceId = typeof value === 'string' ? value.trim() : ''
+  if (!voiceId || voiceId.length > MAX_VOICE_ID_LENGTH) {
+    throw new ApiError('INVALID_PARAMS', {
+      message: '音色ID过长，请重启本地语音服务后重新设计声音',
+      field: 'voiceId',
+    })
+  }
+  return voiceId
+}
+
 /**
  * PATCH /api/novel-promotion/[projectId]/character-voice
  * 更新角色的配音音色设置
@@ -67,10 +86,12 @@ export const POST = apiHandler(async (
       throw new ApiError('INVALID_PARAMS')
     }
 
-    const { voiceId, audioBase64 } = voiceDesign
-    if (!voiceId || !audioBase64) {
+    const { voiceId: rawVoiceId, audioBase64 } = voiceDesign
+    const voicePrompt = typeof voiceDesign.voicePrompt === 'string' ? voiceDesign.voicePrompt.trim() : ''
+    if (!rawVoiceId || !audioBase64) {
       throw new ApiError('INVALID_PARAMS')
     }
+    const voiceId = normalizeVoiceId(rawVoiceId)
 
     // 解码 base64 音频
     const audioBuffer = Buffer.from(audioBase64, 'base64')
@@ -83,9 +104,10 @@ export const POST = apiHandler(async (
     const character = await prisma.novelPromotionCharacter.update({
       where: { id: characterId },
       data: {
-        voiceType: 'qwen-designed',
+        voiceType: resolveDesignedVoiceType(voiceId),
         voiceId: voiceId,  // 保存 AI 生成的 voice ID
-        customVoiceUrl: cosUrl
+        customVoiceUrl: cosUrl,
+        voicePrompt: voicePrompt || null
       }
     })
 
@@ -136,7 +158,8 @@ export const POST = apiHandler(async (
     data: {
       voiceType: 'uploaded',
       voiceId: null,
-      customVoiceUrl: audioUrl
+      customVoiceUrl: audioUrl,
+      voicePrompt: null
     }
   })
 

@@ -104,6 +104,9 @@ export function useVideoPanelsProjection({
             panelLipState?.phase === 'failed'
               ? panelLipState.lastError?.message || panel.lipSyncErrorMessage || undefined
               : panel.lipSyncErrorMessage || undefined,
+          dubbingAudioUrl: panel.dubbingAudioUrl || undefined,
+          dubbingSourceType: panel.dubbingSourceType || undefined,
+          dubbingMetaJson: panel.dubbingMetaJson || undefined,
         })
       })
     })

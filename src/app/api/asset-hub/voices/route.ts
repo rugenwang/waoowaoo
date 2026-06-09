@@ -5,6 +5,20 @@ import { ApiError, apiHandler } from '@/lib/api-errors'
 import { attachMediaFieldsToGlobalVoice } from '@/lib/media/attach'
 import { resolveMediaRefFromLegacyValue } from '@/lib/media/service'
 
+const MAX_VOICE_ID_LENGTH = 191
+
+function normalizeOptionalVoiceId(value: unknown): string | null {
+    const voiceId = typeof value === 'string' ? value.trim() : ''
+    if (!voiceId) return null
+    if (voiceId.length > MAX_VOICE_ID_LENGTH) {
+        throw new ApiError('INVALID_PARAMS', {
+            message: '音色ID过长，请重启本地语音服务后重新设计声音',
+            field: 'voiceId',
+        })
+    }
+    return voiceId
+}
+
 // 获取用户所有音色（支持 folderId 筛选）
 export const GET = apiHandler(async (request: NextRequest) => {
     // 🔐 统一权限验证
@@ -67,6 +81,7 @@ export const POST = apiHandler(async (request: NextRequest) => {
         }
     }
 
+    const normalizedVoiceId = normalizeOptionalVoiceId(voiceId)
     const customVoiceMedia = await resolveMediaRefFromLegacyValue(customVoiceUrl || null)
     const voice = await prisma.globalVoice.create({
         data: {
@@ -74,7 +89,7 @@ export const POST = apiHandler(async (request: NextRequest) => {
             folderId: folderId || null,
             name: name.trim(),
             description: description?.trim() || null,
-            voiceId: voiceId || null,
+            voiceId: normalizedVoiceId,
             voiceType: voiceType || 'qwen-designed',
             customVoiceUrl: customVoiceUrl || null,
             customVoiceMediaId: customVoiceMedia?.id || null,

@@ -34,6 +34,18 @@ export interface MobileProjectDetail {
   } | null
 }
 
+export interface MobileClip {
+  id: string
+  start?: number | null
+  end?: number | null
+  content?: string | null
+  screenplay?: string | null
+  characters?: string | null
+  location?: string | null
+  props?: string | null
+  createdAt?: string
+}
+
 export interface MobilePanelFrame {
   id: string
   frameIndex: number
@@ -83,21 +95,11 @@ export interface MobileStoryboard {
   id: string
   clipId: string
   panels?: MobilePanel[]
-  clip?: {
-    id: string
-    start?: number | null
-    end?: number | null
-    content?: string | null
-    screenplay?: string | null
-    createdAt?: string
-  } | null
+  clip?: MobileClip | null
 }
 
 export interface MobileEpisodeDetail extends MobileEpisodeSummary {
-  clips?: Array<{
-    id: string
-    createdAt?: string
-  }>
+  clips?: MobileClip[]
   storyboards?: MobileStoryboard[]
 }
 

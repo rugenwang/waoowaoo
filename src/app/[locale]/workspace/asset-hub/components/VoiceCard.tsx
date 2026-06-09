@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react'
 import { useTranslations } from 'next-intl'
 import { useDeleteVoice } from '@/lib/query/mutations'
+import { safePlayMedia } from '@/lib/media/safe-play'
 import { AppIcon } from '@/components/ui/icons'
 
 interface Voice {
@@ -47,8 +48,8 @@ export function VoiceCard({ voice, onSelect, isSelected = false, selectionMode =
         audioRef.current = audio
         audio.onended = () => setIsPlaying(false)
         audio.onerror = () => setIsPlaying(false)
-        audio.play()
         setIsPlaying(true)
+        void safePlayMedia(audio).catch(() => setIsPlaying(false))
     }
 
     // 删除音色

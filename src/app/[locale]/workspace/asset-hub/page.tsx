@@ -228,7 +228,7 @@ export default function AssetHubPage() {
     }
 
     // 保存 AI 设计的声音
-    const handleVoiceDesignSave = async (voiceId: string, audioBase64: string) => {
+    const handleVoiceDesignSave = async (voiceId: string, audioBase64: string, voicePrompt?: string) => {
         if (!voiceDesignCharacter) return
 
         try {
@@ -238,7 +238,8 @@ export default function AssetHubPage() {
                 body: JSON.stringify({
                     characterId: voiceDesignCharacter.id,
                     voiceId,
-                    audioBase64
+                    audioBase64,
+                    voicePrompt,
                 })
             })
 
@@ -361,7 +362,7 @@ export default function AssetHubPage() {
     }
 
     // 从音色库选择后绑定到角色
-    const handleVoiceSelect = async (voice: { id: string; customVoiceUrl: string | null }) => {
+    const handleVoiceSelect = async (voice: { id: string; customVoiceUrl: string | null; voiceId: string | null; voiceType: string }) => {
         if (!voicePickerCharacterId) return
 
         try {
@@ -369,6 +370,8 @@ export default function AssetHubPage() {
                 characterId: voicePickerCharacterId,
                 globalVoiceId: voice.id,
                 customVoiceUrl: voice.customVoiceUrl,
+                voiceId: voice.voiceId,
+                voiceType: voice.voiceType,
             })
             queryClient.invalidateQueries({ queryKey: queryKeys.globalAssets.characters() })
             setVoicePickerCharacterId(null)

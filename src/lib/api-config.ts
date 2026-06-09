@@ -422,16 +422,28 @@ export interface ProviderConfig {
 
 export async function getProviderConfig(userId: string, providerId: string): Promise<ProviderConfig> {
   const { providers } = await readUserConfig(userId)
-  const provider = pickProviderStrict(providers, providerId)
+  let provider: CustomProvider
+  try {
+    provider = pickProviderStrict(providers, providerId)
+  } catch (error) {
+    const providerKey = getProviderKey(providerId).toLowerCase()
+    if (providerKey !== 'local') throw error
+    provider = {
+      id: providerId,
+      name: 'Local (ltx-2-mlx)',
+      baseUrl: 'http://127.0.0.1:5566',
+    }
+  }
+  const providerKey = getProviderKey(provider.id).toLowerCase()
 
-  if (!provider.apiKey) {
+  if (!provider.apiKey && providerKey !== 'local') {
     throw new Error(`PROVIDER_API_KEY_MISSING: ${provider.id}`)
   }
 
   return {
     id: provider.id,
     name: provider.name,
-    apiKey: decryptApiKey(provider.apiKey),
+    apiKey: provider.apiKey ? decryptApiKey(provider.apiKey) : '',
     baseUrl: normalizeProviderBaseUrl(provider.id, provider.baseUrl),
     apiMode: provider.apiMode,
     gatewayRoute: provider.gatewayRoute,

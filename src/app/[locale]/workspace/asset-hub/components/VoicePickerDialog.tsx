@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
 import { useGlobalVoices } from '@/lib/query/hooks'
+import { safePlayMedia } from '@/lib/media/safe-play'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import { AppIcon } from '@/components/ui/icons'
@@ -74,8 +75,8 @@ export default function VoicePickerDialog({ isOpen, onClose, onSelect }: VoicePi
         audioRef.current = audio
         audio.onended = () => setPlayingId(null)
         audio.onerror = () => setPlayingId(null)
-        audio.play()
         setPlayingId(voice.id)
+        void safePlayMedia(audio).catch(() => setPlayingId(null))
     }
 
     // 确认选择

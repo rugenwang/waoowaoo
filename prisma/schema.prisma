@@ -88,6 +88,7 @@ model NovelPromotionCharacter {
   customVoiceMedia        MediaObject?          @relation("NovelPromotionCharacterVoiceMedia", fields: [customVoiceMediaId], references: [id], onDelete: SetNull)
   voiceId                 String?
   voiceType               String?
+  voicePrompt             String?               @db.Text
   profileData             String?               @db.Text
   profileConfirmed        Boolean               @default(false)
   introduction            String?               @db.Text // 角色介绍（身份、关系、称呼映射，如"我"对应此角色）
@@ -225,6 +226,11 @@ model NovelPromotionPanel {
   lipSyncVideoUrl   String?
   lipSyncVideoMediaId String?
   lipSyncVideoMedia MediaObject?              @relation("NovelPromotionPanelLipSyncVideoMedia", fields: [lipSyncVideoMediaId], references: [id], onDelete: SetNull)
+  dubbingAudioUrl   String?                   @db.Text
+  dubbingAudioMediaId String?
+  dubbingAudioMedia MediaObject?              @relation("NovelPromotionPanelDubbingAudioMedia", fields: [dubbingAudioMediaId], references: [id], onDelete: SetNull)
+  dubbingSourceType String?                   @db.VarChar(32)
+  dubbingMetaJson   String?                   @db.Text
   sketchImageUrl    String?                   @db.Text
   sketchImageMediaId String?
   sketchImageMedia  MediaObject?              @relation("NovelPromotionPanelSketchMedia", fields: [sketchImageMediaId], references: [id], onDelete: SetNull)
@@ -242,6 +248,7 @@ model NovelPromotionPanel {
   @@index([imageMediaId])
   @@index([videoMediaId])
   @@index([lipSyncVideoMediaId])
+  @@index([dubbingAudioMediaId])
   @@index([sketchImageMediaId])
   @@index([previousImageMediaId])
   @@map("novel_promotion_panels")
@@ -879,6 +886,7 @@ model GlobalCharacter {
   profileConfirmed Boolean  @default(false)
   voiceId          String?
   voiceType        String?
+  voicePrompt      String?  @db.Text
   customVoiceUrl   String?  @db.Text
   customVoiceMediaId String?
   customVoiceMedia MediaObject? @relation("GlobalCharacterVoiceMedia", fields: [customVoiceMediaId], references: [id], onDelete: SetNull)
@@ -1023,6 +1031,7 @@ model MediaObject {
   novelPromotionPanelImages             NovelPromotionPanel[]       @relation("NovelPromotionPanelImageMedia")
   novelPromotionPanelVideos             NovelPromotionPanel[]       @relation("NovelPromotionPanelVideoMedia")
   novelPromotionPanelLipSyncVideos      NovelPromotionPanel[]       @relation("NovelPromotionPanelLipSyncVideoMedia")
+  novelPromotionPanelDubbingAudios      NovelPromotionPanel[]       @relation("NovelPromotionPanelDubbingAudioMedia")
   novelPromotionPanelSketchImages       NovelPromotionPanel[]       @relation("NovelPromotionPanelSketchMedia")
   novelPromotionPanelPreviousImages     NovelPromotionPanel[]       @relation("NovelPromotionPanelPreviousImageMedia")
   novelPromotionPanelFrameImages        NovelPromotionPanelFrame[]  @relation("NovelPromotionPanelFrameImageMedia")

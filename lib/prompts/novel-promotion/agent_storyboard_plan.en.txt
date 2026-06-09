@@ -64,6 +64,10 @@ Panel mode semantics:
 - `panel_mode` is the storyboard structure type. It tells the system whether this top-level panel should be generated from one representative image or from a connected group of key frames.
 - `panel_mode="single"` means one image is enough: one spoken line, one stable reaction, one simple expression, one small/static action. `frames` must contain exactly 1 item with `frame_index=0`, `frame_time_sec=0`, `frame_role="hero"`, `dependency_frame_ids=[]` unless the first frame needs to continue from the previous top-level panel tail, in which case `dependency_frame_ids` may be `["FP"]`. Do not output `group_video_prompt`.
 - `panel_mode="group"` means the panel is a continuous video beat needing 2-20 connected key frames, decided by duration + action density + transition/camera-movement density: visible movement, turning, walking, chasing, fighting, scene transition, multi-stage emotion/action, or clearly different beginning/end states. Frames must be chronological and later frames should depend on earlier frames through `dependency_frame_ids`.
+- Duration and timeline are mandatory before output: count all Chinese dialogue/voiceover/inner-monologue characters in `source_text`; pure speaking time is 2-3 Chinese characters per second. `duration_sec` must not be shorter than pure speaking time, and must also include action time, pauses, camera/transition time, and environment/establishing buffer.
+- The sum of all timeline ranges in `video_prompt` / `group_video_prompt` must equal `duration_sec`; the timeline must start at 00:00 and the final range must end exactly at `duration_sec`.
+- `frames.frame_time_sec` must use the same timeline: frame_index 0 must be 0, later frame_index values must increase in playback order, and the final key state should be at or near the tail of `duration_sec`.
+- A single top-level panel/group must not exceed 20 seconds. If dialogue + action + pauses + camera/environment time exceeds 20 seconds, split into another top-level panel/group instead of compressing the dialogue.
 - Do not make every panel `group` just because the user selected an 8/10/15/20 second duration preference. Use `group` only when multiple visual states are truly needed. Simple panels remain `single`.
 - For group panels, `duration_sec` must be <= 20 seconds. The first frame must be the original/before-action state, not the completed result.
 - Group frame count rule: 6-8s low density = 2 frames; 9-12s low/medium density = 3-4 frames; 13-16s medium/high density = 4-6 frames; 17-20s medium/high density = 5-8 frames.
@@ -143,6 +147,7 @@ Planning rules:
 10. Do not shorten, rewrite, summarize, or replace a provided slot phrase with a short token such as `slot_1`, `left`, or `throne_front`.
 11. Every top-level panel must include `panel_mode`, `duration_sec`, and `frames`.
 12. `single` panels must have exactly 1 frame. `group` panels must have 2-20 frames, based on duration, action density, and transition/camera-movement density; ultra-high-density action/camera movement may approach 1 frame per second.
+12.1 Duration must follow the 2-3 Chinese characters per second dialogue rule, plus action/pause/camera/environment time. Keep `duration_sec`, prompt timeline end time, and `frames.frame_time_sec` aligned.
 13. Every panel must include `props`; use an empty array when no provided prop asset is visible or used.
 13. Return strict JSON only.
 14. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.

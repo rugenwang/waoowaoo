@@ -63,6 +63,9 @@ export interface Panel {
   lipSyncTaskRunning?: boolean | null
   lipSyncErrorMessage?: string | null  // 口型同步错误消息
   lipSyncErrorCode?: string | null
+  dubbingAudioUrl?: string | null
+  dubbingSourceType?: string | null
+  dubbingMetaJson?: string | null
 }
 
 export interface Storyboard {
@@ -108,6 +111,9 @@ export interface VideoPanel {
   lipSyncTaskId?: string
   lipSyncErrorMessage?: string  // 口型同步错误消息
   lipSyncErrorCode?: string
+  dubbingAudioUrl?: string
+  dubbingSourceType?: string
+  dubbingMetaJson?: string
 }
 
 // 匹配的配音信息

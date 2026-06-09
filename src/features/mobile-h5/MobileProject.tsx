@@ -9,11 +9,14 @@ import { AppIcon } from '@/components/ui/icons'
 import { Link, useRouter } from '@/i18n/navigation'
 import { apiFetch } from '@/lib/api-fetch'
 import { downloadRemoteFile } from '@/lib/media/download-remote-file'
+import { useScriptToStoryboardRunStream } from '@/lib/query/hooks/useScriptToStoryboardRunStream'
+import { useStoryToScriptRunStream } from '@/lib/query/hooks/useStoryToScriptRunStream'
 import MobileShell, { MobileEmptyState, MobileLoadingState } from './MobileShell'
 import {
   copyText,
   displayMediaUrl,
   formatDateTime,
+  formatClipSummary,
   getPanelDuration,
   getPanelImageUrl,
   getPanelVideoUrl,
@@ -23,6 +26,7 @@ import {
   parseNameList,
 } from './mobile-utils'
 import type {
+  MobileClip,
   MobileEpisodeDetail,
   MobileEpisodeSummary,
   MobilePanel,
@@ -31,7 +35,7 @@ import type {
   MobileTask,
 } from './types'
 
-type MobileTab = 'storyboard' | 'videos' | 'tasks'
+type MobileTab = 'story' | 'script' | 'storyboard' | 'videos' | 'tasks'
 
 interface ProjectResponse {
   project: MobileProjectDetail
@@ -56,6 +60,11 @@ type MobilePanelDialog =
   | { kind: 'frame-edit'; frame: MobilePanelFrame }
   | { kind: 'video-prompt'; panel: MobilePanel; storyboardId: string }
   | { kind: 'duration'; panel: MobilePanel; storyboardId: string }
+
+type MobileScriptEditDialog = {
+  clip: MobileClip
+  field: 'content' | 'screenplay'
+}
 
 interface PanelMenuState {
   panel: MobilePanel
@@ -95,7 +104,9 @@ function BottomTabs({
   counts: Record<MobileTab, number>
   onChange: (next: MobileTab) => void
 }) {
-  const items: Array<{ key: MobileTab; label: string; icon: 'imagePreview' | 'video' | 'refresh' }> = [
+  const items: Array<{ key: MobileTab; label: string; icon: ComponentProps<typeof AppIcon>['name'] }> = [
+    { key: 'story', label: '故事', icon: 'edit' },
+    { key: 'script', label: '剧本', icon: 'clapperboard' },
     { key: 'storyboard', label: '分镜', icon: 'imagePreview' },
     { key: 'videos', label: '成片', icon: 'video' },
     { key: 'tasks', label: '任务', icon: 'refresh' },
@@ -103,7 +114,7 @@ function BottomTabs({
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200/80 bg-white/95 px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl">
-      <div className="mx-auto grid max-w-md grid-cols-3 gap-2">
+      <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
         {items.map((item) => {
           const active = value === item.key
           return (
@@ -111,7 +122,7 @@ function BottomTabs({
               key={item.key}
               type="button"
               onClick={() => onChange(item.key)}
-              className={`flex h-14 flex-col items-center justify-center rounded-2xl text-xs font-semibold transition active:scale-95 ${active ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'}`}
+              className={`flex h-14 flex-col items-center justify-center rounded-2xl text-[11px] font-semibold transition active:scale-95 ${active ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'}`}
             >
               <span className="relative">
                 <AppIcon name={item.icon} className="h-5 w-5" />
@@ -230,7 +241,9 @@ export default function MobileProject() {
   const { data: session, status } = useSession()
   const queryClient = useQueryClient()
   const projectId = params?.projectId || ''
-  const [tab, setTab] = useState<MobileTab>('storyboard')
+  const [tab, setTab] = useState<MobileTab>('story')
+  const [storyDraft, setStoryDraft] = useState('')
+  const [savingStory, setSavingStory] = useState(false)
   const [copiedPanelId, setCopiedPanelId] = useState<string | null>(null)
   const [copiedFrameId, setCopiedFrameId] = useState<string | null>(null)
   const [expandedClipIds, setExpandedClipIds] = useState<Set<string>>(new Set())
@@ -240,6 +253,8 @@ export default function MobileProject() {
   const [dialog, setDialog] = useState<MobilePanelDialog | null>(null)
   const [dialogDraft, setDialogDraft] = useState('')
   const [frameTimeDraft, setFrameTimeDraft] = useState('')
+  const [scriptDialog, setScriptDialog] = useState<MobileScriptEditDialog | null>(null)
+  const [scriptDraft, setScriptDraft] = useState('')
   const [uploadTarget, setUploadTarget] = useState<MobileUploadTarget | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const hadRunningTasksRef = useRef(false)
@@ -274,6 +289,9 @@ export default function MobileProject() {
     enabled: !!projectId && !!selectedEpisodeId && !!session,
     staleTime: 5000,
   })
+
+  const storyToScriptStream = useStoryToScriptRunStream({ projectId, episodeId: selectedEpisodeId })
+  const scriptToStoryboardStream = useScriptToStoryboardRunStream({ projectId, episodeId: selectedEpisodeId })
 
   const tasksQuery = useQuery({
     queryKey: ['mobile-h5-tasks', projectId],
@@ -364,6 +382,10 @@ export default function MobileProject() {
     }
   }, [projectId, refetchEpisode, refetchProject, refetchTasks, runningTaskCount, selectedEpisodeId, session])
 
+  useEffect(() => {
+    setStoryDraft(episodeQuery.data?.episode?.novelText || '')
+  }, [episodeQuery.data?.episode?.novelText, selectedEpisodeId])
+
   const refreshMobileData = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['mobile-h5-project', projectId] }),
@@ -388,6 +410,95 @@ export default function MobileProject() {
     if (!response.ok) throw new Error(await readErrorMessage(response, fallback))
     return response.json().catch(() => ({}))
   }, [])
+
+  const saveStoryDraft = useCallback(async () => {
+    if (!selectedEpisodeId) return
+    setSavingStory(true)
+    try {
+      await requestJson(`/api/novel-promotion/${projectId}/episodes/${selectedEpisodeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ novelText: storyDraft }),
+      }, '保存故事失败')
+      await refreshMobileData()
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '保存故事失败')
+    } finally {
+      setSavingStory(false)
+    }
+  }, [projectId, refreshMobileData, requestJson, selectedEpisodeId, storyDraft])
+
+  const runStoryToScriptMobile = useCallback(async () => {
+    if (!selectedEpisodeId) return
+    const content = storyDraft.trim()
+    if (!content) {
+      alert('请先填写故事内容。')
+      return
+    }
+    setSavingStory(true)
+    try {
+      await requestJson(`/api/novel-promotion/${projectId}/episodes/${selectedEpisodeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ novelText: storyDraft }),
+      }, '保存故事失败')
+      setSavingStory(false)
+      const result = await storyToScriptStream.run({
+        episodeId: selectedEpisodeId,
+        content,
+        temperature: 0.7,
+        reasoning: true,
+      })
+      if (result.status !== 'completed') {
+        throw new Error(result.errorMessage || '故事生成剧本失败')
+      }
+      await refreshMobileData()
+      setTab('script')
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '故事生成剧本失败')
+    } finally {
+      setSavingStory(false)
+    }
+  }, [projectId, refreshMobileData, requestJson, selectedEpisodeId, storyDraft, storyToScriptStream])
+
+  const runScriptToStoryboardMobile = useCallback(async (clipId?: string) => {
+    if (!selectedEpisodeId) return
+    try {
+      const result = await scriptToStoryboardStream.run({
+        episodeId: selectedEpisodeId,
+        clipId,
+        temperature: 0.7,
+        reasoning: true,
+      })
+      if (result.status !== 'completed') {
+        throw new Error(result.errorMessage || '剧本生成分镜失败')
+      }
+      await refreshMobileData()
+      setTab('storyboard')
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '剧本生成分镜失败')
+    }
+  }, [refreshMobileData, scriptToStoryboardStream, selectedEpisodeId])
+
+  const openScriptDialog = useCallback((clip: MobileClip, field: 'content' | 'screenplay') => {
+    setScriptDialog({ clip, field })
+    setScriptDraft((field === 'screenplay' ? clip.screenplay : clip.content) || '')
+  }, [])
+
+  const submitScriptDialog = useCallback(async () => {
+    if (!scriptDialog) return
+    try {
+      await requestJson(`/api/novel-promotion/${projectId}/clips/${scriptDialog.clip.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [scriptDialog.field]: scriptDraft }),
+      }, '保存剧本片段失败')
+      setScriptDialog(null)
+      await refreshMobileData()
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '保存剧本片段失败')
+    }
+  }, [projectId, refreshMobileData, requestJson, scriptDialog, scriptDraft])
 
   const openUpload = useCallback((target: MobileUploadTarget) => {
     setUploadTarget(target)
@@ -674,6 +785,14 @@ export default function MobileProject() {
 
   const project = projectQuery.data?.project
   const episode = episodeQuery.data?.episode
+  const clips = Array.isArray(episode?.clips)
+    ? [...episode.clips].sort((left, right) => {
+      const leftStart = typeof left.start === 'number' ? left.start : Number.MAX_SAFE_INTEGER
+      const rightStart = typeof right.start === 'number' ? right.start : Number.MAX_SAFE_INTEGER
+      if (leftStart !== rightStart) return leftStart - rightStart
+      return (left.createdAt || '').localeCompare(right.createdAt || '')
+    })
+    : []
   const panels = getSortedPanels(episode)
   const panelGroups = getSortedPanelGroups(episode)
   const videoPanels = panels.filter((panel) => getPanelVideoUrl(panel))
@@ -757,7 +876,11 @@ export default function MobileProject() {
                 刷新
               </button>
             </div>
-            <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+            <div className="mt-4 grid grid-cols-4 gap-2 text-center">
+              <div className="rounded-2xl bg-violet-50 px-2 py-2.5">
+                <div className="text-base font-semibold text-violet-700">{clips.length}</div>
+                <div className="text-[10px] text-violet-600/70">片段</div>
+              </div>
               <div className="rounded-2xl bg-blue-50 px-2 py-2.5">
                 <div className="text-base font-semibold text-blue-700">{panels.length}</div>
                 <div className="text-[10px] text-blue-600/70">分镜</div>
@@ -775,6 +898,42 @@ export default function MobileProject() {
 
           {episodeQuery.isLoading ? <MobileLoadingState label="正在加载剧集..." /> : null}
           {episodeQuery.isError ? <MobileEmptyState title="剧集加载失败" description={episodeQuery.error.message} /> : null}
+          {!episodeQuery.isLoading && !episodeQuery.isError && tab === 'story' ? (
+            <StoryTab
+              episode={episode}
+              storyDraft={storyDraft}
+              saving={savingStory}
+              stream={{
+                running: storyToScriptStream.isRunning || storyToScriptStream.isRecoveredRunning || storyToScriptStream.status === 'running',
+                progress: storyToScriptStream.overallProgress,
+                activeMessage: storyToScriptStream.activeMessage,
+                outputText: storyToScriptStream.outputText,
+                errorMessage: storyToScriptStream.errorMessage,
+              }}
+              onChange={setStoryDraft}
+              onSave={() => void saveStoryDraft()}
+              onRun={() => void runStoryToScriptMobile()}
+              onStop={() => storyToScriptStream.stop()}
+            />
+          ) : null}
+          {!episodeQuery.isLoading && !episodeQuery.isError && tab === 'script' ? (
+            <ScriptTab
+              clips={clips}
+              panelGroups={panelGroups}
+              stream={{
+                running: scriptToStoryboardStream.isRunning || scriptToStoryboardStream.isRecoveredRunning || scriptToStoryboardStream.status === 'running',
+                progress: scriptToStoryboardStream.overallProgress,
+                activeMessage: scriptToStoryboardStream.activeMessage,
+                outputText: scriptToStoryboardStream.outputText,
+                errorMessage: scriptToStoryboardStream.errorMessage,
+              }}
+              onEdit={openScriptDialog}
+              onRunAll={() => void runScriptToStoryboardMobile()}
+              onRunClip={(clipId) => void runScriptToStoryboardMobile(clipId)}
+              onStop={() => scriptToStoryboardStream.stop()}
+              onGoStory={() => setTab('story')}
+            />
+          ) : null}
           {!episodeQuery.isLoading && !episodeQuery.isError && tab === 'storyboard' ? (
             <StoryboardTab
               panels={panels}
@@ -827,7 +986,13 @@ export default function MobileProject() {
           ) : null}
           <BottomTabs
             value={tab}
-            counts={{ storyboard: panels.length, videos: videoPanels.length, tasks: runningTasks.length }}
+            counts={{
+              story: storyDraft.trim() ? 1 : 0,
+              script: clips.length,
+              storyboard: panels.length,
+              videos: videoPanels.length,
+              tasks: runningTasks.length,
+            }}
             onChange={setTab}
           />
         </>
@@ -926,7 +1091,272 @@ export default function MobileProject() {
           </div>
         </div>
       ) : null}
+      {scriptDialog ? (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/45" onClick={() => setScriptDialog(null)}>
+          <div className="w-full rounded-t-[28px] bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]" onClick={(event) => event.stopPropagation()}>
+            <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-slate-200" />
+            <div className="mb-3">
+              <div className="text-base font-semibold text-slate-950">
+                编辑{scriptDialog.field === 'screenplay' ? '剧本' : '片段原文'}
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                片段 {typeof scriptDialog.clip.start === 'number' && typeof scriptDialog.clip.end === 'number'
+                  ? `${scriptDialog.clip.start}-${scriptDialog.clip.end}`
+                  : scriptDialog.clip.id.slice(0, 8)}
+              </div>
+            </div>
+            <textarea
+              value={scriptDraft}
+              onChange={(event) => setScriptDraft(event.target.value)}
+              className="h-[52vh] w-full resize-none rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-800 outline-none focus:border-blue-400"
+            />
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setScriptDialog(null)} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-600">取消</button>
+              <button type="button" onClick={() => void submitScriptDialog()} className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white">保存</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </MobileShell>
+  )
+}
+
+interface MobileRunStatus {
+  running: boolean
+  progress: number
+  activeMessage: string
+  outputText: string
+  errorMessage: string
+}
+
+function RunProgressPanel({ stream }: { stream: MobileRunStatus }) {
+  if (!stream.running && !stream.outputText && !stream.errorMessage) return null
+  const progress = Math.max(0, Math.min(100, Math.round(stream.progress || 0)))
+  return (
+    <div className="rounded-[22px] bg-slate-950 p-4 text-white shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold">{stream.running ? 'AI 正在执行' : stream.errorMessage ? '执行异常' : '执行结果'}</div>
+        <div className="rounded-full bg-white/12 px-2 py-1 text-xs font-semibold">{progress}%</div>
+      </div>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/15">
+        <div className="h-full rounded-full bg-blue-400 transition-all" style={{ width: `${progress}%` }} />
+      </div>
+      {stream.activeMessage ? <div className="mt-3 text-xs leading-5 text-white/75">{stream.activeMessage}</div> : null}
+      {stream.errorMessage ? <div className="mt-3 rounded-2xl bg-red-500/15 p-3 text-xs leading-5 text-red-100">{stream.errorMessage}</div> : null}
+      {stream.outputText ? (
+        <div className="mt-3 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-2xl bg-white/10 p-3 text-xs leading-5 text-white/75">
+          {stream.outputText}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function StoryTab({
+  episode,
+  storyDraft,
+  saving,
+  stream,
+  onChange,
+  onSave,
+  onRun,
+  onStop,
+}: {
+  episode: MobileEpisodeDetail | undefined
+  storyDraft: string
+  saving: boolean
+  stream: MobileRunStatus
+  onChange: (value: string) => void
+  onSave: () => void
+  onRun: () => void
+  onStop: () => void
+}) {
+  const wordCount = storyDraft.trim().length
+  const clipCount = Array.isArray(episode?.clips) ? episode.clips.length : 0
+  return (
+    <div className="space-y-4">
+      <section className="rounded-[26px] bg-white p-4 shadow-sm ring-1 ring-slate-200/80">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold text-blue-600">故事输入</div>
+            <div className="mt-1 text-lg font-semibold text-slate-950">{episode?.name || '当前剧集'}</div>
+          </div>
+          <div className="rounded-2xl bg-slate-100 px-3 py-2 text-right">
+            <div className="text-base font-semibold text-slate-950">{wordCount}</div>
+            <div className="text-[10px] text-slate-500">字符</div>
+          </div>
+        </div>
+        <textarea
+          value={storyDraft}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="在这里填写或修改本集故事内容"
+          className="mt-4 h-[42vh] w-full resize-none rounded-[22px] border border-slate-200 bg-slate-50 p-4 text-sm leading-7 text-slate-800 outline-none focus:border-blue-400 focus:bg-white"
+        />
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={saving || stream.running}
+            onClick={onSave}
+            className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white active:scale-95 disabled:opacity-50"
+          >
+            {saving ? '保存中' : '保存故事'}
+          </button>
+          {stream.running ? (
+            <button
+              type="button"
+              onClick={onStop}
+              className="rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white active:scale-95"
+            >
+              停止生成
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={saving || !storyDraft.trim()}
+              onClick={onRun}
+              className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white active:scale-95 disabled:opacity-50"
+            >
+              生成剧本
+            </button>
+          )}
+        </div>
+      </section>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-[22px] bg-violet-50 px-4 py-3">
+          <div className="text-lg font-semibold text-violet-700">{clipCount}</div>
+          <div className="text-xs text-violet-600/75">已拆分片段</div>
+        </div>
+        <div className="rounded-[22px] bg-blue-50 px-4 py-3">
+          <div className="text-lg font-semibold text-blue-700">{stream.running ? '运行中' : '就绪'}</div>
+          <div className="text-xs text-blue-600/75">故事转剧本</div>
+        </div>
+      </div>
+      <RunProgressPanel stream={stream} />
+    </div>
+  )
+}
+
+function ScriptTab({
+  clips,
+  panelGroups,
+  stream,
+  onEdit,
+  onRunAll,
+  onRunClip,
+  onStop,
+  onGoStory,
+}: {
+  clips: MobileClip[]
+  panelGroups: ReturnType<typeof getSortedPanelGroups>
+  stream: MobileRunStatus
+  onEdit: (clip: MobileClip, field: 'content' | 'screenplay') => void
+  onRunAll: () => void
+  onRunClip: (clipId: string) => void
+  onStop: () => void
+  onGoStory: () => void
+}) {
+  const panelCountByClip = new Map(panelGroups.map((group) => [group.clipId, group.panels.length]))
+  if (clips.length === 0) {
+    return (
+      <div className="space-y-3">
+        <MobileEmptyState title="暂无剧本片段" description="先在故事页生成剧本，生成后会在这里编辑和绘制分镜。" />
+        <button
+          type="button"
+          onClick={onGoStory}
+          className="w-full rounded-[22px] bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm active:scale-[0.99]"
+        >
+          去填写故事
+        </button>
+        <RunProgressPanel stream={stream} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-[26px] bg-slate-950 p-4 text-white shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold text-white/55">剧本片段</div>
+            <div className="mt-1 text-xl font-semibold">{clips.length} 个片段</div>
+          </div>
+          {stream.running ? (
+            <button
+              type="button"
+              onClick={onStop}
+              className="rounded-full bg-red-500 px-3 py-2 text-xs font-semibold text-white active:scale-95"
+            >
+              停止
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onRunAll}
+              className="rounded-full bg-blue-500 px-4 py-2 text-xs font-semibold text-white active:scale-95"
+            >
+              全部生成分镜
+            </button>
+          )}
+        </div>
+      </section>
+      <RunProgressPanel stream={stream} />
+      {clips.map((clip, index) => {
+        const summary = formatClipSummary(clip.screenplay, clip.content) || '暂无片段内容'
+        const panelCount = panelCountByClip.get(clip.id) || 0
+        const range = typeof clip.start === 'number' && typeof clip.end === 'number'
+          ? `${clip.start}-${clip.end}`
+          : null
+        const characters = parseNameList(clip.characters)
+        const props = parseNameList(clip.props)
+        return (
+          <article key={clip.id} className="overflow-hidden rounded-[26px] bg-white shadow-sm ring-1 ring-slate-200/80">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-base font-semibold text-slate-950">片段 {index + 1}</div>
+                  <div className="mt-1 text-xs text-slate-400">{range ? `${range}s` : '未设置时间段'}</div>
+                </div>
+                <span className="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-600">
+                  {panelCount} 分镜
+                </span>
+              </div>
+              <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{summary}</p>
+              {clip.location || characters.length > 0 || props.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
+                  {clip.location ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">{clip.location}</span> : null}
+                  {characters.slice(0, 4).map((name) => <span key={name} className="rounded-full bg-violet-50 px-2 py-1 text-violet-600">{name}</span>)}
+                  {props.slice(0, 4).map((name) => <span key={name} className="rounded-full bg-amber-50 px-2 py-1 text-amber-700">{name}</span>)}
+                </div>
+              ) : null}
+            </div>
+            <div className="grid grid-cols-2 gap-2 p-4">
+              <button
+                type="button"
+                onClick={() => onEdit(clip, 'screenplay')}
+                className="rounded-2xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 active:scale-95"
+              >
+                编辑剧本
+              </button>
+              <button
+                type="button"
+                onClick={() => onEdit(clip, 'content')}
+                className="rounded-2xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 active:scale-95"
+              >
+                编辑原文
+              </button>
+              <button
+                type="button"
+                disabled={stream.running}
+                onClick={() => onRunClip(clip.id)}
+                className="col-span-2 rounded-2xl bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm active:scale-95 disabled:opacity-50"
+              >
+                {stream.running ? '生成中' : panelCount > 0 ? '重新生成本片段分镜' : '生成本片段分镜'}
+              </button>
+            </div>
+          </article>
+        )
+      })}
+    </div>
   )
 }
 

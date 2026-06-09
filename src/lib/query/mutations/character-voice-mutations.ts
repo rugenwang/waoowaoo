@@ -37,7 +37,7 @@ export function useUpdateProjectCharacterVoiceSettings(projectId: string) {
             customVoiceUrl,
         }: {
             characterId: string
-            voiceType: 'qwen-designed' | 'uploaded' | 'custom' | null
+            voiceType: 'qwen-designed' | 'uploaded' | 'custom' | 'local-voxcpm' | null
             voiceId?: string
             customVoiceUrl?: string
         }) => {
@@ -72,17 +72,19 @@ export function useSaveProjectDesignedVoice(projectId: string) {
             characterId,
             voiceId,
             audioBase64,
+            voicePrompt,
         }: {
             characterId: string
             voiceId: string
             audioBase64: string
+            voicePrompt?: string
         }) => {
             return await requestJsonWithError<{ audioUrl?: string }>(`/api/novel-promotion/${projectId}/character-voice`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     characterId,
-                    voiceDesign: { voiceId, audioBase64 },
+                    voiceDesign: { voiceId, audioBase64, voicePrompt },
                 }),
             }, '保存失败')
         },

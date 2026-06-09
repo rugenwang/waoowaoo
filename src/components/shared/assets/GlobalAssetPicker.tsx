@@ -8,6 +8,7 @@ import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import { AppIcon } from '@/components/ui/icons'
 import { apiFetch } from '@/lib/api-fetch'
+import { safePlayMedia } from '@/lib/media/safe-play'
 import type {
   AssetSummary,
   CharacterAssetSummary,
@@ -240,7 +241,6 @@ export default function GlobalAssetPicker({
         setPreviewAudio(audioUrl)
         const audio = new Audio(audioUrl)
         audioRef.current = audio
-        audio.play()
         audio.onended = () => {
             setIsPlayingAudio(false)
             setPreviewAudio(null)
@@ -251,6 +251,11 @@ export default function GlobalAssetPicker({
             setPreviewAudio(null)
             audioRef.current = null
         }
+        void safePlayMedia(audio).catch(() => {
+            setIsPlayingAudio(false)
+            setPreviewAudio(null)
+            audioRef.current = null
+        })
     }
 
     if (!isOpen) return null

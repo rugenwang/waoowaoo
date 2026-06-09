@@ -239,7 +239,7 @@
         "generateSchemesSuffix": "Voice Schemes",
         "schemeCountAriaLabel": "Number of voice schemes to generate",
         "editPreviewText": "Edit preview text",
-        "generating3Schemes": "Generating 3 voice schemes...",
+        "generating3Schemes": "Generating voice schemes...",
         "estimatedTime": "Est. 15-30 seconds",
         "selectScheme": "Select voice scheme:",
         "schemeN": "Scheme {n}",

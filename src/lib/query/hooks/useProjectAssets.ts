@@ -50,6 +50,7 @@ function mapCharacterAssetToProjectCharacter(asset: AssetGroupMap['character'][n
         voiceType: asset.voice.voiceType,
         voiceId: asset.voice.voiceId,
         customVoiceUrl: asset.voice.customVoiceUrl,
+        voicePrompt: asset.voice.voicePrompt ?? null,
         media: asset.voice.media,
         profileData: asset.profileData,
         profileConfirmed: asset.profileConfirmed ?? undefined,

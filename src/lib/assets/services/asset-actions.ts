@@ -946,6 +946,7 @@ async function updateGlobalAsset(input: AssetUpdateInput) {
     if (input.body.voiceId !== undefined) updateData.voiceId = input.body.voiceId
     if (input.body.voiceType !== undefined) updateData.voiceType = input.body.voiceType
     if (input.body.customVoiceUrl !== undefined) updateData.customVoiceUrl = input.body.customVoiceUrl
+    if (input.body.voicePrompt !== undefined) updateData.voicePrompt = input.body.voicePrompt
     if (input.body.globalVoiceId !== undefined) updateData.globalVoiceId = input.body.globalVoiceId
     if (input.body.folderId !== undefined) updateData.folderId = normalizeString(input.body.folderId) || null
     const character = await prisma.globalCharacter.update({
@@ -1011,6 +1012,7 @@ async function updateProjectAsset(input: AssetUpdateInput) {
     if (input.body.voiceId !== undefined) updateData.voiceId = input.body.voiceId
     if (input.body.voiceType !== undefined) updateData.voiceType = input.body.voiceType
     if (input.body.customVoiceUrl !== undefined) updateData.customVoiceUrl = input.body.customVoiceUrl
+    if (input.body.voicePrompt !== undefined) updateData.voicePrompt = input.body.voicePrompt
     if (input.body.profileConfirmed !== undefined) updateData.profileConfirmed = input.body.profileConfirmed
     const character = await prisma.novelPromotionCharacter.update({
       where: { id: input.assetId },

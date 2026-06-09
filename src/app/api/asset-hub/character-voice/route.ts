@@ -7,11 +7,14 @@ import { apiHandler, ApiError } from '@/lib/api-errors'
 interface VoiceDesignPayload {
     voiceId?: string
     audioBase64?: string
+    voicePrompt?: string
 }
 
 interface CharacterVoiceJsonBody {
     characterId?: string
     voiceDesign?: VoiceDesignPayload
+    audioBase64?: string
+    voicePrompt?: string
     voiceType?: string | null
     voiceId?: string | null
     customVoiceUrl?: string | null
@@ -22,6 +25,25 @@ interface AssetHubCharacterVoiceDb {
         findFirst(args: Record<string, unknown>): Promise<{ id: string } | null>
         update(args: Record<string, unknown>): Promise<unknown>
     }
+}
+
+const MAX_VOICE_ID_LENGTH = 191
+
+function resolveDesignedVoiceType(voiceId: unknown): string {
+    return typeof voiceId === 'string' && voiceId.startsWith('local-voxcpm:')
+        ? 'local-voxcpm'
+        : 'qwen-designed'
+}
+
+function normalizeVoiceId(value: unknown): string {
+    const voiceId = typeof value === 'string' ? value.trim() : ''
+    if (!voiceId || voiceId.length > MAX_VOICE_ID_LENGTH) {
+        throw new ApiError('INVALID_PARAMS', {
+            message: '音色ID过长，请重启本地语音服务后重新设计声音',
+            field: 'voiceId',
+        })
+    }
+    return voiceId
 }
 
 /**
@@ -40,16 +62,23 @@ export const POST = apiHandler(async (request: NextRequest) => {
     // 处理 JSON 请求（AI 声音设计）
     if (contentType.includes('application/json')) {
         const body = (await request.json()) as CharacterVoiceJsonBody
-        const { characterId, voiceDesign } = body
+        const { characterId } = body
+        const voiceDesign = body.voiceDesign || {
+            voiceId: body.voiceId || undefined,
+            audioBase64: body.audioBase64 || undefined,
+            voicePrompt: (body as Record<string, unknown>).voicePrompt,
+        }
 
         if (!characterId || !voiceDesign) {
             throw new ApiError('INVALID_PARAMS')
         }
 
-        const { voiceId, audioBase64 } = voiceDesign
-        if (!voiceId || !audioBase64) {
+        const { voiceId: rawVoiceId, audioBase64 } = voiceDesign
+        const voicePrompt = typeof voiceDesign.voicePrompt === 'string' ? voiceDesign.voicePrompt.trim() : ''
+        if (!rawVoiceId || !audioBase64) {
             throw new ApiError('INVALID_PARAMS')
         }
+        const voiceId = normalizeVoiceId(rawVoiceId)
 
         // 验证角色属于用户
         const character = await db.globalCharacter.findFirst({
@@ -66,9 +95,10 @@ export const POST = apiHandler(async (request: NextRequest) => {
         await db.globalCharacter.update({
             where: { id: characterId },
             data: {
-                voiceType: 'qwen-designed',
+                voiceType: resolveDesignedVoiceType(voiceId),
                 voiceId: voiceId,
-                customVoiceUrl: cosUrl
+                customVoiceUrl: cosUrl,
+                voicePrompt: voicePrompt || null
             }
         })
 
@@ -111,12 +141,13 @@ export const POST = apiHandler(async (request: NextRequest) => {
 
     await db.globalCharacter.update({
         where: { id: characterId },
-        data: {
-            voiceType: 'uploaded',
-            voiceId: null,
-            customVoiceUrl: audioUrl
-        }
-    })
+            data: {
+                voiceType: 'uploaded',
+                voiceId: null,
+                customVoiceUrl: audioUrl,
+                voicePrompt: null
+            }
+        })
 
     const signedAudioUrl = getSignedUrl(audioUrl, 7200)
 

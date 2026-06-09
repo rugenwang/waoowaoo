@@ -74,7 +74,7 @@ interface AssetsStageModalsProps {
   handleLocationImageEdit: (modifyPrompt: string, extraImageUrls?: string[]) => Promise<void>
   handleCharacterImageEdit: (modifyPrompt: string, extraImageUrls?: string[]) => Promise<void>
   handleCloseVoiceDesign: () => void
-  handleVoiceDesignSave: (voiceId: string, audioBase64: string) => Promise<void>
+  handleVoiceDesignSave: (voiceId: string, audioBase64: string, voicePrompt?: string) => Promise<void>
   handleCloseCopyPicker: () => void
   handleConfirmCopyFromGlobal: (globalAssetId: string) => Promise<void>
   handleConfirmProfile: (characterId: string, updatedProfileData?: CharacterProfileData) => Promise<void>

@@ -54,8 +54,11 @@ export default function SpeakerVoiceBindingDialog({
         voiceType: string
     }) => {
         if (voice.voiceId) {
+            const provider = voice.voiceType === 'local-voxcpm' || voice.voiceId.startsWith('local-voxcpm:')
+                ? 'local'
+                : 'bailian'
             onBound(speaker, {
-                provider: 'bailian',
+                provider,
                 voiceType: voice.voiceType,
                 voiceId: voice.voiceId,
                 ...(voice.customVoiceUrl ? { previewAudioUrl: voice.customVoiceUrl } : {}),

@@ -35,6 +35,13 @@
    - duration_sec: 预计视频秒数；single 通常 2~8 秒，group 不超过 20 秒
    - frames: 关键帧规划数组；single 只输出 1 帧，group 根据时长、动作密集程度、转场/运镜密集程度输出 2~20 帧
 
+2.0.1 时长与时间轴硬性规则（必须先执行）：
+   - 先统计本顶层分镜 source_text 中需要说出的对白/旁白/内心独白字数；对白纯说话时长按「2~3 个汉字 = 1 秒」估算，宁可偏长，不能短于对白需要的秒数。
+   - 总时长 = 对白纯说话时长 + 动作画面时长 + 停顿留白 + 运镜/转场时长 + 环境/空镜余量；duration 和 duration_sec 必须等于这个相加后的总时长并取整数。
+   - 每段 video_prompt / group_video_prompt 时间轴必须从 00:00 开始连续递增，最后一段结束时间必须等于 duration_sec；所有时间段相加必须等于总时长，禁止时间轴漏秒、重叠、倒退或只写到一半。
+   - frames.frame_time_sec 必须与同一套时间轴对齐：frame_index=0 的 frame_time_sec 必须为 0；后续 frame_index 按播放顺序递增；最后一个结果/承接关键帧应落在 duration_sec 或接近尾部，不能超过 duration_sec。
+   - 单个顶层分镜总时长不得超过 20 秒；如果「对白纯说话时长 + 动作/停顿/运镜/环境时长」超过 20 秒，必须拆成下一个顶层分镜或下一个 group 承接，禁止把长对白硬塞进 20 秒以内。
+
 2.0 panel_mode 字段含义（必须理解后再输出）：
    - panel_mode 是“分镜结构类型”，不是画面风格字段，用来告诉系统这个顶层分镜应该按单张图生成，还是按一组有关联的关键帧生成。
    - panel_mode="single"：表示这个分镜只需要 1 张代表图就能表达清楚，例如单人一句话、单一表情、单一静态动作、普通反应镜头。此时 frames 只能有 1 个元素，frame_index=0，frame_time_sec=0，frame_role="hero"，dependency_frame_ids=[]，不需要 group_video_prompt。
@@ -55,7 +62,7 @@
    - 如果不是超高密度动作，20 秒内容需要超过 8 个关键状态时优先拆成两个顶层 group；如果明确是超高密度动作/密集运镜，可保留一个 group 并输出最多 20 帧。
    - 一个 group 是一个顶层分镜，内部 frames 表示该组视频中的不同关键时刻；不要把同一连续动作拆成多个顶层分镜
 	   - group.frames 每帧包含 frame_index、frame_time_sec、frame_role、image_prompt、video_prompt、dependency_frame_ids
-	   - frame_time_sec 从 0 开始递增，不能超过 duration_sec；后续帧如依赖前面画面，dependency_frame_ids 只能引用更早 frame_index；若本顶层分镜第一帧需要承接上一顶层分镜尾帧，可在 frame_index=0 的 dependency_frame_ids 中写入 "FP"，表示参考上一分镜尾帧
+	   - frame_time_sec 从 0 开始递增，不能超过 duration_sec，并必须与 video_prompt/group_video_prompt 的时间轴秒数对应；后续帧如依赖前面画面，dependency_frame_ids 只能引用更早 frame_index；若本顶层分镜第一帧需要承接上一顶层分镜尾帧，可在 frame_index=0 的 dependency_frame_ids 中写入 "FP"，表示参考上一分镜尾帧
 	   - 第一帧是这组视频的原始状态/开场状态，不要写成事件已经发生完后的结果
 
 2.2 道具资产关联规则：
