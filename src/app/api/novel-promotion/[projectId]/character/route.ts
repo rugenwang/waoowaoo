@@ -21,7 +21,7 @@ function normalizeString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-// 更新角色信息（名字或介绍）
+// 更新角色信息（名字、介绍或声音参考文案）
 export const PATCH = apiHandler(async (
   request: NextRequest,
   context: { params: Promise<{ projectId: string }> }
@@ -33,20 +33,23 @@ export const PATCH = apiHandler(async (
   if (isErrorResponse(authResult)) return authResult
 
   const body = await request.json()
-  const { characterId, name, introduction } = body
+  const { characterId, name, introduction, voicePrompt } = body
 
   if (!characterId) {
     throw new ApiError('INVALID_PARAMS')
   }
 
-  if (!name && introduction === undefined) {
+  if (!name && introduction === undefined && voicePrompt === undefined) {
     throw new ApiError('INVALID_PARAMS')
   }
 
   // 构建更新数据
-  const updateData: { name?: string; introduction?: string } = {}
+  const updateData: { name?: string; introduction?: string; voicePrompt?: string | null } = {}
   if (name) updateData.name = name.trim()
   if (introduction !== undefined) updateData.introduction = introduction.trim()
+  if (voicePrompt !== undefined) {
+    updateData.voicePrompt = typeof voicePrompt === 'string' ? voicePrompt.trim() || null : null
+  }
 
   // 更新角色
   const character = await prisma.novelPromotionCharacter.update({

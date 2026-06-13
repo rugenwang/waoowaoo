@@ -185,6 +185,10 @@ interface EpisodeSelectorProps {
     projectName?: string  // 项目名称，显示在左上角
 }
 
+function formatEpisodeTitle(episode: Episode, index: number): string {
+    return `第 ${index + 1} 集 · ${episode.title}`
+}
+
 export function EpisodeSelector({
     episodes,
     currentId,
@@ -199,7 +203,11 @@ export function EpisodeSelector({
     const [editingId, setEditingId] = useState<string | null>(null)
     const [editingName, setEditingName] = useState('')
     const [deletingId, setDeletingId] = useState<string | null>(null)
-    const currentEp = episodes.find(e => e.id === currentId) || episodes[0]
+    const currentIndex = episodes.findIndex(e => e.id === currentId)
+    const currentEp = currentIndex >= 0 ? episodes[currentIndex] : episodes[0]
+    const currentEpisodeTitle = currentEp
+        ? formatEpisodeTitle(currentEp, currentIndex >= 0 ? currentIndex : 0)
+        : ''
     const menuRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
@@ -229,7 +237,7 @@ export function EpisodeSelector({
                         {projectName || t('project')}
                     </span>
                     <span className="text-sm text-[var(--glass-text-secondary)] line-clamp-1 max-w-[160px]">
-                        {currentEp.title}
+                        {currentEpisodeTitle}
                     </span>
                 </div>
                 <AppIcon name="chevronDown" className={`w-4 h-4 text-[var(--glass-text-tertiary)] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
@@ -238,7 +246,8 @@ export function EpisodeSelector({
             {isOpen && (
                 <div className="glass-surface-modal absolute left-0 top-full mt-2 w-72 origin-top-left p-2 animate-fadeIn">
                     <div className="max-h-[300px] overflow-y-auto app-scrollbar space-y-1">
-                        {episodes.map(ep => {
+                        {episodes.map((ep, index) => {
+                            const episodeTitle = formatEpisodeTitle(ep, index)
                             const statusColor = ep.status?.visual === 'ready'
                                 ? 'bg-[var(--glass-tone-success-fg)]'
                                 : ep.status?.script === 'ready'
@@ -291,7 +300,7 @@ export function EpisodeSelector({
                                 return (
                                     <div key={ep.id} className="flex items-center gap-2 p-3 rounded-xl bg-[var(--glass-tone-danger-bg)] border border-[var(--glass-tone-danger-fg)]/30">
                                         <div className="flex-1 text-sm font-medium text-[var(--glass-tone-danger-fg)] truncate">
-                                            {t('deleteEpisode')}：{ep.title}
+                                            {t('deleteEpisode')}：{episodeTitle}
                                         </div>
                                         <button
                                             onClick={() => {
@@ -327,7 +336,7 @@ export function EpisodeSelector({
                                     >
                                         <div className={`w-2 h-10 rounded-full ${statusColor}`} />
                                         <div className="flex-1">
-                                            <div className="font-bold text-[var(--glass-text-primary)] text-sm truncate">{ep.title}</div>
+                                            <div className="font-bold text-[var(--glass-text-primary)] text-sm truncate">{episodeTitle}</div>
                                             {ep.summary && (
                                                 <div className="text-xs text-[var(--glass-text-tertiary)] truncate">{ep.summary}</div>
                                             )}

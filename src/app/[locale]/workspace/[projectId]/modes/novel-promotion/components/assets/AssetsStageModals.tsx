@@ -23,6 +23,7 @@ interface EditingAppearanceState {
   description: string
   descriptionIndex?: number
   introduction?: string | null
+  voicePrompt?: string | null
 }
 
 interface EditingLocationState {
@@ -182,6 +183,7 @@ export default function AssetsStageModals({
           description={editingAppearance.description}
           descriptionIndex={editingAppearance.descriptionIndex}
           introduction={editingAppearance.introduction}
+          voicePrompt={editingAppearance.voicePrompt}
           projectId={projectId}
           onClose={closeEditingAppearance}
           onSave={(characterId, appearanceId) => void handleGenerateImage('character', characterId, appearanceId)}

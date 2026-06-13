@@ -30,6 +30,29 @@ export function useUpdateProjectCharacterIntroduction(projectId: string) {
     })
 }
 
+export function useUpdateProjectCharacterVoicePrompt(projectId: string) {
+    const queryClient = useQueryClient()
+    const invalidateProjectAssets = () =>
+        invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+
+    return useMutation({
+        mutationFn: async ({
+            characterId,
+            voicePrompt,
+        }: {
+            characterId: string
+            voicePrompt: string
+        }) => {
+            return await requestJsonWithError(`/api/novel-promotion/${projectId}/character`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ characterId, voicePrompt }),
+            }, 'Failed to update character voice prompt')
+        },
+        onSuccess: invalidateProjectAssets,
+    })
+}
+
 /**
  * AI 修改项目角色形象描述
  */

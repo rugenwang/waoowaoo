@@ -130,6 +130,8 @@ export const POST = apiHandler(async (
   const formData = await request.formData()
   const file = formData.get('file') as File
   const characterId = formData.get('characterId') as string
+  const voicePromptValue = formData.get('voicePrompt')
+  const voicePrompt = typeof voicePromptValue === 'string' ? voicePromptValue.trim() : ''
 
   if (!file || !characterId) {
     throw new ApiError('INVALID_PARAMS')
@@ -159,7 +161,7 @@ export const POST = apiHandler(async (
       voiceType: 'uploaded',
       voiceId: null,
       customVoiceUrl: audioUrl,
-      voicePrompt: null
+      voicePrompt: voicePrompt || null
     }
   })
 

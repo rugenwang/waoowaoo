@@ -19,6 +19,7 @@ interface EditingAppearance {
     description: string
     descriptionIndex?: number
     introduction?: string | null  // 角色介绍
+    voicePrompt?: string | null
 }
 
 interface EditingLocation {
@@ -98,7 +99,9 @@ export function useAssetModals({
             characterName: character.name,
             appearanceId: appearance.id,
             description: description,
-            descriptionIndex
+            descriptionIndex,
+            introduction: character.introduction,
+            voicePrompt: character.voicePrompt,
         })
     }
 
@@ -118,13 +121,20 @@ export function useAssetModals({
     }
 
     // 编辑角色形象
-    const handleEditAppearance = (characterId: string, characterName: string, appearance: CharacterAppearance, introduction?: string | null) => {
+    const handleEditAppearance = (
+        characterId: string,
+        characterName: string,
+        appearance: CharacterAppearance,
+        introduction?: string | null,
+        voicePrompt?: string | null,
+    ) => {
         setEditingAppearance({
             characterId,
             characterName,
             appearanceId: appearance.id,
             description: appearance.description || '',
-            introduction
+            introduction,
+            voicePrompt,
         })
     }
 

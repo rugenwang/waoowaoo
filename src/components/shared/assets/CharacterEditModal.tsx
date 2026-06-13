@@ -13,6 +13,7 @@ import {
     useUpdateCharacterName,
     useUpdateProjectAppearanceDescription,
     useUpdateProjectCharacterIntroduction,
+    useUpdateProjectCharacterVoicePrompt,
     useUpdateProjectCharacterName,
 } from '@/lib/query/hooks'
 import { AiModifyDescriptionField } from './AiModifyDescriptionField'
@@ -29,10 +30,12 @@ export interface CharacterEditModalProps {
     descriptionIndex?: number
     isTaskRunning?: boolean
     introduction?: string | null
+    voicePrompt?: string | null
     onClose: () => void
     onSave: (characterId: string, appearanceId: string) => void
     onUpdate?: (newDescription: string) => void
     onIntroductionUpdate?: (newIntroduction: string) => void
+    onVoicePromptUpdate?: (newVoicePrompt: string) => void
     onNameUpdate?: (newName: string) => void
     onRefresh?: () => void
 }
@@ -49,10 +52,12 @@ export function CharacterEditModal({
     descriptionIndex,
     isTaskRunning = false,
     introduction,
+    voicePrompt,
     onClose,
     onSave,
     onUpdate,
     onIntroductionUpdate,
+    onVoicePromptUpdate,
     onNameUpdate,
     onRefresh,
 }: CharacterEditModalProps) {
@@ -65,6 +70,7 @@ export function CharacterEditModal({
     const [editingName, setEditingName] = useState(characterName)
     const [editingDescription, setEditingDescription] = useState(description)
     const [editingIntroduction, setEditingIntroduction] = useState(introduction || '')
+    const [editingVoicePrompt, setEditingVoicePrompt] = useState(voicePrompt || '')
     const [aiModifyInstruction, setAiModifyInstruction] = useState('')
     const [isAiModifying, setIsAiModifying] = useState(false)
     const [isSaving, setIsSaving] = useState(false)
@@ -98,6 +104,7 @@ export function CharacterEditModal({
     const updateAssetHubAppearanceDesc = useUpdateCharacterAppearanceDescription()
     const updateProjectAppearanceDesc = useUpdateProjectAppearanceDescription(projectId ?? '')
     const updateProjectIntroduction = useUpdateProjectCharacterIntroduction(projectId ?? '')
+    const updateProjectVoicePrompt = useUpdateProjectCharacterVoicePrompt(projectId ?? '')
     const aiModifyAssetHub = useAiModifyCharacterDescription()
     const aiModifyProject = useAiModifyProjectAppearanceDescription(projectId ?? '')
 
@@ -149,6 +156,18 @@ export function CharacterEditModal({
             introduction: nextIntro,
         })
         onIntroductionUpdate?.(nextIntro)
+    }
+
+    const persistVoicePromptIfNeeded = async () => {
+        if (mode !== 'project' || !projectId) return
+        if (editingVoicePrompt === (voicePrompt || '')) return
+
+        const nextVoicePrompt = editingVoicePrompt.trim()
+        await updateProjectVoicePrompt.mutateAsync({
+            characterId,
+            voicePrompt: nextVoicePrompt,
+        })
+        onVoicePromptUpdate?.(nextVoicePrompt)
     }
 
     const handleAiModify = async () => {
@@ -214,6 +233,7 @@ export function CharacterEditModal({
             await persistNameIfNeeded()
             await persistDescription()
             await persistIntroductionIfNeeded()
+            await persistVoicePromptIfNeeded()
 
             onUpdate?.(editingDescription)
             onRefresh?.()
@@ -237,6 +257,7 @@ export function CharacterEditModal({
                 await persistNameIfNeeded()
                 await persistDescription()
                 await persistIntroductionIfNeeded()
+                await persistVoicePromptIfNeeded()
 
                 onUpdate?.(savedDescription)
                 onRefresh?.()
@@ -305,6 +326,24 @@ export function CharacterEditModal({
                             />
                             <p className="glass-field-hint">
                                 {t('modal.introductionTip')}
+                            </p>
+                        </div>
+                    )}
+
+                    {mode === 'project' && (
+                        <div className="space-y-2">
+                            <label className="glass-field-label block">
+                                {t('modal.voicePrompt')}
+                            </label>
+                            <textarea
+                                value={editingVoicePrompt}
+                                onChange={(e) => setEditingVoicePrompt(e.target.value)}
+                                rows={3}
+                                className="glass-textarea-base w-full px-3 py-2 resize-none"
+                                placeholder={t('modal.voicePromptPlaceholder')}
+                            />
+                            <p className="glass-field-hint">
+                                {t('modal.voicePromptTip')}
                             </p>
                         </div>
                     )}

@@ -11,12 +11,14 @@ interface CharacterEditModalProps {
   appearanceId: number
   description: string
   introduction?: string | null
+  voicePrompt?: string | null
   descriptionIndex?: number
   projectId: string
   onClose: () => void
   onSave: (characterId: string, appearanceId: number) => void
   onUpdate: (newDescription: string) => void
   onIntroductionUpdate?: (newIntroduction: string) => void
+  onVoicePromptUpdate?: (newVoicePrompt: string) => void
   onNameUpdate?: (newName: string) => void
   isTaskRunning?: boolean
 }
@@ -27,12 +29,14 @@ export default function CharacterEditModal({
   appearanceId,
   description,
   introduction,
+  voicePrompt,
   descriptionIndex,
   projectId,
   onClose,
   onSave,
   onUpdate,
   onIntroductionUpdate,
+  onVoicePromptUpdate,
   onNameUpdate,
   isTaskRunning = false,
 }: CharacterEditModalProps) {
@@ -51,12 +55,14 @@ export default function CharacterEditModal({
       appearanceId={String(appearanceId)}
       description={description}
       introduction={introduction}
+      voicePrompt={voicePrompt}
       descriptionIndex={descriptionIndex}
       projectId={projectId}
       onClose={onClose}
       onSave={handleSave}
       onUpdate={onUpdate}
       onIntroductionUpdate={onIntroductionUpdate}
+      onVoicePromptUpdate={onVoicePromptUpdate}
       onNameUpdate={onNameUpdate}
       isTaskRunning={isTaskRunning}
     />

@@ -61,6 +61,7 @@ export const POST = apiHandler(async (
   const sourceAudioKey = readString(body?.sourceAudioKey)
   const characterId = readString(body?.characterId)
   const userPromptText = readString(body?.promptText)
+  const syncPromptToCharacter = body?.syncPromptToCharacter === true
   if (!panelId || !text) {
     throw new ApiError('INVALID_PARAMS')
   }
@@ -158,18 +159,28 @@ export const POST = apiHandler(async (
     sourceLabel,
     sourceCharacterId,
     sourceAudioKey: mode === 'video-vocal' ? sourceAudioKey : undefined,
+    syncPromptToCharacter: mode === 'character-voice' && syncPromptToCharacter,
     generatedAt: new Date().toISOString(),
     model: 'local-voxcpm-clone',
   }
 
-  await prisma.novelPromotionPanel.update({
-    where: { id: panel.id },
-    data: {
-      dubbingAudioUrl: key,
-      dubbingAudioMediaId: media.id,
-      dubbingSourceType: mode,
-      dubbingMetaJson: JSON.stringify(meta),
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.novelPromotionPanel.update({
+      where: { id: panel.id },
+      data: {
+        dubbingAudioUrl: key,
+        dubbingAudioMediaId: media.id,
+        dubbingSourceType: mode,
+        dubbingMetaJson: JSON.stringify(meta),
+      },
+    })
+
+    if (mode === 'character-voice' && syncPromptToCharacter && sourceCharacterId && promptText) {
+      await tx.novelPromotionCharacter.update({
+        where: { id: sourceCharacterId },
+        data: { voicePrompt: promptText },
+      })
+    }
   })
 
   return NextResponse.json({

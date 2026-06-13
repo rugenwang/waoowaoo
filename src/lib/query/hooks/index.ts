@@ -97,6 +97,7 @@ export {
     useUpdateProjectAppearanceDescription,
     useUpdateProjectLocationDescription,
     useUpdateProjectCharacterIntroduction,
+    useUpdateProjectCharacterVoicePrompt,
     useAiModifyProjectAppearanceDescription,
     useAiModifyProjectLocationDescription,
     useAiModifyProjectPropDescription,

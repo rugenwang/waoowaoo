@@ -53,6 +53,7 @@ export default function PanelDubbingDialog({
   const [selectedCharacterId, setSelectedCharacterId] = useState('')
   const [saveVoiceCharacterId, setSaveVoiceCharacterId] = useState('')
   const [promptText, setPromptText] = useState(defaultDialogue)
+  const [promptTextDirty, setPromptTextDirty] = useState(false)
   const [extracted, setExtracted] = useState<{ audioKey: string; audioUrl: string } | null>(null)
   const [generatedAudioUrl, setGeneratedAudioUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -71,18 +72,32 @@ export default function PanelDubbingDialog({
     setSelectedCharacterId(firstVoiceCharacterId)
     setSaveVoiceCharacterId(firstCharacterId)
     setPromptText(defaultDialogue)
+    setPromptTextDirty(false)
     setExtracted(null)
     setGeneratedAudioUrl(null)
     setError(null)
   }, [defaultDialogue, defaultEndSec, firstCharacterId, firstVoiceCharacterId, open])
 
   useEffect(() => {
-    if (mode !== 'character-voice') return
+    if (!open || mode !== 'character-voice' || promptTextDirty) return
     const nextPrompt = selectedCharacter?.voicePrompt?.trim()
       || (selectedCharacter ? `${selectedCharacter.name}的角色音色` : '')
-      || text
+      || defaultDialogue
     setPromptText(nextPrompt)
-  }, [mode, selectedCharacter, text])
+  }, [
+    defaultDialogue,
+    mode,
+    open,
+    promptTextDirty,
+    selectedCharacterId,
+    selectedCharacter?.name,
+    selectedCharacter?.voicePrompt,
+  ])
+
+  useEffect(() => {
+    if (!open || mode !== 'video-vocal' || promptTextDirty) return
+    setPromptText(text)
+  }, [mode, open, promptTextDirty, text])
 
   if (!open || typeof document === 'undefined') return null
 
@@ -118,6 +133,7 @@ export default function PanelDubbingDialog({
       await uploadCharacterVoice.mutateAsync({
         characterId: saveVoiceCharacterId,
         file: new File([blob], 'extracted-vocals.wav', { type: 'audio/wav' }),
+        voicePrompt: promptText.trim() || text.trim(),
       })
       alert('已保存到角色音色')
     } catch (err: unknown) {
@@ -136,6 +152,7 @@ export default function PanelDubbingDialog({
         promptText: promptText.trim() || text.trim(),
         sourceAudioKey: mode === 'video-vocal' ? extracted?.audioKey : undefined,
         characterId: mode === 'character-voice' ? selectedCharacterId : undefined,
+        syncPromptToCharacter: mode === 'character-voice',
       })
       setGeneratedAudioUrl(result.audioUrl)
     } catch (err: unknown) {
@@ -251,7 +268,10 @@ export default function PanelDubbingDialog({
               <span className="mb-1 block text-xs font-medium text-[var(--glass-text-tertiary)]">选择角色音色</span>
               <select
                 value={selectedCharacterId}
-                onChange={(event) => setSelectedCharacterId(event.target.value)}
+                onChange={(event) => {
+                  setSelectedCharacterId(event.target.value)
+                  setPromptTextDirty(false)
+                }}
                 className="w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] px-3 py-2 text-sm text-[var(--glass-text-secondary)] outline-none"
               >
                 {characters.map((character) => (
@@ -267,9 +287,17 @@ export default function PanelDubbingDialog({
             <span className="mb-1 block text-xs font-medium text-[var(--glass-text-tertiary)]">声音参考文案</span>
             <textarea
               value={promptText}
-              onChange={(event) => setPromptText(event.target.value)}
+              onChange={(event) => {
+                setPromptText(event.target.value)
+                setPromptTextDirty(true)
+              }}
               className="min-h-20 w-full resize-y rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] px-3 py-2 text-sm leading-6 text-[var(--glass-text-secondary)] outline-none focus:border-[var(--glass-tone-info-fg)]"
             />
+            <span className="mt-1 block text-xs text-[var(--glass-text-tertiary)]">
+              {mode === 'character-voice'
+                ? '确认配音后会同步保存到所选角色的声音文案描述。'
+                : '保存为角色音色时会同步保存到所选角色的声音文案描述。'}
+            </span>
           </label>
 
           {generatedAudioUrl && (

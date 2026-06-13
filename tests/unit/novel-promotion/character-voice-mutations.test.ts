@@ -26,7 +26,10 @@ vi.mock('@/lib/query/mutations/mutation-shared', async () => {
   }
 })
 
-import { useUpdateProjectCharacterVoiceSettings } from '@/lib/query/mutations/character-voice-mutations'
+import {
+  useUpdateProjectCharacterVoiceSettings,
+  useUploadProjectCharacterVoice,
+} from '@/lib/query/mutations/character-voice-mutations'
 
 interface UpdateVoiceMutation {
   mutationFn: (variables: {
@@ -34,6 +37,14 @@ interface UpdateVoiceMutation {
     voiceType: 'qwen-designed' | 'uploaded' | 'custom' | null
     voiceId?: string
     customVoiceUrl?: string
+  }) => Promise<unknown>
+}
+
+interface UploadVoiceMutation {
+  mutationFn: (variables: {
+    characterId: string
+    file: File
+    voicePrompt?: string
   }) => Promise<unknown>
 }
 
@@ -72,5 +83,24 @@ describe('project character voice mutations', () => {
       },
       '更新音色失败',
     )
+  })
+
+  it('includes the voice prompt when uploading an extracted voice to a project character', async () => {
+    const mutation = useUploadProjectCharacterVoice('project-1') as unknown as UploadVoiceMutation
+    const file = new File(['audio'], 'voice.wav', { type: 'audio/wav' })
+
+    await mutation.mutationFn({
+      characterId: 'character-1',
+      file,
+      voicePrompt: '年轻女声，温柔但带一点紧张感',
+    })
+
+    expect(requestJsonWithErrorMock).toHaveBeenCalledTimes(1)
+    const [url, init] = requestJsonWithErrorMock.mock.calls[0]
+    expect(url).toBe('/api/novel-promotion/project-1/character-voice')
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeInstanceOf(FormData)
+    expect(init.body.get('characterId')).toBe('character-1')
+    expect(init.body.get('voicePrompt')).toBe('年轻女声，温柔但带一点紧张感')
   })
 })

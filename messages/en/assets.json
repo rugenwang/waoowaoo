@@ -191,6 +191,9 @@
         "introduction": "Character Introduction",
         "introductionPlaceholder": "e.g.: The protagonist; 'I' refers to her. Others call her 'Snow' or 'Sister Snow'...",
         "introductionTip": "Describe the character's role in the story, narrative perspective (who 'I' refers to), how others address them",
+        "voicePrompt": "Voice Prompt Description",
+        "voicePromptPlaceholder": "e.g. Young female voice, clear and gentle, natural tone, slightly smiling...",
+        "voicePromptTip": "Default voice reference text for character video dubbing; saving character voices or character dubbing from the video page also syncs here",
         "saveIntroduction": "Save Introduction"
     },
     "toolbar": {

@@ -36,7 +36,13 @@ interface CharacterSectionProps {
     onAddCharacter: () => void
     onDeleteCharacter: (characterId: string) => void
     onDeleteAppearance: (characterId: string, appearanceId: string) => void
-    onEditAppearance: (characterId: string, characterName: string, appearance: CharacterAppearance, introduction?: string | null) => void
+    onEditAppearance: (
+        characterId: string,
+        characterName: string,
+        appearance: CharacterAppearance,
+        introduction?: string | null,
+        voicePrompt?: string | null,
+    ) => void
     // 🔥 V6.6 重构：重命名为 handleGenerateImage
     handleGenerateImage: (type: 'character' | 'location', id: string, appearanceId?: string, count?: number) => Promise<void>
     onSelectImage: (characterId: string, appearanceId: string, imageIndex: number | null) => void
@@ -318,7 +324,13 @@ export default function CharacterSection({
                                             key={`${character.id}-${appearance.appearanceIndex}`}
                                             character={character}
                                             appearance={appearance}
-                                            onEdit={() => onEditAppearance(character.id, character.name, appearance, character.introduction)}
+                                            onEdit={() => onEditAppearance(
+                                                character.id,
+                                                character.name,
+                                                appearance,
+                                                character.introduction,
+                                                character.voicePrompt,
+                                            )}
                                             onDelete={() => onDeleteCharacter(character.id)}
                                             onDeleteAppearance={() => appearance.id && onDeleteAppearance(character.id, appearance.id)}
                                             onRegenerate={(count) => {

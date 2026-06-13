@@ -508,15 +508,23 @@ function buildPanelFramePrompt(params: {
     ...params.frameReferenceIndexes.map((index) => `F${index + 1}`),
   ].filter(Boolean).join(', ')
   const hasReferenceRule = params.frame.frameIndex > 0 || params.usesPreviousTail
+  const hasLinkedFrameReference = params.frameReferenceImageCount > 0 || params.usesPreviousTail
+  const zhLinkedFrameContinuityRule = hasLinkedFrameReference
+    ? '前一帧/关联帧连续性：承接前一帧画面，人物整体位置、排布顺序、相对间距基本保持一致，允许位置出现微小偏移；严禁不同人物挤占、重叠在同一位置；站姿、动作可自由变化。'
+    : ''
+  const enLinkedFrameContinuityRule = hasLinkedFrameReference
+    ? 'Previous/dependency frame continuity: continue from the previous frame image; keep overall character positions, ordering, and relative spacing basically consistent, allowing only slight positional shifts; never let different characters crowd into or overlap the same spot; standing posture and actions may change freely.'
+    : ''
   const zhReferenceRule = hasReferenceRule
     ? [
       params.frameReferenceImageCount > 0
         ? `参考帧规则：参考图前 ${params.frameReferenceImageCount} 张是直接关联关键帧${referenceLabels ? `（${referenceLabels}）` : ''}。`
         : '参考帧规则：必须承接直接相邻剧情的角色、服饰、场景、光线和构图逻辑。',
       params.usesPreviousTail ? 'FP 表示本帧需要参考上一分镜的尾帧；请把上一分镜结尾状态自然承接为当前分镜开场状态，但不要原样复制上一帧构图。' : '',
-      '请根据直接关联帧和本帧剧本描述，生成顺滑过渡到当前秒点的画面；保留身份和服装一致，但不要原样复制参考帧姿势、表情、站位或构图。',
+      zhLinkedFrameContinuityRule,
+      '请根据直接关联帧和本帧剧本描述，生成顺滑过渡到当前秒点的画面；保留身份和服装一致，人物位置/排布/间距需保持连续，但不要原样复制参考帧姿势、表情或构图。',
       '本帧只表现当前秒点的关键状态，要有明确变化，例如动作进展、人物位置、手部/道具状态、视线、表情或场景转化。'
-    ].join('\n')
+    ].filter(Boolean).join('\n')
     : ''
   const enReferenceRule = hasReferenceRule
     ? [
@@ -524,9 +532,10 @@ function buildPanelFramePrompt(params: {
         ? `Reference-frame rule: the first ${params.frameReferenceImageCount} reference image(s) are directly linked keyframes${referenceLabels ? ` (${referenceLabels})` : ''}.`
         : 'Reference-frame rule: preserve continuity from the directly adjacent story beat.',
       params.usesPreviousTail ? 'FP means this frame references the previous panel tail frame; continue naturally from the previous ending state into this panel opening state without copying the previous composition exactly.' : '',
-      'Use the directly linked frame(s) and this frame script description to create a smooth current-frame image. Keep identity/outfit consistent, but do not copy the reference-frame pose, expression, position, or composition exactly.',
+      enLinkedFrameContinuityRule,
+      'Use the directly linked frame(s) and this frame script description to create a smooth current-frame image. Keep identity/outfit consistent and preserve character position/order/spacing continuity, but do not copy the reference-frame pose, expression, or composition exactly.',
       'Show only the current second state with a clear change: action progress, body position, hand/prop state, gaze, expression, or scene transition.'
-    ].join('\n')
+    ].filter(Boolean).join('\n')
     : ''
   const lines = params.locale === 'en'
     ? [
@@ -623,6 +632,7 @@ function buildPreviousTailReferenceHardRule(locale: TaskJobData['locale']): stri
       '- If the current panel location/scene text conflicts with FP, FP wins. Treat current location text only as story context, never as permission to change the FP environment.',
       '- Do not redesign, replace, or freely reinterpret the FP scene. Only adjust the camera framing slightly when the current panel description requires it.',
       '- Preserve FP continuity for character identity, outfit, hairstyle, prop state, spatial relationship, lighting direction, color mood, and story state.',
+      '- Continue the previous-frame image: keep overall character positions, ordering, and relative spacing basically consistent, allowing only slight positional shifts; never let different characters crowd into or overlap the same spot; standing posture and actions may change freely.',
       '- Do not ignore FP, but also do not copy FP exactly; create the next coherent still frame based on the current panel description.',
     ].join('\n')
   }
@@ -636,6 +646,7 @@ function buildPreviousTailReferenceHardRule(locale: TaskJobData['locale']): stri
     '- 如果当前分镜的场景/地点文字与 FP 不一致，必须以 FP 为准；当前场景文字只能作为剧情上下文，不能作为改变 FP 环境的依据。',
     '- 禁止重新设计、替换或自由发挥 FP 的场景；除非当前分镜描述明确要求，只允许轻微调整取景范围和构图。',
     '- 必须延续 FP 中的人物身份、服装发型、道具状态、空间关系、光线方向、色调氛围和剧情状态。',
+    '- 承接前一帧画面：人物整体位置、排布顺序、相对间距基本保持一致，允许位置出现微小偏移；严禁不同人物挤占、重叠在同一位置；站姿、动作可自由变化。',
     '- 不能忽略 FP，也不能原样复制 FP；要结合当前分镜描述生成顺滑衔接后的当前静态画面。',
   ].join('\n')
 }

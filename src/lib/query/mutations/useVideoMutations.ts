@@ -212,6 +212,7 @@ export function useCloneProjectPanelDubbing(projectId: string) {
       promptText?: string
       sourceAudioKey?: string
       characterId?: string
+      syncPromptToCharacter?: boolean
     }) =>
       await requestJsonWithError<{
         success: boolean
@@ -229,9 +230,12 @@ export function useCloneProjectPanelDubbing(projectId: string) {
         },
         '视频配音失败',
       ),
-    onSettled: async () => {
+    onSettled: async (_data, _error, payload) => {
       await invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
       await queryClient.invalidateQueries({ queryKey: ['episode-data', projectId], exact: false })
+      if (payload?.syncPromptToCharacter) {
+        await invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+      }
     },
   })
 }

@@ -11,10 +11,22 @@ export function useUploadProjectCharacterVoice(projectId: string) {
         invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
 
     return useMutation({
-        mutationFn: async ({ file, characterId }: { file: File; characterId: string }) => {
+        mutationFn: async ({
+            file,
+            characterId,
+            voicePrompt,
+        }: {
+            file: File
+            characterId: string
+            voicePrompt?: string
+        }) => {
             const formData = new FormData()
             formData.append('file', file)
             formData.append('characterId', characterId)
+            const trimmedPrompt = voicePrompt?.trim()
+            if (trimmedPrompt) {
+                formData.append('voicePrompt', trimmedPrompt)
+            }
 
             return await requestJsonWithError(`/api/novel-promotion/${projectId}/character-voice`, {
                 method: 'POST',

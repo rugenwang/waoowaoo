@@ -191,6 +191,9 @@
         "introduction": "角色介绍",
         "introductionPlaceholder": "例如：本书主角，第一人称'我'指的就是她。其他角色称她为'小雪'或'雪姐'...",
         "introductionTip": "描述角色在故事中的身份、叙述视角（如'我'对应谁）、其他角色如何称呼她等",
+        "voicePrompt": "声音文案描述",
+        "voicePromptPlaceholder": "例如：年轻女声，声音清亮温柔，语调自然，略带微笑感...",
+        "voicePromptTip": "用于角色视频配音的默认声音参考文案；从成片页保存角色音色或角色配音时也会同步到这里",
         "saveIntroduction": "保存介绍"
     },
     "toolbar": {

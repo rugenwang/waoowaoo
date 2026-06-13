@@ -311,6 +311,9 @@ describe('worker panel-image-task-handler behavior', () => {
         }),
       }),
     )
+    const prompt = (utilsMock.resolveImageSourceFromGeneration.mock.calls[0]?.[1] as { prompt?: string } | undefined)?.prompt || ''
+    expect(prompt).toContain('人物整体位置、排布顺序、相对间距基本保持一致')
+    expect(prompt).toContain('严禁不同人物挤占、重叠在同一位置')
   })
 
   it('regeneration branch -> keeps old image in previousImageUrl and stores candidates only', async () => {
@@ -652,6 +655,9 @@ describe('worker panel-image-task-handler behavior', () => {
         }),
       }),
     )
+    const secondPrompt = (utilsMock.resolveImageSourceFromGeneration.mock.calls[1]?.[1] as { prompt?: string } | undefined)?.prompt || ''
+    expect(secondPrompt).toContain('人物整体位置、排布顺序、相对间距基本保持一致')
+    expect(secondPrompt).toContain('严禁不同人物挤占、重叠在同一位置')
   })
 
   it('previous-tail flag without available previous tail -> throws explicit error', async () => {
@@ -676,7 +682,36 @@ describe('worker panel-image-task-handler behavior', () => {
       usePreviousPanelTailAsReference: true,
       frames: [],
     })
-    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce(null)
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce({
+      id: 'panel-1',
+      storyboard: { episodeId: 'episode-1' },
+    })
+    prismaMock.novelPromotionPanel.findMany.mockResolvedValueOnce([
+      {
+        id: 'panel-0',
+        panelIndex: 0,
+        panelMode: 'single',
+        imageUrl: null,
+        imageMedia: null,
+        storyboard: {
+          id: 'storyboard-1',
+          clip: { id: 'clip-1', createdAt: new Date('2026-01-01T00:00:00Z') },
+        },
+        frames: [],
+      },
+      {
+        id: 'panel-1',
+        panelIndex: 1,
+        panelMode: 'single',
+        imageUrl: null,
+        imageMedia: null,
+        storyboard: {
+          id: 'storyboard-1',
+          clip: { id: 'clip-1', createdAt: new Date('2026-01-01T00:01:00Z') },
+        },
+        frames: [],
+      },
+    ])
 
     await expect(handlePanelImageTask(buildJob({ candidateCount: 1 }))).rejects.toThrow(
       '当前分镜首帧需要参考上一分镜尾帧，但上一分镜还没有可用尾帧图片',

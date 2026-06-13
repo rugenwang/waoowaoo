@@ -43,4 +43,22 @@ describe('CapsuleNav layering', () => {
     expect(html).not.toContain('z-50 animate-fadeInDown')
     expect(html).not.toContain('z-[60]')
   })
+
+  it('shows the episode ordinal next to the current episode title', () => {
+    Reflect.set(globalThis, 'React', React)
+
+    const html = renderToStaticMarkup(
+      createElement(EpisodeSelector, {
+        episodes: [
+          { id: 'episode-1', title: '开端' },
+          { id: 'episode-2', title: '意外线索' },
+        ],
+        currentId: 'episode-2',
+        onSelect: () => undefined,
+        projectName: '实习生的秘密档案',
+      }),
+    )
+
+    expect(html).toContain('第 2 集 · 意外线索')
+  })
 })
