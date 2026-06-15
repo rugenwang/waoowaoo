@@ -423,6 +423,14 @@ export function useStoryboardImageGeneration({
   }, [setLocalStoryboards])
 
   const regeneratePanelFrameImage = useCallback(async (panelId: string, frameId: string) => {
+    const panel = localStoryboards
+      .flatMap((storyboard) => getStoryboardPanels(storyboard))
+      .find((item) => item.id === panelId)
+    const usePreviousPanelTailAsReference =
+      typeof panel?.usePreviousPanelTailAsReference === 'boolean'
+        ? panel.usePreviousPanelTailAsReference
+        : undefined
+
     if (taskQueue.enabled) {
       taskQueue.enqueue({
         id: `storyboard-frame:${frameId}:${Date.now()}`,
@@ -437,7 +445,11 @@ export function useStoryboardImageGeneration({
         label: `关键帧：${frameId.slice(0, 6)}`,
         submit: async () => {
           markPanelFrameGenerationState(panelId, frameId, 'processing')
-          const data = await regeneratePanelFrameMutation.mutateAsync({ panelId, frameId }) as { taskId?: string }
+          const data = await regeneratePanelFrameMutation.mutateAsync({
+            panelId,
+            frameId,
+            usePreviousPanelTailAsReference,
+          }) as { taskId?: string }
           return { taskId: String(data?.taskId || '') }
         },
         onDone: async () => {
@@ -462,7 +474,11 @@ export function useStoryboardImageGeneration({
     markPanelFrameGenerationState(panelId, frameId, 'processing')
 
     try {
-      const result = await regeneratePanelFrameMutation.mutateAsync({ panelId, frameId }) as { async?: boolean; taskId?: string }
+      const result = await regeneratePanelFrameMutation.mutateAsync({
+        panelId,
+        frameId,
+        usePreviousPanelTailAsReference,
+      }) as { async?: boolean; taskId?: string }
       if (result?.async) {
         if (onSilentRefresh) await onSilentRefresh()
         refreshEpisode()
@@ -484,6 +500,7 @@ export function useStoryboardImageGeneration({
     }
   }, [
     markPanelFrameGenerationState,
+    localStoryboards,
     onSilentRefresh,
     projectId,
     refreshEpisode,

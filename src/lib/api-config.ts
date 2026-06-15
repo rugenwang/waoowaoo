@@ -48,6 +48,8 @@ export interface ModelSelection {
 
 type GatewayRouteType = 'official' | 'openai-compat'
 
+const OFFICIAL_ONLY_PROVIDER_KEYS = new Set(['bailian', 'siliconflow'])
+
 interface CustomProvider {
   id: string
   name: string
@@ -176,7 +178,10 @@ function parseCustomProviders(rawProviders: string | null | undefined): CustomPr
       throw new Error(`PROVIDER_GATEWAY_ROUTE_INVALID: providers[${index}].gatewayRoute`)
     } else if (providerKey === 'openai-compatible' && gatewayRouteRaw === 'official') {
       throw new Error(`PROVIDER_GATEWAY_ROUTE_INVALID: providers[${index}].gatewayRoute`)
-    } else if (providerKey !== 'openai-compatible' && gatewayRouteRaw === 'openai-compat') {
+    } else if (
+      (providerKey === 'gemini-compatible' || OFFICIAL_ONLY_PROVIDER_KEYS.has(providerKey))
+      && gatewayRouteRaw === 'openai-compat'
+    ) {
       throw new Error(`PROVIDER_GATEWAY_ROUTE_INVALID: providers[${index}].gatewayRoute`)
     } else {
       gatewayRoute = gatewayRouteRaw

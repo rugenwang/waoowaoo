@@ -49,11 +49,25 @@ function patchEpisodePanelsCache(
 export function useRegenerateProjectPanelImage(projectId: string) {
     const queryClient = useQueryClient()
     return useMutation({
-        mutationFn: async ({ panelId, count }: { panelId: string; count?: number }) => {
+        mutationFn: async ({
+            panelId,
+            count,
+            usePreviousPanelTailAsReference,
+        }: {
+            panelId: string
+            count?: number
+            usePreviousPanelTailAsReference?: boolean
+        }) => {
             const res = await apiFetch(`/api/novel-promotion/${projectId}/regenerate-panel-image`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ panelId, count: count ?? 1 }),
+                body: JSON.stringify({
+                    panelId,
+                    count: count ?? 1,
+                    ...(typeof usePreviousPanelTailAsReference === 'boolean'
+                        ? { usePreviousPanelTailAsReference }
+                        : {}),
+                }),
             })
             if (!res.ok) {
                 const error = await res.json().catch(() => ({}))
@@ -180,14 +194,23 @@ export function useRegenerateProjectPanelFrameImage(projectId: string) {
         mutationFn: async ({
             panelId,
             frameId,
+            usePreviousPanelTailAsReference,
         }: {
             panelId: string
             frameId: string
+            usePreviousPanelTailAsReference?: boolean
         }) => {
             return await requestJsonWithError(`/api/novel-promotion/${projectId}/regenerate-panel-frame-image`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ panelId, frameId, count: 1 }),
+                body: JSON.stringify({
+                    panelId,
+                    frameId,
+                    count: 1,
+                    ...(typeof usePreviousPanelTailAsReference === 'boolean'
+                        ? { usePreviousPanelTailAsReference }
+                        : {}),
+                }),
             }, '重新生成关键帧失败')
         },
         onMutate: ({ frameId }) => {

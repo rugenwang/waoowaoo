@@ -11,7 +11,11 @@ import {
 } from './image-generation-runtime'
 
 interface RegeneratePanelMutationLike {
-  mutateAsync: (payload: { panelId: string; count: number }) => Promise<unknown>
+  mutateAsync: (payload: {
+    panelId: string
+    count: number
+    usePreviousPanelTailAsReference?: boolean
+  }) => Promise<unknown>
 }
 
 interface UsePanelImageRegenerationParams {
@@ -48,6 +52,14 @@ export function usePanelImageRegeneration({
       force: boolean = false,
       options?: { handoffRefreshOnSubmit?: boolean },
     ): Promise<{ taskId?: string } | null> => {
+      const panel = localStoryboards
+        .flatMap((storyboard) => getStoryboardPanels(storyboard))
+        .find((item) => item.id === panelId)
+      const usePreviousPanelTailAsReference =
+        typeof panel?.usePreviousPanelTailAsReference === 'boolean'
+          ? panel.usePreviousPanelTailAsReference
+          : undefined
+
       if (queueMode) {
         taskQueue.enqueue({
           id: `storyboard-single:${panelId}:${Date.now()}`,
@@ -58,7 +70,11 @@ export function usePanelImageRegeneration({
           label: `分镜：镜头 ${panelId.slice(0, 6)}`,
           submit: async () => {
             setSubmittingPanelImageIds((previous) => new Set(previous).add(panelId))
-            const data = await regeneratePanelMutation.mutateAsync({ panelId, count }) as any
+            const data = await regeneratePanelMutation.mutateAsync({
+              panelId,
+              count,
+              usePreviousPanelTailAsReference,
+            }) as any
             const taskId = String((data as any)?.taskId || '')
             return { taskId }
           },
@@ -92,7 +108,11 @@ export function usePanelImageRegeneration({
 
       let handoffToTaskState = false
       try {
-        const data = await regeneratePanelMutation.mutateAsync({ panelId, count })
+        const data = await regeneratePanelMutation.mutateAsync({
+          panelId,
+          count,
+          usePreviousPanelTailAsReference,
+        })
         const result = (data || {}) as StoryboardImageMutationResult
 
         if (result.async) {
@@ -131,6 +151,7 @@ export function usePanelImageRegeneration({
       }
     },
     [
+      localStoryboards,
       projectId,
       queueMode,
       onSilentRefresh,

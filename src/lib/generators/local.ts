@@ -1,3 +1,7 @@
+import crypto from 'node:crypto'
+import { promises as fs } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { BaseImageGenerator, BaseVideoGenerator, type GenerateResult, type ImageGenerateParams, type VideoGenerateParams } from './base'
 import { getProviderConfig } from '@/lib/api-config'
 import { normalizeToBase64ForGeneration, normalizeReferenceImagesForGeneration } from '@/lib/media/outbound-image'
@@ -7,6 +11,10 @@ type LocalImageOptions = {
   modelId?: string
   modelKey?: string
   size?: string // e.g. "1024x1024"
+  resolution?: string
+  aspectRatio?: string
+  n?: number
+  image2apiModel?: string
   steps?: number
   guidance?: number
   seed?: number
@@ -54,6 +62,94 @@ function parseSize(size?: string): { width: number; height: number } | null {
   const match = /^(\d{2,5})x(\d{2,5})$/i.exec(raw)
   if (!match) return null
   return { width: Number(match[1]), height: Number(match[2]) }
+}
+
+function isAspectRatio(value?: string): boolean {
+  return !!value && /^\d{1,2}:\d{1,2}$/.test(value.trim())
+}
+
+function inferKnownAspectRatio(value?: string): string | null {
+  if (!value) return null
+  const parsed = parseSize(value)
+  if (!parsed) return null
+  const ratio = parsed.width / parsed.height
+  const candidates: Array<[string, number]> = [
+    ['1:1', 1],
+    ['16:9', 16 / 9],
+    ['9:16', 9 / 16],
+    ['4:3', 4 / 3],
+    ['3:4', 3 / 4],
+    ['3:2', 3 / 2],
+    ['2:3', 2 / 3],
+  ]
+  const best = candidates
+    .map(([label, target]) => ({ label, diff: Math.abs(target - ratio) }))
+    .sort((left, right) => left.diff - right.diff)[0]
+  return best && best.diff <= 0.04 ? best.label : null
+}
+
+function resolveImage2ApiCurlSize(options: LocalImageOptions): string {
+  if (isAspectRatio(options.aspectRatio)) return options.aspectRatio!.trim()
+  if (isAspectRatio(options.size)) return options.size!.trim()
+  const fromSize = inferKnownAspectRatio(options.size)
+  if (fromSize) return fromSize
+  const fromResolution = inferKnownAspectRatio(options.resolution)
+  if (fromResolution) return fromResolution
+  return '16:9'
+}
+
+function dataUrlToImageBytes(dataUrl: string, index: number): { bytes: Buffer; mimeType: string; ext: string } {
+  const marker = ';base64,'
+  const markerIndex = dataUrl.indexOf(marker)
+  if (!dataUrl.startsWith('data:') || markerIndex === -1) {
+    throw new Error(`LOCAL_IMAGE2API_REFERENCE_INVALID: reference-${index}`)
+  }
+  const mimeType = dataUrl.slice(5, markerIndex) || 'image/png'
+  const bytes = Buffer.from(dataUrl.slice(markerIndex + marker.length), 'base64')
+  const ext = mimeType === 'image/jpeg' || mimeType === 'image/jpg'
+    ? 'jpg'
+    : mimeType === 'image/webp'
+      ? 'webp'
+      : mimeType === 'image/gif'
+        ? 'gif'
+        : 'png'
+  return { bytes, mimeType, ext }
+}
+
+async function saveImage2ApiCurlReferencePaths(dataUrls: string[]): Promise<Array<{
+  index: number
+  path: string
+  size: number
+  sha256: string
+  mimeType: string
+}>> {
+  if (dataUrls.length === 0) return []
+
+  const requestDir = path.join(
+    os.tmpdir(),
+    'waoowaoo-image2api-curl-refs',
+    `${Date.now()}-${crypto.randomUUID()}`,
+  )
+  await fs.mkdir(requestDir, { recursive: true })
+
+  return await Promise.all(dataUrls.map(async (dataUrl, index) => {
+    const part = dataUrlToImageBytes(dataUrl, index + 1)
+    const sha256 = crypto.createHash('sha256').update(part.bytes).digest('hex')
+    const filePath = path.join(requestDir, `${String(index + 1).padStart(2, '0')}_${sha256.slice(0, 12)}.${part.ext}`)
+    await fs.writeFile(filePath, part.bytes)
+    return {
+      index: index + 1,
+      path: filePath,
+      size: part.bytes.length,
+      sha256,
+      mimeType: part.mimeType,
+    }
+  }))
+}
+
+function isImage2ApiCurlModel(modelId?: string): boolean {
+  const normalized = (modelId || '').trim().toLowerCase()
+  return normalized === 'local/image2api-curl' || normalized === 'image2api-curl'
 }
 
 function resolveVideoDims(options: LocalVideoOptions): { width?: number; height?: number } {
@@ -106,6 +202,68 @@ export class LocalImageGenerator extends BaseImageGenerator {
 
     const normalizedRefs = await normalizeReferenceImagesForGeneration(referenceImages)
     const opt = options as LocalImageOptions
+
+    if (isImage2ApiCurlModel(this.modelId)) {
+      const referenceFiles = await saveImage2ApiCurlReferencePaths(normalizedRefs)
+      const body = {
+        model: opt.image2apiModel || 'gpt-image-2',
+        prompt,
+        n: typeof opt.n === 'number' && Number.isFinite(opt.n) ? Math.max(1, Math.min(4, Math.floor(opt.n))) : 1,
+        size: resolveImage2ApiCurlSize(opt),
+        response_format: 'url',
+        reference_image_paths: referenceFiles.map((item) => item.path),
+        reference_image_debug: referenceFiles,
+      }
+
+      const response = await fetch(`${baseUrl}/api/integrations/waoowaoo/v1/image2api/edits`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      })
+
+      const rawText = await response.text().catch(() => '')
+      let data: unknown = null
+      try {
+        data = rawText ? JSON.parse(rawText) : null
+      } catch {
+        data = null
+      }
+      if (!response.ok) {
+        const message = data && typeof data === 'object' && typeof (data as Record<string, unknown>).error === 'string'
+          ? String((data as Record<string, unknown>).error)
+          : rawText
+        throw new Error(`LOCAL_IMAGE2API_CURL_REQUEST_FAILED: ${response.status} ${message}`.slice(0, 800))
+      }
+
+      const responseObject = data && typeof data === 'object'
+        ? data as Record<string, unknown>
+        : null
+      const rows = responseObject && Array.isArray(responseObject.data)
+        ? (responseObject.data as unknown[])
+        : []
+      const dataUrls = rows
+        .map((item) => (item && typeof item === 'object' ? (item as Record<string, unknown>).url : null))
+        .filter((url): url is string => typeof url === 'string' && url.trim().length > 0)
+        .map((url) => url.trim())
+      const directUrls = responseObject && Array.isArray(responseObject.urls)
+        ? responseObject.urls
+            .filter((url): url is string => typeof url === 'string' && url.trim().length > 0)
+            .map((url) => url.trim())
+        : []
+      const imageUrls = dataUrls.length > 0 ? dataUrls : directUrls
+      if (imageUrls.length === 0) {
+        throw new Error(`LOCAL_IMAGE2API_CURL_EMPTY_RESPONSE: ${rawText.slice(0, 500)}`)
+      }
+      return {
+        success: true,
+        imageUrl: imageUrls[0],
+        ...(imageUrls.length > 1 ? { imageUrls } : {}),
+      }
+    }
+
     const size = parseSize(opt.size)
 
     const response = await fetch(`${baseUrl}/api/integrations/waoowaoo/v1/image`, {

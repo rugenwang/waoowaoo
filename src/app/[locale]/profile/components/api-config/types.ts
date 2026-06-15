@@ -121,6 +121,7 @@ export const PRESET_MODELS: PresetModel[] = [
 
     // 图像模型
     { modelId: 'local/image', name: 'Local Image', type: 'image', provider: 'local' },
+    { modelId: 'local/image2api-curl', name: 'Local Image2API Curl', type: 'image', provider: 'local' },
     { modelId: 'banana', name: 'Banana Pro', type: 'image', provider: 'fal' },
     { modelId: 'banana-2', name: 'Banana 2', type: 'image', provider: 'fal' },
     { modelId: 'doubao-seedream-4-5-251128', name: 'Seedream 4.5', type: 'image', provider: 'ark' },

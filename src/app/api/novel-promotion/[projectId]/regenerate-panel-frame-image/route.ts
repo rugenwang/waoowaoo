@@ -23,6 +23,17 @@ function hasFrameImage(frame: { imageUrl?: string | null; imageMediaId?: string 
   )
 }
 
+function parseOptionalBooleanField(value: unknown): boolean | undefined {
+  if (value === undefined) return undefined
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true') return true
+    if (normalized === 'false') return false
+  }
+  return undefined
+}
+
 export const POST = apiHandler(async (
   request: NextRequest,
   context: { params: Promise<{ projectId: string }> },
@@ -37,6 +48,7 @@ export const POST = apiHandler(async (
   const locale = resolveRequiredTaskLocale(request, body)
   const frameId = typeof body?.frameId === 'string' ? body.frameId.trim() : ''
   const panelIdFromBody = typeof body?.panelId === 'string' ? body.panelId.trim() : ''
+  const requestedUsePreviousTail = parseOptionalBooleanField(body?.usePreviousPanelTailAsReference)
 
   if (!frameId) {
     throw new ApiError('INVALID_PARAMS')
@@ -70,6 +82,17 @@ export const POST = apiHandler(async (
   if (panelIdFromBody && panelIdFromBody !== frame.panelId) {
     throw new ApiError('INVALID_PARAMS')
   }
+  if (
+    typeof requestedUsePreviousTail === 'boolean' &&
+    requestedUsePreviousTail !== (frame.panel as { usePreviousPanelTailAsReference?: boolean }).usePreviousPanelTailAsReference
+  ) {
+    await prisma.novelPromotionPanel.update({
+      where: { id: frame.panelId },
+      data: { usePreviousPanelTailAsReference: requestedUsePreviousTail },
+    })
+    ;(frame.panel as { usePreviousPanelTailAsReference?: boolean }).usePreviousPanelTailAsReference = requestedUsePreviousTail
+  }
+
   const panelUsesPreviousTailAsReference = Boolean(
     (frame.panel as { usePreviousPanelTailAsReference?: boolean }).usePreviousPanelTailAsReference,
   )

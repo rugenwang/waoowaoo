@@ -29,6 +29,33 @@ export interface PreviousPanelImageOption {
   imageUrl: string
 }
 
+function PreviousTailReferenceButton({
+  enabled,
+  disabled,
+  onToggle,
+}: {
+  enabled?: boolean
+  disabled?: boolean
+  onToggle: () => void | Promise<void>
+}) {
+  return (
+    <button
+      type="button"
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+        enabled
+          ? 'border-[var(--glass-tone-success-fg)] bg-[var(--glass-tone-success-fg)] text-white shadow-sm'
+          : 'border-[var(--glass-tone-info-fg)] bg-[var(--glass-tone-info-bg)] text-[var(--glass-tone-info-fg)] hover:bg-[var(--glass-bg-muted)]'
+      }`}
+      disabled={disabled}
+      onClick={() => void onToggle()}
+      title={enabled ? '当前分镜已链接上一分镜尾帧' : '让当前分镜首帧参考上一分镜尾帧'}
+    >
+      <AppIcon name="link" size={12} />
+      {enabled ? '已链接上一尾帧' : '链接上一尾帧'}
+    </button>
+  )
+}
+
 interface PanelCardProps {
   projectId: string
   panel: StoryboardPanel
@@ -100,6 +127,8 @@ function PanelFrameGrid({
   onDeleteFrame,
   onSplitFrame,
   usePreviousPanelTailAsReference,
+  onToggleUsePreviousPanelTail,
+  previousPanelTailDisabled,
 }: {
   projectId: string
   panelId: string
@@ -115,6 +144,8 @@ function PanelFrameGrid({
   onDeleteFrame?: (panelId: string, frameId: string) => void | Promise<void>
   onSplitFrame?: (frameId: string, placement: 'before' | 'after') => void | Promise<void>
   usePreviousPanelTailAsReference?: boolean
+  onToggleUsePreviousPanelTail?: () => void | Promise<void>
+  previousPanelTailDisabled?: boolean
 }) {
   const t = useTranslations('storyboard')
   const [isExpanded, setIsExpanded] = useState(false)
@@ -446,10 +477,18 @@ function PanelFrameGrid({
             <AppIcon name="externalLink" size={12} />
             展开查看
           </button>
-          <div className="flex items-center gap-1 text-[11px] text-[var(--glass-text-tertiary)]">
-            <AppIcon name="link" size={12} />
-            连贯参考链
-          </div>
+          {onToggleUsePreviousPanelTail ? (
+            <PreviousTailReferenceButton
+              enabled={usePreviousPanelTailAsReference}
+              disabled={previousPanelTailDisabled}
+              onToggle={onToggleUsePreviousPanelTail}
+            />
+          ) : (
+            <div className="flex items-center gap-1 text-[11px] text-[var(--glass-text-tertiary)]">
+              <AppIcon name="link" size={12} />
+              连贯参考链
+            </div>
+          )}
         </div>
       </div>
       <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
@@ -913,7 +952,6 @@ export default function PanelCard({
     | { type: 'frame'; frameId: string; label: string }
     | null
   >(null)
-  const canTogglePreviousPanelTail = Boolean(onToggleUsePreviousPanelTail)
   const panelFrames = Array.isArray(panel.frames) ? panel.frames : []
   const displayDurationSec = panel.duration ?? panel.groupDurationSec ?? panelData.duration ?? null
   const videoPromptField = panel.panelMode === 'group' ? 'groupVideoPrompt' : 'videoPrompt'
@@ -1139,7 +1177,24 @@ export default function PanelCard({
           onDeleteFrame={onDeleteFrame}
           onSplitFrame={onSplitFrame}
           usePreviousPanelTailAsReference={panel.usePreviousPanelTailAsReference}
+          onToggleUsePreviousPanelTail={onToggleUsePreviousPanelTail ? handleToggleUsePreviousPanelTail : undefined}
+          previousPanelTailDisabled={isTogglingPreviousPanelTail}
         />
+        {onToggleUsePreviousPanelTail && panelFrames.length <= 1 ? (
+          <div className="border-t border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-surface)] px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-1.5 text-xs text-[var(--glass-text-secondary)]">
+                <AppIcon name="link" size={13} className="shrink-0" />
+                <span className="truncate">上一分镜尾帧参考</span>
+              </div>
+              <PreviousTailReferenceButton
+                enabled={panel.usePreviousPanelTailAsReference}
+                disabled={isTogglingPreviousPanelTail}
+                onToggle={handleToggleUsePreviousPanelTail}
+              />
+            </div>
+          </div>
+        ) : null}
         {onInsertFrame && panelFrames.length <= 1 ? (
           <div className="border-t border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-surface)] px-3 py-2">
             <button
@@ -1153,19 +1208,15 @@ export default function PanelCard({
           </div>
         ) : null}
         {/* 插入分镜/镜头变体按钮 - 在图片区域右侧垂直居中 */}
-        {(onInsertAfter || onDuplicatePanel || onMergePanelWithNext || onToggleUsePreviousPanelTail || onVariant) && (
+        {(onInsertAfter || onDuplicatePanel || onMergePanelWithNext || onVariant) && (
           <div className="absolute -right-[22px] top-1/2 -translate-y-1/2 z-50">
             <PanelActionButtons
               onInsertPanel={onInsertAfter || (() => { })}
               onDuplicatePanel={onDuplicatePanel ? handleDuplicatePanel : undefined}
               onMergeWithNextPanel={onMergePanelWithNext ? handleMergePanelWithNext : undefined}
-              onToggleUsePreviousPanelTail={onToggleUsePreviousPanelTail ? handleToggleUsePreviousPanelTail : undefined}
               onVariant={onVariant || (() => { })}
-              disabled={isInsertDisabled || isDuplicatingPanel || isMergingPanel || isTogglingPreviousPanelTail}
+              disabled={isInsertDisabled || isDuplicatingPanel || isMergingPanel}
               hasImage={!!imageUrl}
-              isUsingPreviousPanelTail={panel.usePreviousPanelTailAsReference}
-              canUsePreviousPanelTail={canTogglePreviousPanelTail}
-              previousPanelTailDisabled={isTogglingPreviousPanelTail}
             />
           </div>
         )}

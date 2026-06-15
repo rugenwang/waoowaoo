@@ -3,6 +3,10 @@ import { prisma } from '@/lib/prisma'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { serializeStructuredJsonField } from '@/lib/novel-promotion/panel-ai-data-sync'
+import {
+  parsePanelFrameDependencyPlan,
+  serializePanelFrameDependencyPlan,
+} from '@/lib/novel-promotion/panel-tail-reference'
 
 function parseNullableNumberField(value: unknown): number | null {
   if (value === null || value === '') return null
@@ -37,6 +41,30 @@ function parseOptionalBooleanField(value: unknown): boolean | undefined {
   if (value === undefined) return undefined
   if (typeof value === 'boolean') return value
   throw new ApiError('INVALID_PARAMS')
+}
+
+async function clearPreviousTailDependenciesForPanel(panelId: string) {
+  const frames = await prisma.novelPromotionPanelFrame.findMany({
+    where: { panelId },
+    select: {
+      id: true,
+      dependencyFrameIds: true,
+    },
+  })
+
+  await Promise.all(frames.map(async (frame) => {
+    const plan = parsePanelFrameDependencyPlan(frame.dependencyFrameIds)
+    if (!plan.previousTail) return
+    await prisma.novelPromotionPanelFrame.update({
+      where: { id: frame.id },
+      data: {
+        dependencyFrameIds: serializePanelFrameDependencyPlan({
+          frameIndexes: plan.frameIndexes,
+          previousTail: false,
+        }),
+      },
+    })
+  }))
 }
 
 /**
@@ -302,6 +330,9 @@ export const PATCH = apiHandler(async (
       where: { id: panelId },
       data: updateData
     })
+    if (nextUsePreviousPanelTailAsReference === false) {
+      await clearPreviousTailDependenciesForPanel(panelId)
+    }
 
     return NextResponse.json({ success: true })
   }
@@ -352,6 +383,16 @@ export const PATCH = apiHandler(async (
     },
     data: updateData
   })
+  if (updatedPanel.count > 0 && nextUsePreviousPanelTailAsReference === false) {
+    const panels = await prisma.novelPromotionPanel.findMany({
+      where: {
+        storyboardId,
+        panelIndex,
+      },
+      select: { id: true },
+    })
+    await Promise.all(panels.map((panel) => clearPreviousTailDependenciesForPanel(panel.id)))
+  }
 
   // 如果 Panel 不存在，创建它（Panel 表是唯一数据源）
   if (updatedPanel.count === 0) {

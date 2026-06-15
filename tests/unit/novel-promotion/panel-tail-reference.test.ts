@@ -59,4 +59,15 @@ describe('panel-tail-reference helpers', () => {
       previousTail: false,
     })
   })
+
+  it('removes stale FP dependencies when previous-panel tail reference is disabled', () => {
+    expect(parsePanelFrameDependencyPlan(withPreviousTailDependency('["FP"]', false, 0))).toEqual({
+      frameIndexes: [],
+      previousTail: false,
+    })
+    expect(parsePanelFrameDependencyPlan(withPreviousTailDependency('["FP",0]', false, 1))).toEqual({
+      frameIndexes: [0],
+      previousTail: false,
+    })
+  })
 })

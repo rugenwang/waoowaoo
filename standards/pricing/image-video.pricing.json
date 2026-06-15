@@ -6063,5 +6063,14 @@
       "mode": "flat",
       "flatAmount": 0.5
     }
+  },
+  {
+    "apiType": "image",
+    "provider": "local",
+    "modelId": "local/image2api-curl",
+    "pricing": {
+      "mode": "flat",
+      "flatAmount": 0
+    }
   }
 ]

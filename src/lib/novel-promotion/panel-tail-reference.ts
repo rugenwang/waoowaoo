@@ -78,11 +78,16 @@ export function withPreviousTailDependency(
   enabled: boolean,
   frameIndex: number,
 ): string | null {
-  if (!enabled || frameIndex !== 0) {
-    const normalized = parsePanelFrameDependencyPlan(raw)
-    return serializePanelFrameDependencyPlan(normalized)
-  }
   const plan = parsePanelFrameDependencyPlan(raw)
+  if (!enabled) {
+    return serializePanelFrameDependencyPlan({
+      frameIndexes: plan.frameIndexes,
+      previousTail: false,
+    })
+  }
+  if (frameIndex !== 0) {
+    return serializePanelFrameDependencyPlan(plan)
+  }
   return serializePanelFrameDependencyPlan({
     frameIndexes: plan.frameIndexes,
     previousTail: true,

@@ -15,6 +15,17 @@ import { loadPreviousPanelTailImageInfo } from '@/lib/novel-promotion/previous-p
 
 const DEFAULT_CANDIDATE_COUNT = 1
 
+function parseOptionalBooleanField(value: unknown): boolean | undefined {
+  if (value === undefined) return undefined
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true') return true
+    if (normalized === 'false') return false
+  }
+  return undefined
+}
+
 export const POST = apiHandler(async (
   request: NextRequest,
   context: { params: Promise<{ projectId: string }> },
@@ -29,6 +40,7 @@ export const POST = apiHandler(async (
   const locale = resolveRequiredTaskLocale(request, body)
   const panelId = body?.panelId
   const count = body?.count
+  const requestedUsePreviousTail = parseOptionalBooleanField(body?.usePreviousPanelTailAsReference)
   const candidateCount = Math.max(1, Math.min(4, Number(count ?? DEFAULT_CANDIDATE_COUNT)))
 
   if (!panelId) {
@@ -50,6 +62,14 @@ export const POST = apiHandler(async (
   if (!panel) {
     throw new ApiError('NOT_FOUND')
   }
+  if (typeof requestedUsePreviousTail === 'boolean' && requestedUsePreviousTail !== panel.usePreviousPanelTailAsReference) {
+    await prisma.novelPromotionPanel.update({
+      where: { id: panel.id },
+      data: { usePreviousPanelTailAsReference: requestedUsePreviousTail },
+    })
+    panel.usePreviousPanelTailAsReference = requestedUsePreviousTail
+  }
+
   let panelUsesPreviousTailAsReference = Boolean(
     (panel as { usePreviousPanelTailAsReference?: boolean }).usePreviousPanelTailAsReference,
   )

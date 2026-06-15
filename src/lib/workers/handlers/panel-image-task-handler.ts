@@ -741,7 +741,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     : []
   const needsPreviousTailReference =
     isMultiFrameGroup
-      ? framesNeedingGenerationForPreviousTailCheck.some((frame) => parsePanelFrameDependencyPlan(
+      ? (!targetFrame && panelUsesPreviousTailAsReference) || framesNeedingGenerationForPreviousTailCheck.some((frame) => parsePanelFrameDependencyPlan(
         withPreviousTailDependency(
           frame.dependencyFrameIds,
           panelUsesPreviousTailAsReference,
@@ -979,8 +979,14 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   if (isMultiFrameGroup) {
     const generatedByFrameIndex = new Map<number, string>()
     const generatedUrls: string[] = []
+    const shouldRegenerateFirstFrameForPreviousTail =
+      !targetFrame &&
+      panelUsesPreviousTailAsReference &&
+      Boolean(previousTailImageUrl) &&
+      sortedFrames[0]?.frameIndex === 0
     const existingGeneratedFrames = sortedFrames.filter((frame) => {
       if (targetFrameId && frame.id === targetFrameId) return false
+      if (shouldRegenerateFirstFrameForPreviousTail && frame.frameIndex === 0) return false
       return typeof frame.imageUrl === 'string' && frame.imageUrl.trim()
     })
     const shouldResumePartialGroup =
@@ -1008,7 +1014,22 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
 
     const framesToGenerate = targetFrame
       ? [targetFrame]
-      : sortedFrames.filter((frame) => !(shouldResumePartialGroup && frame.imageUrl))
+      : sortedFrames.filter((frame) => {
+        if (shouldRegenerateFirstFrameForPreviousTail && frame.frameIndex === 0) return true
+        return !(shouldResumePartialGroup && frame.imageUrl)
+      })
+    logger.info({
+      message: 'panel group image generation frame plan',
+      details: {
+        panelId: panel.id,
+        usePreviousPanelTailAsReference: panelUsesPreviousTailAsReference,
+        previousTailImageLoaded: Boolean(previousTailImageUrl),
+        shouldRegenerateFirstFrameForPreviousTail,
+        targetFrameId: targetFrame?.id || null,
+        existingFrameIndexes: existingGeneratedFrames.map((frame) => frame.frameIndex),
+        frameIndexesToGenerate: framesToGenerate.map((frame) => frame.frameIndex),
+      },
+    })
 
     for (const frame of targetFrame ? framesToGenerate : []) {
       const dependencyPlan = parsePanelFrameDependencyPlan(
