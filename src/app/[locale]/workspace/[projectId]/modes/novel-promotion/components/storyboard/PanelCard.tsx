@@ -162,9 +162,9 @@ function PanelFrameGrid({
       targetId: frame.id,
       types: ['image_panel'],
     })),
-    { enabled: frames.length > 1, staleTime: 2000 },
+    { enabled: frames.length > 0, staleTime: 2000 },
   )
-  if (frames.length <= 1) return null
+  if (frames.length === 0) return null
   const [ratioWidth, ratioHeight] = videoRatio.split(':').map((value) => Number(value))
   const isVerticalRatio = Number.isFinite(ratioWidth) && Number.isFinite(ratioHeight) && ratioHeight > ratioWidth
   const frameAspectRatio = Number.isFinite(ratioWidth) && Number.isFinite(ratioHeight) && ratioWidth > 0 && ratioHeight > 0
@@ -309,7 +309,10 @@ function PanelFrameGrid({
 
   const handleInsertFrame = (frame: NovelPromotionPanelFrame, placement: 'before' | 'after') => {
     if (!onInsertFrame) return
-    void Promise.resolve(onInsertFrame({ frameId: frame.id, placement })).catch((error: unknown) => {
+    const payload = frame.virtual
+      ? { panelId, placement }
+      : { frameId: frame.id, placement }
+    void Promise.resolve(onInsertFrame(payload)).catch((error: unknown) => {
       if (shouldShowError(error)) {
         alert(extractErrorMessage(error, '插入关键帧失败'))
       }
@@ -466,7 +469,7 @@ function PanelFrameGrid({
     <div className="border-t border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-surface)] px-3 py-3">
       <div className="mb-2.5 flex items-center justify-between gap-2">
         <div className="text-xs font-medium text-[var(--glass-text-secondary)]">
-          分镜组关键帧 · {frames.length} 帧
+          {frames.length > 1 ? '分镜组关键帧' : '分镜关键帧'} · {frames.length} 帧
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -551,7 +554,7 @@ function PanelFrameGrid({
                   )}
                 </button>
                 <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between bg-gradient-to-b from-black/55 to-transparent p-2">
-                  <div className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-semibold text-slate-900 shadow-sm">
+                  <div className="inline-flex h-7 min-w-9 items-center justify-center rounded-full border border-white/80 bg-black/75 px-2 text-[11px] font-extrabold leading-none text-white shadow-[0_4px_12px_rgba(0,0,0,0.42)] backdrop-blur">
                     F{frame.frameIndex + 1}
                   </div>
                   <div className="flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur">
@@ -702,7 +705,7 @@ function PanelFrameGrid({
           >
             <div className="flex items-center justify-between border-b border-[var(--glass-stroke-subtle)] px-4 py-3">
               <div className="text-sm font-semibold text-[var(--glass-text-primary)]">
-                分镜组关键帧 · {frames.length} 帧
+                {frames.length > 1 ? '分镜组关键帧' : '分镜关键帧'} · {frames.length} 帧
               </div>
               <button
                 type="button"
@@ -732,7 +735,7 @@ function PanelFrameGrid({
                       ) : (
                         <div className="flex h-full items-center justify-center text-sm text-[var(--glass-text-tertiary)]">待生成</div>
                       )}
-                      <span className="absolute left-2 top-2 rounded-full bg-black/65 px-2 py-1 text-xs font-semibold text-white">
+                      <span className="absolute left-2 top-2 inline-flex min-h-7 items-center rounded-full border border-white/70 bg-black/75 px-2.5 py-1 text-xs font-extrabold text-white shadow-[0_4px_12px_rgba(0,0,0,0.42)] backdrop-blur">
                         F{frame.frameIndex + 1} · {frame.frameTimeSec}s
                       </span>
                     </button>
@@ -1045,15 +1048,6 @@ export default function PanelCard({
       .finally(() => setIsTogglingPreviousPanelTail(false))
   }
 
-  const handleInsertFrameFromSinglePanel = () => {
-    if (!onInsertFrame) return
-    void Promise.resolve(onInsertFrame({ panelId: panel.id, placement: 'after' })).catch((error: unknown) => {
-      if (shouldShowError(error)) {
-        alert(extractErrorMessage(error, '插入关键帧失败'))
-      }
-    })
-  }
-
   const currentVideoPrompt = videoPromptField === 'groupVideoPrompt'
     ? panelData.groupVideoPrompt || panel.groupVideoPrompt || panelData.videoPrompt || ''
     : panelData.videoPrompt || panel.video_prompt || ''
@@ -1176,37 +1170,10 @@ export default function PanelCard({
           onInsertFrame={onInsertFrame}
           onDeleteFrame={onDeleteFrame}
           onSplitFrame={onSplitFrame}
-          usePreviousPanelTailAsReference={panel.usePreviousPanelTailAsReference}
-          onToggleUsePreviousPanelTail={onToggleUsePreviousPanelTail ? handleToggleUsePreviousPanelTail : undefined}
+          usePreviousPanelTailAsReference={hasPreviousPanel ? panel.usePreviousPanelTailAsReference : false}
+          onToggleUsePreviousPanelTail={hasPreviousPanel && onToggleUsePreviousPanelTail ? handleToggleUsePreviousPanelTail : undefined}
           previousPanelTailDisabled={isTogglingPreviousPanelTail}
         />
-        {onToggleUsePreviousPanelTail && panelFrames.length <= 1 ? (
-          <div className="border-t border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-surface)] px-3 py-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-1.5 text-xs text-[var(--glass-text-secondary)]">
-                <AppIcon name="link" size={13} className="shrink-0" />
-                <span className="truncate">上一分镜尾帧参考</span>
-              </div>
-              <PreviousTailReferenceButton
-                enabled={panel.usePreviousPanelTailAsReference}
-                disabled={isTogglingPreviousPanelTail}
-                onToggle={handleToggleUsePreviousPanelTail}
-              />
-            </div>
-          </div>
-        ) : null}
-        {onInsertFrame && panelFrames.length <= 1 ? (
-          <div className="border-t border-[var(--glass-stroke-subtle)] bg-[var(--glass-bg-surface)] px-3 py-2">
-            <button
-              type="button"
-              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[var(--glass-tone-info-fg)] bg-[var(--glass-tone-info-bg)] px-3 py-2 text-xs font-medium text-[var(--glass-tone-info-fg)] transition hover:bg-[var(--glass-bg-muted)]"
-              onClick={handleInsertFrameFromSinglePanel}
-            >
-              <AppIcon name="plus" size={13} />
-              <span>插入关键帧并转为分镜组</span>
-            </button>
-          </div>
-        ) : null}
         {/* 插入分镜/镜头变体按钮 - 在图片区域右侧垂直居中 */}
         {(onInsertAfter || onDuplicatePanel || onMergePanelWithNext || onVariant) && (
           <div className="absolute -right-[22px] top-1/2 -translate-y-1/2 z-50">

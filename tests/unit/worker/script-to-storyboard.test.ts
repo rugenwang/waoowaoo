@@ -50,6 +50,22 @@ const runScriptToStoryboardOrchestratorMock = vi.hoisted(() =>
 )
 const parseVoiceLinesJsonMock = vi.hoisted(() => vi.fn())
 const persistStoryboardOutputsMock = vi.hoisted(() => vi.fn())
+const persistStoryboardsAndPanelsMock = vi.hoisted(() => vi.fn(async () => [
+  {
+    storyboardId: 'storyboard-1',
+    clipId: 'clip-1',
+    panels: [
+      {
+        id: 'panel-1',
+        panelIndex: 0,
+        description: 'phase3 retry panel',
+        srtSegment: null,
+        characters: null,
+        props: null,
+      },
+    ],
+  },
+]))
 const parseStoryboardRetryTargetMock = vi.hoisted(() => vi.fn())
 const runScriptToStoryboardAtomicRetryMock = vi.hoisted(() => vi.fn())
 const workflowLeaseMock = vi.hoisted(() => ({
@@ -160,6 +176,8 @@ vi.mock('@/lib/workers/handlers/script-to-storyboard-helpers', () => ({
     return value as Record<string, unknown>
   },
   buildStoryboardJsonFromClipPanels: vi.fn(() => '[]'),
+  applyForcedStoryboardGrouping: vi.fn((clipPanels) => clipPanels),
+  persistStoryboardsAndPanels: persistStoryboardsAndPanelsMock,
   parseEffort: vi.fn(() => null),
   parseTemperature: vi.fn(() => 0.7),
   parseVoiceLinesJson: parseVoiceLinesJsonMock,
@@ -442,7 +460,7 @@ describe('worker script-to-storyboard behavior', () => {
     })
     expect(runScriptToStoryboardAtomicRetryMock).toHaveBeenCalledTimes(1)
     expect(runScriptToStoryboardOrchestratorMock).not.toHaveBeenCalled()
-    expect(persistStoryboardOutputsMock).toHaveBeenCalledWith({
+    expect(persistStoryboardsAndPanelsMock).toHaveBeenCalledWith({
       episodeId: 'episode-1',
       clipPanels: [
         {
@@ -457,7 +475,6 @@ describe('worker script-to-storyboard behavior', () => {
           ],
         },
       ],
-      voiceLineRows: null,
     })
   })
 })

@@ -34,6 +34,11 @@ function parseOptionalBooleanField(value: unknown): boolean | undefined {
   return undefined
 }
 
+function parseVirtualFramePanelId(frameId: string): string | null {
+  const suffix = ':virtual-frame-0'
+  return frameId.endsWith(suffix) ? frameId.slice(0, -suffix.length) : null
+}
+
 export const POST = apiHandler(async (
   request: NextRequest,
   context: { params: Promise<{ projectId: string }> },
@@ -54,7 +59,7 @@ export const POST = apiHandler(async (
     throw new ApiError('INVALID_PARAMS')
   }
 
-  const frame = await prisma.novelPromotionPanelFrame.findFirst({
+  let frame = await prisma.novelPromotionPanelFrame.findFirst({
     where: {
       id: frameId,
       panel: {
@@ -77,7 +82,68 @@ export const POST = apiHandler(async (
   })
 
   if (!frame) {
-    throw new ApiError('NOT_FOUND')
+    const virtualPanelId = parseVirtualFramePanelId(frameId)
+    if (virtualPanelId) {
+      const panel = await prisma.novelPromotionPanel.findFirst({
+        where: {
+          id: virtualPanelId,
+          storyboard: {
+            episode: {
+              novelPromotionProject: {
+                projectId,
+              },
+            },
+          },
+        },
+        include: {
+          frames: { orderBy: { frameIndex: 'asc' } },
+        },
+      })
+      if (!panel) {
+        throw new ApiError('NOT_FOUND')
+      }
+      const firstFrame = panel.frames[0] || await prisma.novelPromotionPanelFrame.create({
+        data: {
+          panelId: panel.id,
+          frameIndex: 0,
+          frameTimeSec: 0,
+          frameRole: 'hero',
+          dependencyFrameIds: serializePanelFrameDependencyPlan({
+            previousTail: panel.usePreviousPanelTailAsReference,
+            frameIndexes: [],
+          }),
+          imagePrompt: panel.imagePrompt || panel.description || null,
+          videoPrompt: panel.videoPrompt || panel.groupVideoPrompt || null,
+          imageUrl: panel.imageUrl || null,
+          imageMediaId: panel.imageMediaId || null,
+          generationStatus: panel.imageUrl || panel.imageMediaId ? 'completed' : null,
+        },
+      })
+      frame = await prisma.novelPromotionPanelFrame.findFirst({
+        where: {
+          id: firstFrame.id,
+          panel: {
+            storyboard: {
+              episode: {
+                novelPromotionProject: {
+                  projectId,
+                },
+              },
+            },
+          },
+        },
+        include: {
+          panel: {
+            include: {
+              frames: { orderBy: { frameIndex: 'asc' } },
+            },
+          },
+        },
+      })
+    }
+    if (!frame) {
+      throw new ApiError('NOT_FOUND')
+    }
   }
   if (panelIdFromBody && panelIdFromBody !== frame.panelId) {
     throw new ApiError('INVALID_PARAMS')

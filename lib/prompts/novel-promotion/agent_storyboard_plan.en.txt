@@ -52,9 +52,9 @@ Output format (JSON array only):
         "frame_time_sec": 0,
         "frame_role": "hero",
         "dependency_frame_ids": [],
-        "image_prompt": "4K image prompt for the single representative frame",
+        "image_prompt": "Input reference F1 is current storyboard location image, F2 is character image, F3 is prop image if visible; current still image: 4K image prompt for the single representative frame",
         "video_prompt": "short motion prompt for this frame",
-        "reference_policy": { "type": "single_frame", "note": "one stable image is enough" }
+        "reference_policy": { "type": "single_frame", "ordered_references": ["current storyboard location image", "character image", "prop image if visible"], "note": "one stable image is enough" }
       }
     ]
   }
@@ -62,7 +62,7 @@ Output format (JSON array only):
 
 Panel mode semantics:
 - `panel_mode` is the storyboard structure type. It tells the system whether this top-level panel should be generated from one representative image or from a connected group of key frames.
-- `panel_mode="single"` means one image is enough: one spoken line, one stable reaction, one simple expression, one small/static action. `frames` must contain exactly 1 item with `frame_index=0`, `frame_time_sec=0`, `frame_role="hero"`, `dependency_frame_ids=[]` unless the first frame needs to continue from the previous top-level panel tail, in which case `dependency_frame_ids` may be `["FP"]`. Do not output `group_video_prompt`.
+- `panel_mode="single"` means one image is enough: one spoken line, one stable reaction, one simple expression, one small/static action. `frames` must contain exactly 1 item with `frame_index=0`, `frame_time_sec=0`, `frame_role="hero"`, `dependency_frame_ids=[]`. Do not output `group_video_prompt`.
 - `panel_mode="group"` means the panel is a continuous video beat needing 2-20 connected key frames, decided by duration + action density + transition/camera-movement density: visible movement, turning, walking, chasing, fighting, scene transition, multi-stage emotion/action, or clearly different beginning/end states. Frames must be chronological and later frames should depend on earlier frames through `dependency_frame_ids`.
 - Duration and timeline are mandatory before output: count all Chinese dialogue/voiceover/inner-monologue characters in `source_text`; pure speaking time is 2-3 Chinese characters per second. `duration_sec` must not be shorter than pure speaking time, and must also include action time, pauses, camera/transition time, and environment/establishing buffer.
 - The sum of all timeline ranges in `video_prompt` / `group_video_prompt` must equal `duration_sec`; the timeline must start at 00:00 and the final range must end exactly at `duration_sec`.
@@ -75,7 +75,13 @@ Panel mode semantics:
 - Ultra-high density action/camera movement should approach 1 frame per second, capped by duration_sec, so a 20s group may use up to 20 frames. Use this for continuous fighting, melee, high-speed chase, repeated dodge/block/combo actions, explosion/falling, rapid cutting, continuous transitions, or dense whip-pan/pass-through/tracking camera combinations.
 - If a non-ultra-high-density 20s beat needs more than 8 key states, split it into two top-level group panels. If it is clearly ultra-high-density action/camera movement, keep one group and output up to 20 frames.
 - Top-level `props` must list visible or interacted prop asset names selected from Props info. Distinctive objects such as backpacks, bags, watches, rings, bracelets, phones, books, umbrellas, cups, cameras, keys, suitcases, weapons, magical tools, tokens, and folders must be prop assets, not character appearance. If no prop is visible or used, output `props: []`.
-- `FP` means the first frame references the previous top-level panel tail frame. Use `FP` only in `frame_index=0` when continuity truly needs the previous ending state: same character position, pose, prop state, lighting, or continuous action. Do not use `FP` for a new scene, time jump, dream/flashback, or unrelated shot. The frame `reference_policy` must mention preserving continuity from the previous panel tail without copying composition.
+- Do NOT output `FP` during initial storyboard planning. Previous-tail linking is a manual storyboard-page option and will be added by the system only after the user enables it. If a panel seems suitable for previous-tail continuity, mention it only in `description` or `reference_policy.note`; do not put `FP` in `dependency_frame_ids` or `ordered_references`.
+- Every frame, including `panel_mode="single"`, must include `reference_policy.ordered_references`. This tells downstream image generation what each input reference image means.
+- Ordered reference sequence must be: dependency frame references first, then location reference image(s), then character reference image(s) in `characters` order, then prop reference image(s) in `props` order.
+- `frame.image_prompt` must start by explaining the input reference order, for example: `Input references F1-F2 are Office scene references, F3 is character image: Lin Wan · default, F4 is prop folder; current still image...`. Here F1/F2/Fn means input reference image order, not storyboard keyframe numbers.
+- In every `frame.image_prompt`, each visible person must be written as age/gender/temperament + character name, not a generic label only. Good examples: `young woman Lin Wan stands on screen-left`, `middle-aged man Mr. Wang sits behind the desk`, `young man Lu Ze looks toward the doorway`. If age/gender is uncertain, still include the character name with the action.
+- A single panel should still be treated as a one-frame group for image planning: `frame_index=0`, `frame_role="hero"`, one representative image prompt, and a complete reference policy for location/characters/props.
+- Location can use multiple reference images when the shot needs multiple spatial anchors such as room layout, hallway direction, furniture, doors/windows, or indoor/outdoor relationship. Explain which location reference controls which spatial part in `reference_policy` and `image_prompt`.
 
 Mode examples:
 [
@@ -95,18 +101,18 @@ Mode examples:
         "frame_time_sec": 0,
         "frame_role": "hero",
         "dependency_frame_ids": [],
-        "image_prompt": "4K image, office medium shot, original before-action state: Zhang San has just opened the door, Li Si works at the left desk, Wang Wu writes at the right desk, all characters fully and properly clothed, natural light, clear image.",
+        "image_prompt": "Input reference F1 is current storyboard location image: Office, F2 is character image: Zhang San · default, F3 is character image: Li Si · default, F4 is character image: Wang Wu · default; current still image: 4K image, office medium shot, original before-action state: young man Zhang San has just opened the door, young man Li Si works at the left desk, young man Wang Wu writes at the right desk, all characters fully and properly clothed, natural light, clear image.",
         "video_prompt": "Zhang San enters the office while Li Si and Wang Wu are still working, keeping spatial continuity clear.",
-        "reference_policy": {"type": "base", "note": "opening original state for this group"}
+        "reference_policy": {"type": "base", "ordered_references": ["current storyboard location image: Office", "character image: Zhang San · default", "character image: Li Si · default", "character image: Wang Wu · default"], "note": "opening original state for this group"}
       },
       {
         "frame_index": 1,
         "frame_time_sec": 4,
         "frame_role": "dialogue",
         "dependency_frame_ids": [0],
-        "image_prompt": "4K image, office closer shot, Zhang San speaks at the doorway while Li Si and Wang Wu raise their heads toward him, clothing, hairstyles, light, and office layout consistent with frame 0.",
+        "image_prompt": "Input reference F1 is generated keyframe F1 from this storyboard group, F2 is current storyboard location image: Office, F3 is character image: Zhang San · default, F4 is character image: Li Si · default, F5 is character image: Wang Wu · default; current still image: 4K image, office closer shot, young man Zhang San speaks at the doorway while young man Li Si and young man Wang Wu raise their heads toward him, clothing, light, and office layout consistent with frame 0.",
         "video_prompt": "Zhang San announces the meeting; Li Si and Wang Wu look up from their work, continuing the positions from frame 0.",
-        "reference_policy": {"type": "depends_on_previous", "note": "refer to frame 0 for character, clothing, scene, and lighting continuity"}
+        "reference_policy": {"type": "depends_on_previous", "ordered_references": ["generated keyframe F1 from this storyboard group", "current storyboard location image: Office", "character image: Zhang San · default", "character image: Li Si · default", "character image: Wang Wu · default"], "note": "refer to frame 0 for character, clothing, scene, and lighting continuity"}
       }
     ]
   },
@@ -126,9 +132,9 @@ Mode examples:
         "frame_time_sec": 0,
         "frame_role": "hero",
         "dependency_frame_ids": [],
-        "image_prompt": "4K image, office doorway close shot, Zhang San looks into the room, fully and properly clothed, serious expression, lips slightly parted before speaking, lighting consistent with previous panels.",
+        "image_prompt": "Input reference F1 is current storyboard location image: Office, F2 is character image: Zhang San · default; current still image: 4K image, office doorway close shot, young man Zhang San looks into the room, fully and properly clothed, serious expression, lips slightly parted before speaking, natural office lighting, clear image.",
         "video_prompt": "Zhang San adds one spoken line at the doorway; focus on his face, expression, and lip movement.",
-        "reference_policy": {"type": "single_frame", "note": "one speaking shot only; no grouped dependency needed"}
+        "reference_policy": {"type": "single_frame", "ordered_references": ["current storyboard location image: Office", "character image: Zhang San · default"], "note": "one speaking shot only; if the user manually enables previous-tail linking, the system will add FP as an extra reference"}
       }
     ]
   }
@@ -150,4 +156,5 @@ Planning rules:
 12.1 Duration must follow the 2-3 Chinese characters per second dialogue rule, plus action/pause/camera/environment time. Keep `duration_sec`, prompt timeline end time, and `frames.frame_time_sec` aligned.
 13. Every panel must include `props`; use an empty array when no provided prop asset is visible or used.
 13. Return strict JSON only.
-14. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.
+14. Every frame must include `reference_policy.ordered_references` in the order `dependency frames -> location image(s) -> character image(s) -> prop image(s)`, and every `frame.image_prompt` must explain what input reference F1/F2/Fn means. Do not output FP during planning.
+15. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.

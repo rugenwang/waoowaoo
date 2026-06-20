@@ -36,6 +36,12 @@ import { handleAssetHubAIModifyTask } from './handlers/asset-hub-ai-modify'
 import { handleReferenceToCharacterTask } from './handlers/reference-to-character'
 import { handleShotAITask } from './handlers/shot-ai-tasks'
 import { handleCharacterProfileTask } from './handlers/character-profile'
+import {
+  buildPanelFramePersistence,
+  cleanPanelDescriptionText,
+  cleanVideoPromptText,
+  createPanelFrames,
+} from './handlers/script-to-storyboard-helpers'
 
 function readAssetKind(value: Record<string, unknown>): string {
   return typeof value.assetKind === 'string' ? value.assetKind : 'location'
@@ -390,7 +396,10 @@ async function handleRegenerateStoryboardTextTask(job: Job<TaskJobData>) {
   await assertTaskActive(job, 'regenerate_storyboard_transaction')
   await prisma.$transaction(async (tx) => {
     const panelModel = tx.novelPromotionPanel as unknown as {
-      create: (args: { data: Record<string, unknown> }) => Promise<unknown>
+      create: (args: {
+        data: Record<string, unknown>
+        select: { id: true }
+      }) => Promise<{ id: string }>
     }
     await tx.novelPromotionPanel.deleteMany({ where: { storyboardId } })
     await tx.novelPromotionStoryboard.update({
@@ -403,29 +412,39 @@ async function handleRegenerateStoryboardTextTask(job: Job<TaskJobData>) {
       const srtRange = Array.isArray(panel.srt_range) ? panel.srt_range : []
       const srtStart = typeof srtRange[0] === 'number' ? srtRange[0] : null
       const srtEnd = typeof srtRange[1] === 'number' ? srtRange[1] : null
-      await panelModel.create({
+      const framePersistence = buildPanelFramePersistence(panel)
+      const panelVideoPrompt = cleanVideoPromptText(panel.video_prompt || null)
+      const panelDescription = cleanPanelDescriptionText(panel)
+      const created = await panelModel.create({
         data: {
           storyboardId,
           panelIndex: i,
           panelNumber: panel.panel_number || i + 1,
           shotType: panel.shot_type || null,
           cameraMove: panel.camera_move || null,
-          description: panel.description || null,
+          description: panelDescription,
           location: panel.location || null,
           characters: panel.characters ? JSON.stringify(panel.characters) : null,
           props: panel.props ? JSON.stringify(panel.props) : null,
           srtStart,
           srtEnd,
-          duration: (typeof panel.duration === 'number' && Number.isFinite(panel.duration) && panel.duration > 0)
-            ? Math.floor(panel.duration)
-            : null,
-          videoPrompt: panel.video_prompt || null,
+          duration: framePersistence.duration
+            ?? ((typeof panel.duration === 'number' && Number.isFinite(panel.duration) && panel.duration > 0)
+              ? Math.floor(panel.duration)
+              : null),
+          videoPrompt: panelVideoPrompt,
           sceneType: typeof panel.scene_type === 'string' ? panel.scene_type : null,
           srtSegment: panel.source_text || null,
           photographyRules: panel.photographyPlan ? JSON.stringify(panel.photographyPlan) : null,
           actingNotes: panel.actingNotes ? JSON.stringify(panel.actingNotes) : null,
+          panelMode: framePersistence.panelMode,
+          groupDurationSec: framePersistence.groupDurationSec,
+          groupVideoPrompt: framePersistence.groupVideoPrompt,
+          groupPlanJson: framePersistence.groupPlanJson,
         },
+        select: { id: true },
       })
+      await createPanelFrames(tx, created.id, framePersistence.frames)
     }
   }, { timeout: 30000 })
 

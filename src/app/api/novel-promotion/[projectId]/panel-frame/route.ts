@@ -28,6 +28,11 @@ function readOptionalText(value: unknown): string | null | undefined {
   return trimmed || null
 }
 
+function parseVirtualFramePanelId(frameId: string): string | null {
+  const suffix = ':virtual-frame-0'
+  return frameId.endsWith(suffix) ? frameId.slice(0, -suffix.length) : null
+}
+
 function roundFrameTime(value: number): number {
   return Math.round(value * 100) / 100
 }
@@ -332,6 +337,73 @@ export const PATCH = apiHandler(async (
   })
 
   if (!frame) {
+    const virtualPanelId = parseVirtualFramePanelId(frameId)
+    if (virtualPanelId) {
+      const panel = await prisma.novelPromotionPanel.findFirst({
+        where: {
+          id: virtualPanelId,
+          storyboard: {
+            episode: {
+              novelPromotionProject: {
+                projectId,
+              },
+            },
+          },
+        },
+        include: {
+          frames: { orderBy: { frameIndex: 'asc' } },
+        },
+      })
+      if (!panel) {
+        throw new ApiError('NOT_FOUND')
+      }
+      if (hasFrameTimeUpdate) {
+        throw new ApiError('INVALID_PARAMS', {
+          code: 'FRAME_TIME_FIRST_FRAME_LOCKED',
+          field: 'frameTimeSec',
+          message: 'F1 的起始时间固定为 0 秒',
+        })
+      }
+      const firstFrame = panel.frames[0] || await prisma.novelPromotionPanelFrame.create({
+        data: {
+          panelId: panel.id,
+          frameIndex: 0,
+          frameTimeSec: 0,
+          frameRole: 'hero',
+          dependencyFrameIds: serializePanelFrameDependencyPlan({
+            previousTail: panel.usePreviousPanelTailAsReference,
+            frameIndexes: [],
+          }),
+          imagePrompt: panel.imagePrompt || panel.description || null,
+          videoPrompt: panel.videoPrompt || panel.groupVideoPrompt || null,
+          imageUrl: panel.imageUrl || null,
+          imageMediaId: panel.imageMediaId || null,
+          generationStatus: panel.imageUrl || panel.imageMediaId ? 'completed' : null,
+        },
+      })
+      const updated = await prisma.novelPromotionPanelFrame.update({
+        where: { id: firstFrame.id },
+        data: {
+          ...(nextImagePrompt !== undefined ? { imagePrompt: nextImagePrompt } : {}),
+          ...(nextVideoPrompt !== undefined ? { videoPrompt: nextVideoPrompt } : {}),
+        },
+      })
+      if (nextImagePrompt !== undefined) {
+        await prisma.novelPromotionPanel.update({
+          where: { id: panel.id },
+          data: { imagePrompt: nextImagePrompt },
+        })
+      }
+      return NextResponse.json({
+        success: true,
+        frameId: updated.id,
+        panelId: updated.panelId,
+        frameIndex: updated.frameIndex,
+        frameTimeSec: updated.frameTimeSec,
+        imagePrompt: updated.imagePrompt,
+        videoPrompt: updated.videoPrompt,
+      })
+    }
     throw new ApiError('NOT_FOUND')
   }
   if (hasFrameTimeUpdate && frame.frameIndex === 0) {
@@ -371,6 +443,13 @@ export const PATCH = apiHandler(async (
       ...(nextVideoPrompt !== undefined ? { videoPrompt: nextVideoPrompt } : {}),
     },
   })
+
+  if (nextImagePrompt !== undefined && frame.frameIndex === 0 && frame.panel.frames.length <= 1) {
+    await prisma.novelPromotionPanel.update({
+      where: { id: frame.panelId },
+      data: { imagePrompt: nextImagePrompt },
+    })
+  }
 
   return NextResponse.json({
     success: true,

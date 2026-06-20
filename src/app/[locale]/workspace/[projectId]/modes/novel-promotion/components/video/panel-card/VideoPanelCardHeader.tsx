@@ -188,7 +188,7 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
 
        {/* 镜头编号和时长 */}
        <div className="absolute top-2 left-2 flex items-center gap-1.5">
-         <span className="glass-chip glass-chip-neutral px-2 py-0.5 text-xs font-medium">
+         <span className="inline-flex h-8 min-w-8 items-center justify-center rounded-full border border-white/70 bg-black/75 px-2.5 text-sm font-extrabold leading-none text-white shadow-[0_5px_16px_rgba(0,0,0,0.42)] backdrop-blur">
            {panelIndex + 1}
          </span>
          {normalizedDuration !== null ? (
@@ -223,7 +223,7 @@ export default function VideoPanelCardHeader({ runtime, onUploadVideo, isUploadi
                 className="h-full w-full object-cover"
                />
                </button>
-               <span className="absolute left-1 top-1 rounded bg-black/65 px-1 text-[10px] font-semibold text-white">
+               <span className="absolute left-1 top-1 inline-flex min-h-5 items-center rounded-full border border-white/60 bg-black/75 px-1.5 text-[10px] font-extrabold text-white shadow-[0_3px_10px_rgba(0,0,0,0.38)] backdrop-blur">
                  F{frame.frameIndex + 1}
                </span>
                {frame.frameIndex === 0 ? (

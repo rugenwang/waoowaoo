@@ -201,14 +201,15 @@ export default function StoryboardPanelList({
               onInsertFrame={onInsertFrame}
               onDeleteFrame={onDeleteFrame}
               onSplitFrame={onSplitFrame}
-              onToggleUsePreviousPanelTail={(enabled) =>
-                onToggleUsePreviousPanelTailReference({
-                  panelId: panel.id,
-                  storyboardId,
-                  panelIndex: panel.panelIndex,
-                  usePreviousPanelTailAsReference: enabled,
-                })
-              }
+              onToggleUsePreviousPanelTail={hasPreviousPanel
+                ? (enabled) =>
+                  onToggleUsePreviousPanelTailReference({
+                    panelId: panel.id,
+                    storyboardId,
+                    panelIndex: panel.panelIndex,
+                    usePreviousPanelTailAsReference: enabled,
+                  })
+                : undefined}
               onOpenEditModal={() => onOpenEditModal(index)}
               onOpenAIDataModal={() => onOpenAIDataModal(index)}
               onSelectCandidateIndex={onSelectPanelCandidateIndex}

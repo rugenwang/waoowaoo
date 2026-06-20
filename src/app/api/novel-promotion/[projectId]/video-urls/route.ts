@@ -4,10 +4,12 @@ import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 
 interface PanelData {
+    id: string
     panelIndex: number | null
     description: string | null
     videoUrl: string | null
     lipSyncVideoUrl: string | null
+    dubbingAudioUrl: string | null
 }
 
 interface StoryboardData {
@@ -115,6 +117,8 @@ export const POST = apiHandler(async (
     interface VideoCandidate extends VideoItem {
         videoKey: string
         desc: string
+        panelId: string
+        dubbingAudioUrl: string | null
     }
     const videoCandidates: VideoCandidate[] = []
 
@@ -147,7 +151,10 @@ export const POST = apiHandler(async (
                     clipIndex: clipIndex >= 0 ? clipIndex : 999,
                     panelIndex: panel.panelIndex || 0,
                     videoKey,
-                    desc: safeDesc})
+                    desc: safeDesc,
+                    panelId: panel.id,
+                    dubbingAudioUrl: panel.dubbingAudioUrl,
+                })
             }
         }
     }
@@ -177,12 +184,23 @@ export const POST = apiHandler(async (
         }
     })
 
+    const audios = videoCandidates.flatMap((video, idx) => {
+        if (!video.dubbingAudioUrl) return []
+        const index = idx + 1
+        return [{
+            index,
+            fileName: `audio/${String(index).padStart(3, '0')}_${video.desc}_配音.wav`,
+            audioUrl: `/api/novel-promotion/${projectId}/panel-dubbing/audio?panelId=${encodeURIComponent(video.panelId)}`,
+        }]
+    })
+
     if (result.length === 0) {
         throw new ApiError('INVALID_PARAMS')
     }
 
     return NextResponse.json({
         projectName: project.name,
-        videos: result
+        videos: result,
+        audios,
     })
 })

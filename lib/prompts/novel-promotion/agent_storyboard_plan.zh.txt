@@ -34,6 +34,7 @@
    - panel_mode: "single" 或 "group"
    - duration_sec: 预计视频秒数；single 通常 2~8 秒，group 不超过 20 秒
    - frames: 关键帧规划数组；single 只输出 1 帧，group 根据时长、动作密集程度、转场/运镜密集程度输出 2~20 帧
+   - frames[].reference_policy: 必须写清本帧后续生图会用到的参考图顺序和含义；即使 panel_mode="single" 也必须输出 1 个 frame 并写 reference_policy，不能因为不是分镜组而忽略
 
 2.0.1 时长与时间轴硬性规则（必须先执行）：
    - 先统计本顶层分镜 source_text 中需要说出的对白/旁白/内心独白字数；对白纯说话时长按「2~3 个汉字 = 1 秒」估算，宁可偏长，不能短于对白需要的秒数。
@@ -62,7 +63,7 @@
    - 如果不是超高密度动作，20 秒内容需要超过 8 个关键状态时优先拆成两个顶层 group；如果明确是超高密度动作/密集运镜，可保留一个 group 并输出最多 20 帧。
    - 一个 group 是一个顶层分镜，内部 frames 表示该组视频中的不同关键时刻；不要把同一连续动作拆成多个顶层分镜
 	   - group.frames 每帧包含 frame_index、frame_time_sec、frame_role、image_prompt、video_prompt、dependency_frame_ids
-	   - frame_time_sec 从 0 开始递增，不能超过 duration_sec，并必须与 video_prompt/group_video_prompt 的时间轴秒数对应；后续帧如依赖前面画面，dependency_frame_ids 只能引用更早 frame_index；若本顶层分镜第一帧需要承接上一顶层分镜尾帧，可在 frame_index=0 的 dependency_frame_ids 中写入 "FP"，表示参考上一分镜尾帧
+	   - frame_time_sec 从 0 开始递增，不能超过 duration_sec，并必须与 video_prompt/group_video_prompt 的时间轴秒数对应；后续帧如依赖前面画面，dependency_frame_ids 只能引用更早 frame_index；初始分镜规划阶段禁止写入 "FP"，上一尾帧连接由用户在分镜页手动开启后系统追加
 	   - 第一帧是这组视频的原始状态/开场状态，不要写成事件已经发生完后的结果
 
 2.2 道具资产关联规则：
@@ -73,10 +74,23 @@
    - 没有任何可见/互动道具时输出 props: []。
 
 2.3 跨分镜尾帧参考 FP 规则：
-   - FP 只允许出现在每个顶层分镜的第一帧 frame_index=0 的 dependency_frame_ids 中。
-   - 当当前分镜需要承接上一分镜最后状态（同一人物位置、姿态、道具状态、场景光线或动作连续）时，由你决定加入 "FP"。
-   - 加入 "FP" 后，reference_policy 必须说明“参考上一分镜尾帧，保持人物/服装/场景/道具状态连贯，但不要复制构图”。
-   - 如果当前分镜是全新场景、时间跳跃、梦境/闪回或不需要承接上一镜，则不要使用 FP。
+   - 初始分镜规划阶段禁止由 AI 自己决定写入 "FP"；dependency_frame_ids 不得包含 "FP"。
+   - "FP" 只代表用户在分镜页面手动开启“连接上一分镜尾帧”后的系统状态，不是你可以主动规划的依赖。
+   - 如果你认为当前分镜适合承接上一分镜，只能在 description 或 reference_policy.note 中用自然语言写“适合承接上一分镜尾帧”，但不要把它写进 dependency_frame_ids，也不要把它写入 ordered_references。
+   - 后续若用户点击链接，系统会自动把上一尾帧作为第 1 张参考图，并自动更新生图提示词。
+
+2.4 每帧参考图顺序规划规则（后续生图会严格按该顺序传图）：
+   - 每个 frame.reference_policy 必须包含 ordered_references 数组，用来告诉后续生图接口“第几张参考图是什么”。
+   - ordered_references 的顺序必须按实际生图顺序规划：
+     1) 若本帧依赖组内前置帧，依赖帧图片排在资产图之前，例如「分镜组已生成关键帧 F1」；
+     2) 场景图在角色图之前，可以有多张场景图，例如「场景图：办公室_白天 · 第1张」「场景图：办公室_白天 · 第2张」；
+     3) 角色图按 characters 数组顺序排列，例如「角色图：林晚 · 初始形象」；
+     4) 道具图按 props 数组顺序排列，例如「道具图：文件夹」。
+   - frame.image_prompt 开头必须显式说明这些参考图如何使用，例如：「参考图F1-F2为办公室场景图，F3为角色图：林晚 · 初始形象，F4为道具图：文件夹；当前画面……」。
+   - frame.image_prompt 的画面正文里，人物必须使用“年龄/性别/气质 + 角色名”的写法，禁止只写“年轻男子”“年轻女子”这种泛称；正确示例：「年轻女子林晚站在画面左侧」「中年男子王总坐在办公桌后」「年轻男子陆泽回头看向门口」。如果无法确定年龄段，也必须写「角色名 + 具体动作」。
+   - 如果 single 分镜只有一张代表图，也必须把它当成一个只含 F1 的分镜组来写：frame_index=0，frame_role="hero"，image_prompt 描述本镜头代表画面，reference_policy 写清场景/角色/道具参考图。
+   - 场景可以选择多张参考图：当场景资产有多个可用图且本镜头需要兼顾空间结构、门窗/家具/走廊/室内外关系时，应在 reference_policy.ordered_references 中规划多张场景图，并在 image_prompt 中说明哪张图用于锁定哪部分空间。
+   - image_prompt 必须基于 reference_policy 写具体动作、站位、前后左右、相对距离、道具状态和表情，不能只写“参考图保持一致”。
 
 3. source_text 规则（极其重要）：
    ⚠️ 每个分镜都必须包含，不得为null或空字符串
@@ -300,18 +314,18 @@
         "frame_time_sec": 0,
         "frame_role": "hero",
         "dependency_frame_ids": [],
-        "image_prompt": "4K画质，办公室中景，动作开始前的原始状态：张三刚推开办公室门进入，李四坐在左侧工位低头工作，王五坐在右侧工位写字，三人衣着完整得体，光线自然，画面清晰。",
+        "image_prompt": "参考图F1为当前分镜场景图：办公室，F2为角色图：张三 · 初始形象，F3为角色图：李四 · 初始形象，F4为角色图：王五 · 初始形象；当前画面：4K画质，办公室中景，动作开始前的原始状态：年轻男子张三刚推开办公室门进入，年轻男子李四坐在左侧工位低头工作，年轻男子王五坐在右侧工位写字，三人衣着完整得体，光线自然，画面清晰。",
         "video_prompt": "张三推门进入办公室，李四和王五仍在各自工位工作，镜头保持办公室空间关系清晰。",
-        "reference_policy": {"type": "base", "note": "本组开场原始状态"}
+        "reference_policy": {"type": "base", "ordered_references": ["当前分镜场景图：办公室", "角色图：张三 · 初始形象", "角色图：李四 · 初始形象", "角色图：王五 · 初始形象"], "note": "本组开场原始状态"}
       },
       {
         "frame_index": 1,
         "frame_time_sec": 4,
         "frame_role": "dialogue",
         "dependency_frame_ids": [0],
-        "image_prompt": "4K画质，办公室近景，张三站在门口开口说话，对面李四和王五抬起头望向他，三人服饰、发型、办公室光线与第一帧保持一致。",
+        "image_prompt": "参考图F1为分镜组已生成关键帧 F1，F2为当前分镜场景图：办公室，F3为角色图：张三 · 初始形象，F4为角色图：李四 · 初始形象，F5为角色图：王五 · 初始形象；当前画面：4K画质，办公室近景，年轻男子张三站在门口开口说话，对面年轻男子李四和年轻男子王五抬起头望向他，三人服饰、办公室光线与第一帧保持一致。",
         "video_prompt": "张三站在门口开口通知开会，李四和王五从工作状态抬头回应，人物位置承接第一帧。",
-        "reference_policy": {"type": "depends_on_previous", "note": "参考第0帧保持人物、服饰、场景、光线连贯"}
+        "reference_policy": {"type": "depends_on_previous", "ordered_references": ["分镜组已生成关键帧 F1", "当前分镜场景图：办公室", "角色图：张三 · 初始形象", "角色图：李四 · 初始形象", "角色图：王五 · 初始形象"], "note": "参考第0帧保持人物、服饰、场景、光线连贯"}
       }
     ]
   },
@@ -334,18 +348,18 @@
         "frame_time_sec": 0,
         "frame_role": "hero",
         "dependency_frame_ids": [],
-        "image_prompt": "4K画质，办公室近景，动作开始前的原始状态：李四坐在左侧工位刚抬头，王五坐在右侧工位手中仍握着笔，张三站在门口等待，人物衣着完整得体，场景光线与上一组一致。",
+        "image_prompt": "参考图F1为当前分镜场景图：办公室，F2为角色图：李四 · 初始形象，F3为角色图：王五 · 初始形象，F4为角色图：张三 · 初始形象；当前画面：4K画质，办公室近景，动作开始前的原始状态：年轻男子李四坐在左侧工位刚抬头，年轻男子王五坐在右侧工位手中仍握着笔，年轻男子张三站在门口等待，人物衣着完整得体，当前办公室场景光线自然。",
         "video_prompt": "李四抬头准备回应，王五仍在工位，张三在门口等待，动作尚未完成。",
-        "reference_policy": {"type": "base", "note": "本组开场原始状态"}
+        "reference_policy": {"type": "base", "ordered_references": ["当前分镜场景图：办公室", "角色图：李四 · 初始形象", "角色图：王五 · 初始形象", "角色图：张三 · 初始形象"], "note": "本组开场原始状态；如果用户手动开启上一尾帧链接，系统会额外加入 FP 参考图"}
       },
       {
         "frame_index": 1,
         "frame_time_sec": 4,
         "frame_role": "ending",
         "dependency_frame_ids": [0],
-        "image_prompt": "4K画质，办公室中景，王五从座位上站起身，李四也准备起身，张三在门口向外走去，人物服饰、发型、场景和光线保持一致。",
+        "image_prompt": "参考图F1为分镜组已生成关键帧 F1，F2为当前分镜场景图：办公室，F3为角色图：李四 · 初始形象，F4为角色图：王五 · 初始形象，F5为角色图：张三 · 初始形象；当前画面：4K画质，办公室中景，年轻男子王五从座位上站起身，年轻男子李四也准备起身，年轻男子张三在门口向外走去，人物服饰、场景和光线保持一致。",
         "video_prompt": "李四点头回应，王五放下笔站起身，张三转身准备带两人离开办公室。",
-        "reference_policy": {"type": "depends_on_previous", "note": "参考第0帧保持人物、服饰、场景、光线连贯"}
+        "reference_policy": {"type": "depends_on_previous", "ordered_references": ["分镜组已生成关键帧 F1", "当前分镜场景图：办公室", "角色图：李四 · 初始形象", "角色图：王五 · 初始形象", "角色图：张三 · 初始形象"], "note": "参考第0帧保持人物、服饰、场景、光线连贯"}
       }
     ]
   },
@@ -366,9 +380,9 @@
         "frame_time_sec": 0,
         "frame_role": "hero",
         "dependency_frame_ids": [],
-        "image_prompt": "4K画质，办公室门口近景，张三站在门口看向室内，衣着完整得体，表情认真，嘴唇微张准备说话，办公室光线与前面分镜保持一致，画面清晰。",
+        "image_prompt": "参考图F1为当前分镜场景图：办公室，F2为角色图：张三 · 初始形象；当前画面：4K画质，办公室门口近景，年轻男子张三站在门口看向室内，衣着完整得体，表情认真，嘴唇微张准备说话，办公室光线自然，画面清晰。",
         "video_prompt": "张三站在办公室门口补充一句话，近景固定镜聚焦他的脸部表情和说话状态，人物位置承接上一组分镜。",
-        "reference_policy": {"type": "single_frame", "note": "单一说话镜头，只需要一张代表图，不需要组内依赖"}
+        "reference_policy": {"type": "single_frame", "ordered_references": ["当前分镜场景图：办公室", "角色图：张三 · 初始形象"], "note": "单一说话镜头，只有一张代表图；如果用户手动开启上一尾帧链接，系统会额外加入 FP 参考图"}
       }
     ]
   }
@@ -424,3 +438,5 @@ Clip信息：
 17. 必须为每个顶层分镜输出 panel_mode、duration_sec、frames
 18. group 顶层分镜必须根据时长、动作密集程度、转场/运镜密集程度包含 2~20 个 frames；普通中高密度通常 2~8 帧，超高密度动作/运镜可接近每秒 1 帧；single 顶层分镜只能包含 1 个 frame
 19. 分镜组时长倾向存在时，连续动作/多阶段情绪/转场必须优先合并为 group，禁止拆成多个顶层 single
+20. 每个 frame 都必须输出 reference_policy.ordered_references，按「组内依赖帧 → 场景图（可多张）→ 角色图 → 道具图」顺序说明参考图含义；single 的唯一 frame 也必须输出；初始规划禁止输出 FP
+21. 每个 frame.image_prompt 开头必须写清参考图 F1/F2/Fn 分别是什么，并基于这些参考图描述当前画面的动作、站位、空间关系、道具和表情；image_prompt 中人物必须带角色名，例如「年轻女子林晚」

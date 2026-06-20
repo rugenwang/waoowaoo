@@ -162,6 +162,13 @@ export const ART_STYLES = [
     preview: '实',
     promptZh: '真实电影级画面质感，真实现实场景，色彩饱满通透，画面干净精致，真实感',
     promptEn: 'Realistic cinematic look, real-world scene fidelity, rich transparent colors, clean and refined image quality.'
+  },
+  {
+    value: 'chinese-ancient',
+    label: '中国真人古风',
+    preview: '古',
+    promptZh: '中国真人古风影视写实风格，真人演员质感，真实自然的皮肤、五官、发丝与服装材质，符合故事朝代的传统中式建筑、服饰与礼制细节，古典东方美学构图，真实自然光影，电影级质感，色彩雅致克制，画面细腻通透，人物与场景年代统一，禁止出现现代元素，禁止动漫、插画、卡通或CG建模质感。',
+    promptEn: 'Chinese live-action period-drama cinematic realism with real actors, natural skin, facial features, hair, and fabric textures; historically coherent traditional Chinese architecture, costumes, and ritual details appropriate to the story era; classical Eastern composition, natural realistic lighting, refined restrained colors, detailed clean imagery, consistent period setting, no modern elements, and no anime, illustration, cartoon, or CG-rendered look.'
   }
 ]
 

@@ -55,26 +55,42 @@ export function useVideoDownloadAll({
       })
       const result = (data || {}) as EpisodeVideoUrlsResponse
       const videos = result.videos || []
+      const audios = result.audios || []
       const projectName = result.projectName || 'videos'
 
       if (videos.length === 0) {
         throw new Error(t('stage.noVideos'))
       }
 
-      _ulogInfo(`[下载视频] 共 ${videos.length} 个视频，开始下载...`)
-      setDownloadProgress({ current: 0, total: videos.length })
+      const totalFiles = videos.length + audios.length
+      _ulogInfo(`[下载视频] 共 ${videos.length} 个视频、${audios.length} 个配音音频，开始下载...`)
+      setDownloadProgress({ current: 0, total: totalFiles })
 
       const zip = new JSZip()
       for (let index = 0; index < videos.length; index += 1) {
         const video = videos[index]
         _ulogInfo(`[下载视频] 下载 ${index + 1}/${videos.length}: ${video.fileName}`)
-        setDownloadProgress({ current: index + 1, total: videos.length })
+        setDownloadProgress({ current: index + 1, total: totalFiles })
 
         try {
           const blob = await downloadRemoteBlobMutation.mutateAsync(video.videoUrl)
           zip.file(video.fileName, blob)
         } catch (error) {
           _ulogError(`[下载视频] 下载失败: ${video.fileName}`, error)
+        }
+      }
+
+      for (let index = 0; index < audios.length; index += 1) {
+        const audio = audios[index]
+        const current = videos.length + index + 1
+        _ulogInfo(`[下载视频] 下载配音 ${index + 1}/${audios.length}: ${audio.fileName}`)
+        setDownloadProgress({ current, total: totalFiles })
+
+        try {
+          const blob = await downloadRemoteBlobMutation.mutateAsync(audio.audioUrl)
+          zip.file(audio.fileName, blob)
+        } catch (error) {
+          _ulogError(`[下载视频] 配音下载失败: ${audio.fileName}`, error)
         }
       }
 

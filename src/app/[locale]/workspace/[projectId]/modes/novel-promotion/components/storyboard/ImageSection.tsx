@@ -209,7 +209,9 @@ export default function ImageSection({
       )}
 
       <div className="absolute top-2 left-2 flex items-center gap-1.5">
-        <span className="glass-chip glass-chip-neutral px-2 py-0.5 text-xs font-medium">{globalPanelNumber}</span>
+        <span className="inline-flex h-8 min-w-8 items-center justify-center rounded-full border border-white/70 bg-black/75 px-2.5 text-sm font-extrabold leading-none text-white shadow-[0_5px_16px_rgba(0,0,0,0.42)] backdrop-blur">
+          {globalPanelNumber}
+        </span>
         {normalizedDuration !== null ? (
           <span className="inline-flex items-center gap-1 rounded-full border border-white/55 bg-black/70 px-2.5 py-1 text-xs font-bold text-white shadow-[0_4px_14px_rgba(0,0,0,0.35)] backdrop-blur">
             <AppIcon name="clock" className="h-3 w-3" />

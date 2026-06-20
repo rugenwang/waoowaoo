@@ -45,8 +45,8 @@ Key-frame group rules:
 - group duration_sec must be <= 20 seconds. single duration_sec should usually be 2-8 seconds; group duration_sec should usually be 6-20 seconds.
 - Each frame must include frame_index, frame_time_sec, frame_role, dependency_frame_ids, image_prompt, video_prompt, reference_policy.
 - frame_time_sec starts at 0, increases in playback order, and never exceeds duration_sec.
-- dependency_frame_ids may reference earlier frame_index values. For frame_index=0 only, it may also contain "FP", meaning this first frame should reference the previous top-level panel tail frame to preserve continuity.
-- Use "FP" only when the current panel must continue from the previous panel ending state: same character position, pose, prop state, light, or continuous action. Do not use FP for a new scene, time jump, dream/flashback, or unrelated shot. The frame reference_policy must mention preserving continuity from the previous panel tail without copying composition.
+- dependency_frame_ids may reference earlier frame_index values only. Do NOT output "FP" during storyboard detail refinement.
+- Previous-tail linking is a manual storyboard-page option and will be added by the system only after the user enables it. If a panel seems suitable for previous-tail continuity, mention it only in `description` or `reference_policy.note`; do not put `FP` in `dependency_frame_ids` or `ordered_references`.
 - image_prompt must be a direct positive image-generation prompt and preserve character identity, clothing, scene, light, aspect, and visual style across the group.
 - The first group frame (frame_index=0, frame_time_sec=0, frame_role="hero") MUST be the original state before the video action starts: the character has not completed later actions, emotional changes, movement, fight results, or transition results.
 - The first frame image_prompt must explicitly describe before-action/original position/initial pose/initial expression and must naturally lead into later frames.
@@ -54,6 +54,9 @@ Key-frame group rules:
 - When panel_mode="group", group_video_prompt must describe positive visual quality, background music style, segmented timeline, camera movement, characters, actions, expressions, dialogue, and transitions. Avoid exaggerated action.
 - When panel_mode="single", do not output group_video_prompt.
 - Every panel must output `props`: select names from Props info for visible, held, carried, handed, fought over, used, opened/closed, or story-identifying objects. Distinctive items such as backpacks, bags, watches, rings, bracelets, phones, books, umbrellas, cups, cameras, keys, suitcases, weapons, magical items, tokens, and folders must be prop assets, not character appearance. If none, output [].
+- Every frame, including `panel_mode="single"`, must include `reference_policy.ordered_references`. Ordered reference sequence must be: dependency frame references first, then location reference image(s), then character reference image(s) in `characters` order, then prop reference image(s) in `props` order.
+- Every `frame.image_prompt` must start by explaining what input reference F1/F2/Fn means and how the current still image should use those references. Here F1/F2/Fn means input reference image order, not storyboard keyframe numbers.
+- In every `frame.image_prompt`, each visible person must be written as age/gender/temperament + character name, not a generic label only. Good examples: `young woman Lin Wan stands on screen-left`, `middle-aged man Mr. Wang sits behind the desk`, `young man Lu Ze looks toward the doorway`. If age/gender is uncertain, still include the character name with the action.
 
 【video_prompt CINEMATIC SHORT-DRAMA FORMAT — MANDATORY】
 
@@ -107,9 +110,9 @@ Output schema example (field names must be preserved):
         "frame_time_sec": 0,
         "frame_role": "hero",
         "dependency_frame_ids": [],
-        "image_prompt": "4K画质，现代书房场景，暖黄色台灯，年轻女子坐在书桌前打开笔记本电脑，神情放松，平视中景，画面清晰无模糊。",
+        "image_prompt": "参考图F1为当前分镜场景图：书房，F2为角色图：角色A · 初始形象；当前画面：4K画质，现代书房场景，暖黄色台灯，年轻女子角色A坐在书桌前打开笔记本电脑，神情放松，平视中景，画面清晰无模糊。",
         "video_prompt": "00:00-00:03：平视中景推镜，从书桌左侧缓缓推进到画面右侧年轻女子身前；近景固定镜，聚焦右侧年轻女子坐下并打开笔记本电脑的动作；表情特写，她嘴角轻轻上扬；【对话】画面右侧年轻女子声音轻柔清亮，语气带着自我鼓励地说：「今天也要好好加油呀。」；背景音中键盘轻响与治愈温柔轻音乐自然响起。",
-        "reference_policy": {"character_consistency": "人物五官、气质和整体形象保持一致", "scene_consistency": "保持书房与暖黄色台灯光线一致"}
+        "reference_policy": {"ordered_references": ["当前分镜场景图：书房", "角色图：角色A · 初始形象"], "character_consistency": "人物五官、气质和整体形象保持一致", "scene_consistency": "保持书房与暖黄色台灯光线一致"}
       }
     ],
     "video_prompt": "高清4K，电影级质感，现代书房场景，暖黄色台灯光影柔和，氛围安静治愈，年轻女子气质温和自然，人物动作流畅不僵硬，表情神态生动，无画面闪烁、无脸部崩坏、无肢体畸形，色调温暖柔和，沉浸式都市短剧质感，背景音乐为治愈温柔轻音乐，贯穿整段视频。\n\n00:00-00:03：平视中景推镜，从书桌左侧缓缓推进到画面右侧年轻女子身前；近景固定镜，聚焦右侧年轻女子坐下并打开笔记本电脑的动作；表情特写，她嘴角轻轻上扬；【对话】画面右侧年轻女子声音轻柔清亮，语气带着自我鼓励地说：「今天也要好好加油呀。」；背景音中键盘轻响与治愈温柔轻音乐自然响起。"
@@ -144,4 +147,6 @@ Rules:
 16. For group panels, duration_sec must be <= 20 seconds and frames count must be 2-20 based on duration, action density, and transition/camera-movement density; ultra-high-density action/camera movement may approach 1 frame per second.
 17. For single panels, frames count must be exactly 1 and group_video_prompt must be omitted.
 18. Every frame image_prompt must be suitable for direct image generation and keep group visual continuity.
+18.1 Every frame must include `reference_policy.ordered_references` in the order `dependency frames -> location image(s) -> character image(s) -> prop image(s)`, and every `frame.image_prompt` must explain what input reference F1/F2/Fn means. Do not output FP during detail refinement.
+18.2 Every `frame.image_prompt` must include the concrete character name beside the age/gender label, e.g. 年轻女子林晚, 中年男子王总, 年轻男子陆泽.
 19. Every panel must include `props`; use [] when no provided prop is visible or used.

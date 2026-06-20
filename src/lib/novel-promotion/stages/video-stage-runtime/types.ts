@@ -31,6 +31,7 @@ export interface VideoModelOption {
 
 export interface EpisodeVideoUrlsResponse {
   videos?: Array<{ index: number; fileName: string; videoUrl: string }>
+  audios?: Array<{ index: number; fileName: string; audioUrl: string }>
   projectName?: string
 }
 

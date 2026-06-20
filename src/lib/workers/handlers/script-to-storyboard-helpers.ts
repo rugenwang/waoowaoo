@@ -79,7 +79,7 @@ function readString(record: JsonRecord, keys: string[]): string | null {
   return null
 }
 
-function cleanVideoPromptText(value: string | null): string | null {
+export function cleanVideoPromptText(value: string | null): string | null {
   if (!value) return null
   const cleaned = value
     .replace(/[①②③④⑤⑥⑦⑧⑨⑩]\s*/g, '')
@@ -90,6 +90,49 @@ function cleanVideoPromptText(value: string | null): string | null {
     .replace(/；{2,}/g, '；')
     .trim()
   return cleaned || null
+}
+
+function stripReferenceIntro(value: string): string {
+  return value
+    .replace(/^参考图F\d+[^；;]*[；;]\s*/u, '')
+    .replace(/^参考图F\d+(?:[-~到至]F\d+)?[^；;]*[；;]\s*/u, '')
+    .replace(/^Input references?\s+F\d+(?:[-~]\s*F\d+)?[^;]*;\s*/iu, '')
+    .replace(/^无额外输入参考图[；;]\s*/u, '')
+    .replace(/^当前画面[：:]\s*/u, '')
+    .replace(/^current still image[：:]\s*/iu, '')
+    .trim()
+}
+
+function looksLikeVideoPrompt(value: string): boolean {
+  const text = value.trim()
+  if (!text) return false
+  const hasTimeline = /\b\d{2}:\d{2}\s*-\s*\d{2}:\d{2}[：:]/.test(text)
+  const hasVideoMarkers = text.includes('背景音乐为')
+    || text.includes('【对话】')
+    || text.includes('【旁白】')
+    || text.includes('无画面闪烁')
+    || text.includes('电影级质感')
+  return hasTimeline || (text.length > 180 && hasVideoMarkers)
+}
+
+export function cleanPanelDescriptionText(panel: StoryboardPanel): string | null {
+  const rawDescription = typeof panel.description === 'string' ? panel.description.trim() : ''
+  if (rawDescription && !looksLikeVideoPrompt(rawDescription)) return rawDescription
+
+  const frames = Array.isArray(panel.frames) ? panel.frames : []
+  for (const frame of frames) {
+    const record = asJsonRecord(frame)
+    const framePrompt = record ? readString(record, ['image_prompt', 'imagePrompt', 'prompt']) : null
+    if (framePrompt) {
+      const cleaned = stripReferenceIntro(framePrompt)
+      if (cleaned && !looksLikeVideoPrompt(cleaned)) return cleaned
+    }
+  }
+
+  const sourceText = typeof panel.source_text === 'string' ? panel.source_text.trim() : ''
+  if (sourceText && !looksLikeVideoPrompt(sourceText)) return sourceText
+
+  return rawDescription ? stripReferenceIntro(rawDescription).slice(0, 160) : null
 }
 
 function readNumber(record: JsonRecord, keys: string[]): number | null {
@@ -122,6 +165,117 @@ function toJsonArrayText(value: unknown): string | null {
   return normalized.length > 0 ? toJsonText(normalized) : null
 }
 
+function readNameFromReference(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim()
+  const record = asJsonRecord(value)
+  if (!record) return null
+  return readString(record, ['name', 'label', 'title'])
+}
+
+function readAppearanceFromReference(value: unknown): string | null {
+  const record = asJsonRecord(value)
+  if (!record) return null
+  return readString(record, ['appearance', 'changeReason', 'variant'])
+}
+
+function normalizeDependencyItems(value: unknown): Array<string | number> {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      if (typeof item === 'string' && item.trim()) {
+        const trimmed = item.trim()
+        if (trimmed.toUpperCase() === 'FP') return 'FP'
+        const numeric = Number(trimmed)
+        return Number.isFinite(numeric) ? Math.floor(numeric) : trimmed
+      }
+      if (typeof item === 'number' && Number.isFinite(item)) return Math.floor(item)
+      return null
+    })
+    .filter((item): item is string | number => item !== null)
+}
+
+function removeModelPlannedPreviousTailDependency(value: unknown): Array<string | number> {
+  return normalizeDependencyItems(value).filter((item) => !(typeof item === 'string' && item.toUpperCase() === 'FP'))
+}
+
+function buildOrderedReferenceLabels(panel: StoryboardPanel, dependencies: unknown): string[] {
+  const labels: string[] = []
+  for (const item of normalizeDependencyItems(dependencies)) {
+    if (typeof item === 'string' && item.toUpperCase() === 'FP') {
+      labels.push('上一个连续分镜的尾帧 FP，作为当前分镜的参考图')
+    } else if (typeof item === 'number') {
+      labels.push(`分镜组已生成关键帧 F${item + 1}`)
+    }
+  }
+
+  const location = readString(panel, ['location'])
+  if (location) {
+    labels.push(`当前分镜场景图：${location}`)
+  }
+
+  const characters = Array.isArray(panel.characters) ? panel.characters : []
+  for (const character of characters) {
+    const name = readNameFromReference(character)
+    if (!name) continue
+    const appearance = readAppearanceFromReference(character)
+    labels.push(appearance ? `角色图：${name} · ${appearance}` : `角色图：${name}`)
+  }
+
+  const props = Array.isArray(panel.props) ? panel.props : []
+  for (const prop of props) {
+    const name = readNameFromReference(prop)
+    if (name) labels.push(`道具图：${name}`)
+  }
+
+  return labels
+}
+
+function hasReferenceIntro(prompt: string | null): boolean {
+  return Boolean(prompt && /(?:参考图|输入参考图)\s*F\d+|Input reference\s+F\d+/i.test(prompt))
+}
+
+function containsPreviousTailReference(prompt: string): boolean {
+  return /(?:上一(?:个)?(?:连续)?分镜(?:的)?尾帧|上一尾帧|previous(?:\s+\w+){0,4}\s+tail|previous\s+panel\s+tail|FP)/i.test(prompt)
+}
+
+function dependencyIncludesPreviousTail(dependencies: unknown): boolean {
+  return normalizeDependencyItems(dependencies).some((item) => typeof item === 'string' && item.toUpperCase() === 'FP')
+}
+
+function ensureFramePromptReferenceIntro(
+  prompt: string | null,
+  panel: StoryboardPanel,
+  dependencies: unknown,
+): string | null {
+  const cleanPrompt = typeof prompt === 'string' ? prompt.trim() : ''
+  if (!cleanPrompt) return null
+  if (hasReferenceIntro(cleanPrompt) && (!containsPreviousTailReference(cleanPrompt) || dependencyIncludesPreviousTail(dependencies))) {
+    return cleanPrompt
+  }
+  const promptBody = hasReferenceIntro(cleanPrompt) ? stripReferenceIntro(cleanPrompt) : cleanPrompt
+  const labels = buildOrderedReferenceLabels(panel, dependencies)
+  if (labels.length === 0) {
+    return `无额外输入参考图；当前画面：${promptBody}`
+  }
+  const referenceIntro = labels
+    .map((label, index) => `参考图F${index + 1}为${label}`)
+    .join('，')
+  return `${referenceIntro}；当前画面：${promptBody}`
+}
+
+function buildReferencePolicyWithOrderedReferences(
+  policy: unknown,
+  panel: StoryboardPanel,
+  dependencies: unknown,
+): JsonRecord {
+  const base = asJsonRecord(policy) || {}
+  const labels = buildOrderedReferenceLabels(panel, dependencies)
+  return {
+    ...base,
+    ordered_references: labels,
+  }
+}
+
 function clampFrameTime(value: number | null, duration: number | null, fallback: number) {
   const raw = value ?? fallback
   const safe = Number.isFinite(raw) ? raw : fallback
@@ -148,15 +302,18 @@ function normalizePanelFrameRows(panel: StoryboardPanel, duration: number | null
         fallbackTime,
       )
       const dependencies = frame.dependency_frame_ids ?? frame.dependencyFrameIds ?? frame.dependencies ?? frame.depends_on
+      const safeDependencies = removeModelPlannedPreviousTailDependency(dependencies)
+      const imagePrompt = readString(frame, ['image_prompt', 'imagePrompt', 'prompt', 'description'])
+      const referencePolicy = frame.reference_policy ?? frame.referencePolicy ?? frame.references ?? null
       return {
         frameIndex,
         frameTimeSec,
         frameRole: readString(frame, ['frame_role', 'frameRole', 'role']) || (index === 0 ? 'hero' : 'continuity'),
-        dependencyFrameIds: toJsonArrayText(dependencies),
-        imagePrompt: readString(frame, ['image_prompt', 'imagePrompt', 'prompt', 'description']),
+        dependencyFrameIds: toJsonArrayText(safeDependencies),
+        imagePrompt: ensureFramePromptReferenceIntro(imagePrompt, panel, safeDependencies),
         videoPrompt: cleanVideoPromptText(readString(frame, ['video_prompt', 'videoPrompt', 'motion_prompt', 'motionPrompt'])),
         promptJson: toJsonText(frame),
-        referencePolicy: toJsonText(frame.reference_policy ?? frame.referencePolicy ?? frame.references ?? null),
+        referencePolicy: toJsonText(buildReferencePolicyWithOrderedReferences(referencePolicy, panel, safeDependencies)),
         generationStatus: 'pending',
       }
     })
@@ -165,10 +322,14 @@ function normalizePanelFrameRows(panel: StoryboardPanel, duration: number | null
       frameTimeSec: 0,
       frameRole: 'hero',
       dependencyFrameIds: null,
-      imagePrompt: readString(panel, ['image_prompt', 'imagePrompt', 'description', 'source_text']),
+      imagePrompt: ensureFramePromptReferenceIntro(
+        readString(panel, ['image_prompt', 'imagePrompt', 'description', 'source_text']),
+        panel,
+        [],
+      ),
       videoPrompt: cleanVideoPromptText(readString(panel, ['video_prompt', 'videoPrompt'])),
       promptJson: null,
-      referencePolicy: null,
+      referencePolicy: toJsonText(buildReferencePolicyWithOrderedReferences(null, panel, [])),
       generationStatus: 'pending',
     }]
 
@@ -415,16 +576,19 @@ function buildFallbackFrame(panel: StoryboardPanel, index: number, total: number
   const frameTimeSec = total <= 1
     ? 0
     : Math.round((durationSec / Math.max(1, total - 1)) * index * 10) / 10
+  const dependencyFrameIds = index === 0 ? [] : [index - 1]
+  const baseImagePrompt = panel.image_prompt || panel.description || panel.source_text || ''
+  const referencePolicy = index === 0
+    ? { type: 'base', note: '本组开场原始状态' }
+    : { type: 'depends_on_previous', note: '参考前一关键帧保持人物、服饰、场景、光线连贯' }
   return {
     frame_index: index,
     frame_time_sec: frameTimeSec,
     frame_role: index === 0 ? 'hero' : index === total - 1 ? 'ending' : 'continuity',
-    dependency_frame_ids: index === 0 ? [] : [index - 1],
-    image_prompt: panel.image_prompt || panel.description || panel.source_text || '',
+    dependency_frame_ids: dependencyFrameIds,
+    image_prompt: ensureFramePromptReferenceIntro(String(baseImagePrompt), panel, dependencyFrameIds),
     video_prompt: panel.video_prompt || panel.description || panel.source_text || '',
-    reference_policy: index === 0
-      ? { type: 'base', note: '本组开场原始状态' }
-      : { type: 'depends_on_previous', note: '参考前一关键帧保持人物、服饰、场景、光线连贯' },
+    reference_policy: buildReferencePolicyWithOrderedReferences(referencePolicy, panel, dependencyFrameIds),
   }
 }
 
@@ -516,7 +680,7 @@ export function applyForcedStoryboardGrouping(
   })
 }
 
-async function createPanelFrames(
+export async function createPanelFrames(
   tx: { novelPromotionPanelFrame: unknown },
   panelId: string,
   frames: PanelFramePersistenceRow[],
@@ -623,7 +787,7 @@ export function buildStoryboardJsonFromClipPanels(clipPanels: ClipPanelsResult[]
         storyboardId: clipEntry.clipId,
         panelIndex: index,
         text_segment: panel.source_text || '',
-        description: panel.description || '',
+        description: cleanPanelDescriptionText(panel) || '',
         characters: Array.isArray(panel.characters) ? panel.characters.filter(Boolean) : [],
         props: Array.isArray(panel.props) ? panel.props.filter(Boolean) : [],
       })
@@ -687,6 +851,7 @@ export async function persistStoryboardsAndPanels(params: {
         const panel = clipEntry.finalPanels[i]
         const framePersistence = buildPanelFramePersistence(panel)
         const panelVideoPrompt = cleanVideoPromptText(panel.video_prompt || null)
+        const panelDescription = cleanPanelDescriptionText(panel)
         const created = await panelModel.create({
           data: {
             storyboardId: storyboard.id,
@@ -694,7 +859,7 @@ export async function persistStoryboardsAndPanels(params: {
             panelNumber: panel.panel_number || i + 1,
             shotType: panel.shot_type || '中景',
             cameraMove: panel.camera_move || '固定',
-            description: panel.description || null,
+            description: panelDescription,
             videoPrompt: panelVideoPrompt,
             location: panel.location || null,
             characters: panel.characters ? JSON.stringify(panel.characters) : null,
@@ -788,6 +953,7 @@ export async function persistStoryboardOutputs(params: {
         const panel = clipEntry.finalPanels[i]
         const framePersistence = buildPanelFramePersistence(panel)
         const panelVideoPrompt = cleanVideoPromptText(panel.video_prompt || null)
+        const panelDescription = cleanPanelDescriptionText(panel)
         const created = await panelModel.create({
           data: {
             storyboardId: storyboard.id,
@@ -795,7 +961,7 @@ export async function persistStoryboardOutputs(params: {
             panelNumber: panel.panel_number || i + 1,
             shotType: panel.shot_type || '中景',
             cameraMove: panel.camera_move || '固定',
-            description: panel.description || null,
+            description: panelDescription,
             videoPrompt: panelVideoPrompt,
             location: panel.location || null,
             characters: panel.characters ? JSON.stringify(panel.characters) : null,

@@ -24,6 +24,9 @@ const utilsMock = vi.hoisted(() => ({
 
 const sharedMock = vi.hoisted(() => ({
   collectPanelReferenceImages: vi.fn(async () => ['https://signed.example/ref-1.png']),
+  collectPanelReferenceImageEntries: vi.fn(async () => [
+    { url: 'https://signed.example/ref-1.png', label: '场景图：Old Town', kind: 'location' },
+  ]),
   resolveNovelData: vi.fn(async () => ({
     videoRatio: '16:9',
     characters: [],
@@ -92,6 +95,7 @@ vi.mock('@/lib/workers/handlers/image-task-handler-shared', async () => {
   return {
     ...actual,
     collectPanelReferenceImages: sharedMock.collectPanelReferenceImages,
+    collectPanelReferenceImageEntries: sharedMock.collectPanelReferenceImageEntries,
     resolveNovelData: sharedMock.resolveNovelData,
   }
 })
@@ -126,6 +130,9 @@ describe('worker panel-image-task-handler behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     sharedMock.collectPanelReferenceImages.mockImplementation(async () => ['https://signed.example/ref-1.png'])
+    sharedMock.collectPanelReferenceImageEntries.mockImplementation(async () => [
+      { url: 'https://signed.example/ref-1.png', label: '场景图：Old Town', kind: 'location' },
+    ])
     outboundMock.normalizeReferenceImagesForGeneration.mockImplementation(async (..._args: unknown[]) => ['normalized-ref-1'])
 
     prismaMock.novelPromotionPanel.findUnique.mockResolvedValue({
@@ -179,7 +186,7 @@ describe('worker panel-image-task-handler behavior', () => {
       expect.anything(),
       expect.objectContaining({
         modelId: 'storyboard-model-1',
-        prompt: expect.stringContaining('panel-image-prompt'),
+        prompt: expect.stringContaining('panel anchor prompt'),
         allowTaskExternalIdResume: false,
         options: expect.objectContaining({
           referenceImages: ['normalized-ref-1'],
@@ -187,26 +194,13 @@ describe('worker panel-image-task-handler behavior', () => {
         }),
       }),
     )
-    expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
-      variables: expect.objectContaining({
-        storyboard_text_json_input: expect.stringContaining('"slot": "街道左侧靠墙的留白位置"'),
+    expect(promptMock.buildPrompt).not.toHaveBeenCalled()
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.not.stringContaining('storyboard_text_json_input'),
       }),
-    }))
-    expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
-      variables: expect.objectContaining({
-        storyboard_text_json_input: expect.stringContaining('"available_slots"'),
-      }),
-    }))
-    expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
-      variables: expect.objectContaining({
-        storyboard_text_json_input: expect.stringContaining('"reference_priority"'),
-      }),
-    }))
-    expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
-      variables: expect.objectContaining({
-        storyboard_text_json_input: expect.stringContaining('"video_prompt": "dramatic"'),
-      }),
-    }))
+    )
 
     expect(prismaMock.novelPromotionPanel.update).toHaveBeenCalledWith({
       where: { id: 'panel-1' },
@@ -443,15 +437,18 @@ describe('worker panel-image-task-handler behavior', () => {
   })
 
   it('single panel with previous-tail flag -> prepends previous panel tail reference', async () => {
-    sharedMock.collectPanelReferenceImages.mockImplementation(async (...args: unknown[]) => {
+    sharedMock.collectPanelReferenceImageEntries.mockImplementation(async (...args: unknown[]) => {
       const options = args[2] as { includeLocationReference?: boolean } | undefined
       if (options?.includeLocationReference === false) {
-        return ['https://signed.example/ref-character.png', 'https://signed.example/ref-prop.png']
+        return [
+          { url: 'https://signed.example/ref-character.png', label: '角色图：张三', kind: 'character' },
+          { url: 'https://signed.example/ref-prop.png', label: '道具图：咖啡杯', kind: 'prop' },
+        ]
       }
       return [
-        'https://signed.example/ref-character.png',
-        'https://signed.example/ref-location.png',
-        'https://signed.example/ref-prop.png',
+        { url: 'https://signed.example/ref-location.png', label: '场景图：Old Town', kind: 'location' },
+        { url: 'https://signed.example/ref-character.png', label: '角色图：张三', kind: 'character' },
+        { url: 'https://signed.example/ref-prop.png', label: '道具图：咖啡杯', kind: 'prop' },
       ]
     })
     outboundMock.normalizeReferenceImagesForGeneration.mockImplementation(async (...args: unknown[]) => {
@@ -510,7 +507,7 @@ describe('worker panel-image-task-handler behavior', () => {
 
     await handlePanelImageTask(buildJob({ candidateCount: 1 }))
 
-    expect(sharedMock.collectPanelReferenceImages).toHaveBeenCalledWith(
+    expect(sharedMock.collectPanelReferenceImageEntries).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ id: 'panel-1' }),
       { includeLocationReference: false },
@@ -532,15 +529,18 @@ describe('worker panel-image-task-handler behavior', () => {
   it('group generation with previous-tail flag -> only the first frame receives previous tail reference', async () => {
     utilsMock.resolveImageSourceFromGeneration.mockReset()
     utilsMock.uploadImageSourceToCos.mockReset()
-    sharedMock.collectPanelReferenceImages.mockImplementation(async (...args: unknown[]) => {
+    sharedMock.collectPanelReferenceImageEntries.mockImplementation(async (...args: unknown[]) => {
       const options = args[2] as { includeLocationReference?: boolean } | undefined
       if (options?.includeLocationReference === false) {
-        return ['https://signed.example/ref-character.png', 'https://signed.example/ref-prop.png']
+        return [
+          { url: 'https://signed.example/ref-character.png', label: '角色图：张三', kind: 'character' },
+          { url: 'https://signed.example/ref-prop.png', label: '道具图：咖啡杯', kind: 'prop' },
+        ]
       }
       return [
-        'https://signed.example/ref-character.png',
-        'https://signed.example/ref-location.png',
-        'https://signed.example/ref-prop.png',
+        { url: 'https://signed.example/ref-location.png', label: '场景图：Old Town', kind: 'location' },
+        { url: 'https://signed.example/ref-character.png', label: '角色图：张三', kind: 'character' },
+        { url: 'https://signed.example/ref-prop.png', label: '道具图：咖啡杯', kind: 'prop' },
       ]
     })
     outboundMock.normalizeReferenceImagesForGeneration.mockImplementation(async (...args: unknown[]) => {
@@ -648,8 +648,8 @@ describe('worker panel-image-task-handler behavior', () => {
         options: expect.objectContaining({
           referenceImages: [
             'normalized:signed:cos/frame-1.png',
-            'normalized:https://signed.example/ref-character.png',
             'normalized:https://signed.example/ref-location.png',
+            'normalized:https://signed.example/ref-character.png',
             'normalized:https://signed.example/ref-prop.png',
           ],
         }),
@@ -967,7 +967,7 @@ describe('worker panel-image-task-handler behavior', () => {
     )
   })
 
-  it('target frame regeneration with refine enabled -> sends refined frame prompt plus hard constraints', async () => {
+  it('target frame regeneration with refine enabled -> still passes through frame prompt plus hard constraints', async () => {
     utilsMock.resolveImageSourceFromGeneration.mockReset()
     utilsMock.uploadImageSourceToCos.mockReset()
     aiRuntimeMock.executeAiTextStep.mockClear()
@@ -1034,15 +1034,11 @@ describe('worker panel-image-task-handler behavior', () => {
       targetFrameId: 'frame-2',
     }))
 
-    expect(aiRuntimeMock.executeAiTextStep).toHaveBeenCalledTimes(1)
-    expect(aiRuntimeMock.executeAiTextStep).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'analysis-model-1',
-      action: 'NP_STORYBOARD_PROMPT_REFINE',
-    }))
+    expect(aiRuntimeMock.executeAiTextStep).not.toHaveBeenCalled()
     expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        prompt: expect.stringContaining('REFINED_STILL_FRAME_PROMPT'),
+        prompt: expect.stringContaining('关键帧生图提示：frame 2 prompt'),
       }),
     )
     expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
@@ -1051,11 +1047,12 @@ describe('worker panel-image-task-handler behavior', () => {
         prompt: expect.stringContaining('镜头类型：medium'),
       }),
     )
-    expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
-      variables: expect.objectContaining({
-        storyboard_text_json_input: expect.stringContaining('咖啡杯'),
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.not.stringContaining('REFINED_STILL_FRAME_PROMPT'),
       }),
-    }))
+    )
     expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({

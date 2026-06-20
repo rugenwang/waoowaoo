@@ -253,16 +253,50 @@ interface CollectPanelReferenceImagesOptions {
   includeLocationReference?: boolean
 }
 
-export async function collectPanelReferenceImages(
+export type PanelReferenceImageEntry = {
+  url: string
+  label: string
+  kind: 'sketch' | 'location' | 'character' | 'prop'
+}
+
+function collectSelectedLocationImages(location: LocationLike | undefined | null) {
+  const images = location?.images || []
+  const selectedImages = images.filter((image) => image.isSelected)
+  return selectedImages.length > 0 ? selectedImages : images.slice(0, 1)
+}
+
+export async function collectPanelReferenceImageEntries(
   projectData: NovelProjectData,
   panel: PanelLike,
   options: CollectPanelReferenceImagesOptions = {},
 ) {
   const includeLocationReference = options.includeLocationReference !== false
-  const refs: string[] = []
+  const refs: PanelReferenceImageEntry[] = []
 
   const sketch = toSignedUrlIfCos(panel.sketchImageUrl, 3600)
-  if (sketch) refs.push(sketch)
+  if (sketch) {
+    refs.push({
+      url: sketch,
+      label: '当前分镜手工参考图/草图',
+      kind: 'sketch',
+    })
+  }
+
+  if (includeLocationReference && panel.location) {
+    const location = (projectData.locations || []).find((loc) => (loc.assetKind || 'location') !== 'prop' && loc.name.toLowerCase() === panel.location!.toLowerCase())
+    const locationImages = collectSelectedLocationImages(location)
+    locationImages.forEach((image, index) => {
+      const signed = toSignedUrlIfCos(image?.imageUrl, 3600)
+      if (!signed) return
+      refs.push({
+        url: signed,
+        label: locationImages.length > 1
+          ? `当前分镜场景图：${location?.name || panel.location} · 第 ${index + 1} 张`
+          : `当前分镜场景图：${location?.name || panel.location}`,
+        kind: 'location',
+      })
+    })
+  }
 
   const panelCharacters = parsePanelCharacterReferences(panel.characters)
   for (const item of panelCharacters) {
@@ -283,16 +317,14 @@ export async function collectPanelReferenceImages(
     const selectedUrl = selectedIndex !== null && selectedIndex !== undefined ? imageUrls[selectedIndex] : null
     const key = selectedUrl || imageUrls[0] || appearance.imageUrl
     const signed = toSignedUrlIfCos(key, 3600)
-    if (signed) refs.push(signed)
-  }
-
-  if (includeLocationReference && panel.location) {
-    const location = (projectData.locations || []).find((loc) => (loc.assetKind || 'location') !== 'prop' && loc.name.toLowerCase() === panel.location!.toLowerCase())
-    if (location) {
-      const images = location.images || []
-      const selected = images.find((img) => img.isSelected) || images[0]
-      const signed = toSignedUrlIfCos(selected?.imageUrl, 3600)
-      if (signed) refs.push(signed)
+    if (signed) {
+      refs.push({
+        url: signed,
+        label: item.appearance
+          ? `角色图：${item.name} · ${item.appearance}`
+          : `角色图：${item.name}`,
+        kind: 'character',
+      })
     }
   }
 
@@ -301,11 +333,28 @@ export async function collectPanelReferenceImages(
       (item) => (item.assetKind || 'location') === 'prop' && item.name.toLowerCase() === propName.toLowerCase(),
     )
     if (!prop) continue
-    const images = prop.images || []
-    const selected = images.find((img) => img.isSelected) || images[0]
-    const signed = toSignedUrlIfCos(selected?.imageUrl, 3600)
-    if (signed) refs.push(signed)
+    const propImages = collectSelectedLocationImages(prop)
+    propImages.forEach((image, index) => {
+      const signed = toSignedUrlIfCos(image?.imageUrl, 3600)
+      if (!signed) return
+      refs.push({
+        url: signed,
+        label: propImages.length > 1
+          ? `道具图：${propName} · 第 ${index + 1} 张`
+          : `道具图：${propName}`,
+        kind: 'prop',
+      })
+    })
   }
 
   return refs
+}
+
+export async function collectPanelReferenceImages(
+  projectData: NovelProjectData,
+  panel: PanelLike,
+  options: CollectPanelReferenceImagesOptions = {},
+) {
+  const entries = await collectPanelReferenceImageEntries(projectData, panel, options)
+  return entries.map((entry) => entry.url)
 }

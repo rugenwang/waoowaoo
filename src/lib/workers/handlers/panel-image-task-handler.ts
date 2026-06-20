@@ -15,14 +15,13 @@ import { normalizeReferenceImagesForGeneration } from '@/lib/media/outbound-imag
 import {
   AnyObj,
   clampCount,
-  collectPanelReferenceImages,
+  collectPanelReferenceImageEntries,
   findCharacterByName,
   parsePanelCharacterReferences,
   pickFirstString,
   resolveNovelData,
 } from './image-task-handler-shared'
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
-import { executeAiTextStep } from '@/lib/ai-runtime/client'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { clearTaskExternalId } from '@/lib/task/service'
 import { buildPanelAiDataJson } from '@/lib/novel-promotion/panel-ai-data-json'
@@ -428,28 +427,6 @@ function buildFrameReferencePlan(params: {
   }
 }
 
-function buildPanelFrameRefineContext(params: {
-  panelContext: ReturnType<typeof buildPanelPromptContext>
-  frame: PanelFrameForGeneration
-  frameReferenceIndexes: number[]
-  usesPreviousTail: boolean
-  referenceImageCount: number
-}) {
-  return {
-    ...params.panelContext,
-    current_frame: {
-      frame_index: params.frame.frameIndex,
-      frame_label: `F${params.frame.frameIndex + 1}`,
-      frame_time_sec: params.frame.frameTimeSec,
-      frame_role: params.frame.frameRole || '',
-      image_prompt: params.frame.imagePrompt || '',
-      dependency_frame_indexes: params.frameReferenceIndexes,
-      uses_previous_panel_tail_frame: params.usesPreviousTail,
-      reference_image_count: params.referenceImageCount,
-    },
-  }
-}
-
 function buildPanelFramePrompt(params: {
   locale: TaskJobData['locale']
   aspectRatio: string
@@ -465,43 +442,6 @@ function buildPanelFramePrompt(params: {
   const shot = (params.panelContext as { shot?: PromptRecord }).shot || {}
   const shotType = String(shot.shot_type || '').trim()
   const cameraMove = String(shot.camera_move || '').trim()
-  const location = String(shot.location || '').trim()
-  const referencePriority = String(shot.reference_priority || '').trim()
-  const locationReference = shot.location_reference && typeof shot.location_reference === 'object'
-    ? shot.location_reference as PromptRecord
-    : null
-  const locationReferenceText = [
-    locationReference?.description ? String(locationReference.description).trim() : '',
-    Array.isArray(locationReference?.available_slots) && locationReference.available_slots.length > 0
-      ? `${params.locale === 'en' ? 'available positions' : '可站位置'}：${locationReference.available_slots.map(String).join(params.locale === 'en' ? '; ' : '、')}`
-      : '',
-  ].filter(Boolean).join(params.locale === 'en' ? '; ' : '；')
-  const characters = Array.isArray(shot.characters)
-    ? (shot.characters as PromptCharacter[])
-      .map((character) => {
-        const name = String(character?.name || '').trim()
-        const appearance = String(character?.appearance || '').trim()
-        const slot = String(character?.slot || '').trim()
-        const referenceDescription = String(character?.reference_description || '').trim()
-        const extras = [
-          appearance,
-          slot ? `${params.locale === 'en' ? 'fixed position' : '固定位置'}：${slot}` : '',
-          referenceDescription ? `${params.locale === 'en' ? 'reference outfit/details' : '参考服装/细节'}：${referenceDescription}` : '',
-        ].filter(Boolean).join(params.locale === 'en' ? ', ' : '，')
-        return name ? (extras ? `${name}（${extras}）` : name) : ''
-      })
-      .filter(Boolean)
-      .join(params.locale === 'en' ? '; ' : '、')
-    : ''
-  const props = Array.isArray(shot.props)
-    ? (shot.props as Array<string | PromptRecord>).map((prop) => {
-      if (typeof prop === 'string') return prop
-      const name = String(prop.name || '').trim()
-      const propDescription = String(prop.description || '').trim()
-      if (!name) return ''
-      return propDescription ? `${name}（${propDescription}）` : name
-    }).filter(Boolean).join(params.locale === 'en' ? '; ' : '、')
-    : ''
   const framePrompt = String(params.frame.imagePrompt || params.panelDescription || '').trim()
   const referenceLabels = [
     params.usesPreviousTail ? 'FP（上一分镜尾帧）' : '',
@@ -541,11 +481,6 @@ function buildPanelFramePrompt(params: {
     ? [
       `Aspect ratio: ${params.aspectRatio}`,
       shotType || cameraMove ? `Shot: ${[shotType, cameraMove].filter(Boolean).join(', ')}` : '',
-      location ? `Location: ${location}` : '',
-      locationReferenceText ? `Location reference: ${locationReferenceText}` : '',
-      characters ? `Characters: ${characters}` : '',
-      props ? `Props: ${props}` : '',
-      referencePriority ? `Reference priority: ${referencePriority}` : '',
       params.panelDescription ? `Panel description: ${params.panelDescription}` : '',
       framePrompt ? `Key frame image prompt: ${framePrompt}` : '',
       `Frame time: ${params.frame.frameTimeSec}s`,
@@ -559,15 +494,6 @@ function buildPanelFramePrompt(params: {
     : [
       `画面比例：${params.aspectRatio}`,
       shotType || cameraMove ? `镜头：${[shotType, cameraMove].filter(Boolean).join('，')}` : '',
-      location
-        ? (params.usesPreviousTail
-          ? `场景连续性：实际环境必须严格沿用第一张参考图 FP；当前地点文字“${location}”只作为剧情上下文，不能覆盖 FP 场景。`
-          : `场景：${location}`)
-        : '',
-      !params.usesPreviousTail && locationReferenceText ? `场景参考：${locationReferenceText}` : '',
-      characters ? `角色：${characters}` : '',
-      props ? `道具：${props}` : '',
-      referencePriority ? `参考优先级：${referencePriority}` : '',
       params.panelDescription ? `分镜描述：${params.panelDescription}` : '',
       framePrompt ? `关键帧生图提示：${framePrompt}` : '',
       `所在秒点：${params.frame.frameTimeSec}s`,
@@ -648,6 +574,32 @@ function buildPreviousTailReferenceHardRule(locale: TaskJobData['locale']): stri
     '- 必须延续 FP 中的人物身份、服装发型、道具状态、空间关系、光线方向、色调氛围和剧情状态。',
     '- 承接前一帧画面：人物整体位置、排布顺序、相对间距基本保持一致，允许位置出现微小偏移；严禁不同人物挤占、重叠在同一位置；站姿、动作可自由变化。',
     '- 不能忽略 FP，也不能原样复制 FP；要结合当前分镜描述生成顺滑衔接后的当前静态画面。',
+  ].join('\n')
+}
+
+function buildReferenceImageOrderInstruction(params: {
+  locale: TaskJobData['locale']
+  labels: string[]
+}): string {
+  const labels = params.labels.map((label) => String(label || '').trim()).filter(Boolean)
+  if (labels.length === 0) return ''
+  if (params.locale === 'en') {
+    return [
+      'REFERENCE IMAGE ORDER (must follow):',
+      '- The following F1/F2/Fn labels mean the order of input reference images, not storyboard keyframe numbers.',
+      ...labels.map((label, index) => `- Input reference F${index + 1}: ${label}.`),
+      '- If both an FP previous-tail image and current storyboard location images exist, the FP image controls continuity from the previous storyboard, while the current storyboard location images describe the intended scene assets for this storyboard. Use the current location images as scene constraints and detail supplements without breaking FP continuity.',
+      '- Understand every input reference by this order before generating: FP/dependency frames control continuity, current storyboard location images control scene structure and lighting, character images control identity/outfit/hairstyle, and prop images control prop appearance.',
+      '- In the generated still image, combine the current script/frame description with the ordered references. Do not copy any reference image exactly.',
+    ].join('\n')
+  }
+  return [
+    '【参考图顺序说明 - 必须遵守】',
+    '- 以下 F1/F2/Fn 表示传入生图接口的参考图片顺序，不是分镜组关键帧编号。',
+    ...labels.map((label, index) => `- 输入参考图 F${index + 1}：${label}。`),
+    '- 如果同时存在 FP 上一尾帧和当前分镜场景图：FP 负责承接上一个连续分镜的画面连续性；当前分镜场景图是这个分镜自己的场景资产，负责约束和补充当前分镜的空间结构、光线、可站位置与环境细节，不能破坏 FP 连续性。',
+    '- 必须先按这个顺序理解参考图：FP/依赖帧负责连续性，当前分镜场景图负责场景资产约束，角色图负责身份/服装/发型，道具图负责道具外观。',
+    '- 生成当前静态图时，把当前剧本/关键帧描述与这些参考图融合；禁止原样复制任意参考图构图或姿势。',
   ].join('\n')
 }
 
@@ -751,10 +703,8 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       : panelUsesPreviousTailAsReference
 
   const candidateCount = clampCount(payload.candidateCount ?? payload.count, 1, 4, 1)
-  const panelReferenceImages = await collectPanelReferenceImages(projectData, panel)
-  const panelReferenceImagesWithoutLocation = needsPreviousTailReference
-    ? await collectPanelReferenceImages(projectData, panel, { includeLocationReference: false })
-    : panelReferenceImages
+  const panelReferenceEntries = await collectPanelReferenceImageEntries(projectData, panel)
+  const panelReferenceImages = panelReferenceEntries.map((entry) => entry.url)
   const previousTailInfo = needsPreviousTailReference
     ? await loadPreviousPanelTailImageInfo({
       storyboardId: panel.storyboardId,
@@ -776,9 +726,12 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     await markPanelFrameGenerationFailed(targetFrame?.id, message)
     throw new Error(message)
   }
-  const panelReferenceImagesForSinglePanel = !isMultiFrameGroup && previousTailImageUrl
-    ? panelReferenceImagesWithoutLocation
-    : panelReferenceImages
+  const panelReferenceImagesForSinglePanel = panelReferenceImages
+  const panelReferenceEntriesForSinglePanel = panelReferenceEntries
+  const singlePanelReferenceLabels = [
+    ...(!isMultiFrameGroup && previousTailImageUrl ? ['FP：上一个连续分镜的尾帧，作为当前分镜的参考图'] : []),
+    ...panelReferenceEntriesForSinglePanel.map((entry) => entry.label),
+  ]
   const singlePanelRefs = uniqueStrings([
     ...(!isMultiFrameGroup && previousTailImageUrl
       ? [toSignedUrlIfCos(previousTailImageUrl, 3600) || previousTailImageUrl]
@@ -788,9 +741,6 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   const normalizedRefs = await normalizeReferenceImagesForGeneration(singlePanelRefs)
   const normalizedPanelRefs = isMultiFrameGroup
     ? await normalizeReferenceImagesForGeneration(uniqueStrings(panelReferenceImages))
-    : normalizedRefs
-  const normalizedPanelRefsWithoutLocation = isMultiFrameGroup
-    ? await normalizeReferenceImagesForGeneration(uniqueStrings(panelReferenceImagesWithoutLocation))
     : normalizedRefs
 
   const logger = createScopedLogger({
@@ -811,8 +761,8 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       referenceImagesEffectiveRawCount: singlePanelRefs.length,
       referenceImagesNormalizedCount: normalizedRefs.length,
       referenceImageLabels: [
-        ...(!isMultiFrameGroup && previousTailImageUrl ? ['FP(previous-panel-tail)'] : []),
-        ...panelReferenceImagesForSinglePanel.map((_, index) => `asset-${index + 1}`),
+        ...(!isMultiFrameGroup && previousTailImageUrl ? ['FP(previous panel tail for current storyboard continuity)'] : []),
+        ...panelReferenceEntriesForSinglePanel.map((entry) => entry.label),
       ],
       rawUrls: singlePanelRefs.map((u) => u.substring(0, 100)),
       normalizedUrls: normalizedRefs.map((u) => u.substring(0, 100)),
@@ -827,16 +777,17 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   if (!projectData.videoRatio) throw new Error('Project videoRatio not configured')
   const aspectRatio = projectData.videoRatio
 
-  const usePanelDescriptionEnabled = modelConfig.localStoryboardUsePanelDescriptionEnabled === true
-  const panelDescriptionText = String(panel.description || '').trim()
-
+  const firstFramePromptText = !isMultiFrameGroup
+    ? String(sortedFrames[0]?.imagePrompt || '').trim()
+    : ''
+  const panelDirectPromptText = String(firstFramePromptText || panel.imagePrompt || panel.description || '').trim()
   const promptContext = buildPanelPromptContext({
     panel: {
       id: panel.id,
       shotType: panel.shotType,
       cameraMove: panel.cameraMove,
       description: panel.description,
-      imagePrompt: null,
+      imagePrompt: panel.imagePrompt,
       videoPrompt: panel.panelMode === 'group'
         ? panel.groupVideoPrompt || panel.videoPrompt
         : panel.videoPrompt,
@@ -852,17 +803,16 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   })
   const contextJson = JSON.stringify(promptContext, null, 2)
 
-  // 默认走当前“查看数据 JSON”；只有在开启“启用画面描述”且 panel.description 有内容时，才用画面描述直出。
+  // 生图主体 prompt 优先直接透传当前分镜的生图提示/画面描述，避免自动重写带回旧 JSON 字段。
   let prompt = ''
-  if (usePanelDescriptionEnabled && panelDescriptionText) {
+  if (panelDirectPromptText) {
     prompt = buildPanelDescriptionPrompt({
-      description: panelDescriptionText,
+      description: panelDirectPromptText,
       styleText: artStyle || '',
       locale: job.data.locale,
     })
   } else {
-    // 对本地模型（ltx/MLX），不把 JSON 串当作最终 prompt；而是把结构化数据整理成“整洁的自然语言 prompt”
-    // （与项目里其它生图链路一致：最终 prompt 是一段可读文本，而不是大段 JSON）。
+    // 兜底：老数据没有 imagePrompt/description 时，仍使用结构化信息生成可读 prompt。
     if (parsedStoryboardModel?.provider === 'local') {
       prompt = buildPanelStructuredPrompt({
         locale: job.data.locale,
@@ -883,80 +833,10 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     }
   }
 
-  // 可选：本地模型前先用文本模型精炼 prompt（把 JSON/规则压成一条更适合本地模型的提示词）
-  const shouldRefinePrompt =
-    modelConfig.localStoryboardPromptRefineEnabled === true
-    && !!modelConfig.analysisModel
-
-  const refinedOrRawPrompt = !isMultiFrameGroup && shouldRefinePrompt ? await (async () => {
-    try {
-      const strength = modelConfig.localStoryboardPromptRefineLevel || 'medium'
-      const refineUserPrompt = buildPrompt({
-        promptId: PROMPT_IDS.NP_STORYBOARD_PROMPT_REFINE,
-        locale: job.data.locale,
-        variables: {
-          storyboard_text_json_input: contextJson,
-          source_text: panel.description || '',
-          aspect_ratio: aspectRatio,
-          style: artStyle || '与参考图风格一致',
-          strength,
-          reference_images_count: String(normalizedRefs.length),
-        },
-      })
-
-      logger.info({
-        message: 'storyboard prompt refine request payload',
-        details: {
-          panelId: panel.id,
-          locale: job.data.locale,
-          model: modelConfig.analysisModel,
-          usePanelDescription: usePanelDescriptionEnabled && !!panelDescriptionText,
-          aspectRatio,
-          strength,
-          referenceImagesCount: normalizedRefs.length,
-          data: promptContext,
-          contextJson,
-          refineUserPrompt,
-        },
-      })
-
-      const res = await executeAiTextStep({
-        userId: job.data.userId,
-        projectId: job.data.projectId,
-        model: modelConfig.analysisModel!,
-        action: 'NP_STORYBOARD_PROMPT_REFINE',
-        meta: {
-          stepId: 'np_storyboard_prompt_refine',
-          stepTitle: 'storyboard_prompt_refine',
-          stepIndex: 1,
-          stepTotal: 1,
-          stepAttempt: 1,
-        },
-        reasoning: false,
-        temperature: 0.2,
-        messages: [
-          { role: 'user', content: refineUserPrompt },
-        ],
-      })
-
-      const refined = cleanupRefinedPrompt(res.text)
-      logger.info({
-        message: 'storyboard prompt refine response payload',
-        details: {
-          panelId: panel.id,
-          rawResponseText: res.text,
-          cleanedPrompt: refined,
-        },
-      })
-      return refined || prompt
-    } catch (err) {
-      logger.warn({
-        message: 'storyboard prompt refine failed, fallback to original prompt',
-        details: { error: String(err) },
-      })
-      return prompt
-    }
-  })() : prompt
+  // 生图阶段不再自动调用大模型“美化/精炼”提示词，直接透传当前分镜/关键帧描述。
+  // 参考图顺序、FP 连贯性、画面安全等硬约束仍在最终 prompt 中追加。
+  const shouldRefinePrompt = false
+  const refinedOrRawPrompt = prompt
   const shotPromptPrefix = buildShotPromptPrefix({
     locale: job.data.locale,
     context: promptContext,
@@ -1084,14 +964,22 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       const normalizedFrameReferenceRefs = dependencyUrls.length > 0
         ? await normalizeReferenceImagesForGeneration(dependencyUrls)
         : []
-      const panelAssetRefs = frameReferencePlan.usesPreviousTail
-        ? normalizedPanelRefsWithoutLocation
-        : normalizedPanelRefs
+      const panelAssetRefs = normalizedPanelRefs
+      const panelAssetReferenceLabels = panelReferenceEntries.map((entry) => entry.label)
       const normalizedFrameRefs = uniqueStrings([
         ...normalizedFrameReferenceRefs,
         ...panelAssetRefs,
       ])
+      const frameReferenceLabels = [
+        ...(frameReferencePlan.usesPreviousTail ? ['FP：上一个连续分镜的尾帧，作为当前分镜的参考图'] : []),
+        ...frameReferencePlan.frameReferenceIndexes.map((index) => `分镜组已生成关键帧 F${index + 1}`),
+        ...panelAssetReferenceLabels,
+      ]
       const frameHardConstraints = [
+        buildReferenceImageOrderInstruction({
+          locale: job.data.locale,
+          labels: frameReferenceLabels,
+        }),
         frameReferencePlan.usesPreviousTail ? buildPreviousTailReferenceHardRule(job.data.locale) : '',
         buildStoryboardHardConstraints({
           locale: job.data.locale,
@@ -1112,94 +1000,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
         frameReferenceImageCount: normalizedFrameReferenceRefs.length,
         hardConstraints: frameHardConstraints,
       })
-      const framePromptInput = buildPanelFrameRefineContext({
-        panelContext: promptContext,
-        frame,
-        frameReferenceIndexes: frameReferencePlan.frameReferenceIndexes,
-        usesPreviousTail: frameReferencePlan.usesPreviousTail,
-        referenceImageCount: normalizedFrameRefs.length,
-      })
-      const frameContextJson = JSON.stringify(framePromptInput, null, 2)
-      const frameResolvedPrompt = shouldRefinePrompt ? await (async () => {
-        try {
-          const strength = modelConfig.localStoryboardPromptRefineLevel || 'medium'
-          const refineUserPrompt = buildPrompt({
-            promptId: PROMPT_IDS.NP_STORYBOARD_PROMPT_REFINE,
-            locale: job.data.locale,
-            variables: {
-              storyboard_text_json_input: frameContextJson,
-              source_text: frame.imagePrompt || panel.description || '',
-              aspect_ratio: aspectRatio,
-              style: artStyle || '与参考图风格一致',
-              strength,
-              reference_images_count: String(normalizedFrameRefs.length),
-            },
-          })
-
-          logger.info({
-            message: 'storyboard frame prompt refine request payload',
-            details: {
-              panelId: panel.id,
-              frameId: frame.id,
-              frameIndex: frame.frameIndex,
-              locale: job.data.locale,
-              model: modelConfig.analysisModel,
-              aspectRatio,
-              strength,
-              referenceImagesCount: normalizedFrameRefs.length,
-              data: framePromptInput,
-              contextJson: frameContextJson,
-              refineUserPrompt,
-            },
-          })
-
-          const res = await executeAiTextStep({
-            userId: job.data.userId,
-            projectId: job.data.projectId,
-            model: modelConfig.analysisModel!,
-            action: 'NP_STORYBOARD_PROMPT_REFINE',
-            meta: {
-              stepId: 'np_storyboard_frame_prompt_refine',
-              stepTitle: 'storyboard_frame_prompt_refine',
-              stepIndex: 1,
-              stepTotal: 1,
-              stepAttempt: 1,
-            },
-            reasoning: false,
-            temperature: 0.2,
-            messages: [
-              { role: 'user', content: refineUserPrompt },
-            ],
-          })
-
-          const refined = cleanupRefinedPrompt(res.text)
-          const refinedWithConstraints = refined
-            ? [refined, frameHardConstraints].filter(Boolean).join('\n\n')
-            : ''
-          logger.info({
-            message: 'storyboard frame prompt refine response payload',
-            details: {
-              panelId: panel.id,
-              frameId: frame.id,
-              frameIndex: frame.frameIndex,
-              rawResponseText: res.text,
-              cleanedPrompt: refinedWithConstraints || refined,
-            },
-          })
-          return refinedWithConstraints || frameBasePrompt
-        } catch (err) {
-          logger.warn({
-            message: 'storyboard frame prompt refine failed, fallback to frame base prompt',
-            details: {
-              panelId: panel.id,
-              frameId: frame.id,
-              frameIndex: frame.frameIndex,
-              error: String(err),
-            },
-          })
-          return frameBasePrompt
-        }
-      })() : frameBasePrompt
+      const frameResolvedPrompt = frameBasePrompt
       const framePromptWithShotType = [
         buildShotPromptPrefix({ locale: job.data.locale, context: promptContext }),
         frameResolvedPrompt,
@@ -1231,9 +1032,9 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
           options: {
             referenceImages: normalizedFrameRefs,
             referenceImageLabels: [
-              ...(frameReferencePlan.usesPreviousTail ? ['FP(previous-panel-tail)'] : []),
+              ...(frameReferencePlan.usesPreviousTail ? ['FP(previous panel tail for current storyboard continuity)'] : []),
               ...frameReferencePlan.frameReferenceIndexes.map((index) => `F${index + 1}`),
-              ...panelAssetRefs.map((_, index) => `asset-${index + 1}`),
+              ...panelAssetReferenceLabels,
             ],
             aspectRatio,
           },
@@ -1308,6 +1109,10 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   }
 
   const finalConstraints = [
+    buildReferenceImageOrderInstruction({
+      locale: job.data.locale,
+      labels: singlePanelReferenceLabels,
+    }),
     !isMultiFrameGroup && previousTailImageUrl ? buildPreviousTailReferenceHardRule(job.data.locale) : '',
     hardConstraints,
   ].filter(Boolean).join('\n\n')
@@ -1339,8 +1144,8 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       options: {
         referenceImages: normalizedRefs,
         referenceImageLabels: [
-          ...(!isMultiFrameGroup && previousTailImageUrl ? ['FP(previous-panel-tail)'] : []),
-          ...panelReferenceImagesForSinglePanel.map((_, index) => `asset-${index + 1}`),
+          ...(!isMultiFrameGroup && previousTailImageUrl ? ['FP(previous panel tail for current storyboard continuity)'] : []),
+          ...panelReferenceEntriesForSinglePanel.map((entry) => entry.label),
         ],
         aspectRatio,
       },
