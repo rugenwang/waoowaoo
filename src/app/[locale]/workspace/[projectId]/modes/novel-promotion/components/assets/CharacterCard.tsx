@@ -24,8 +24,10 @@ import { useImageGenerationCount } from '@/lib/image-generation/use-image-genera
 import { AppIcon } from '@/components/ui/icons'
 import { AI_EDIT_BUTTON_CLASS, AI_EDIT_ICON_CLASS } from '@/components/ui/ai-edit-style'
 import AISparklesIcon from '@/components/ui/icons/AISparklesIcon'
+import { useTaskQueue } from '@/lib/task-queue'
 
 interface CharacterCardProps {
+  mobile?: boolean
   character: Character
   appearance: CharacterAppearance
   onEdit: () => void
@@ -52,6 +54,7 @@ interface CharacterCardProps {
 }
 
 export default function CharacterCard({
+  mobile = false,
   character,
   appearance,
   onEdit,
@@ -72,9 +75,10 @@ export default function CharacterCard({
   onConfirmSelection,
   onVoiceChange,
   onVoiceDesign,
-  onVoiceSelectFromHub
+  onVoiceSelectFromHub,
 }: CharacterCardProps) {
   // 🔥 使用 mutation
+  const taskQueue = useTaskQueue()
   const uploadImage = useUploadProjectCharacterImage(projectId)
   const cancelTask = useCancelTask(projectId)
   const taskStateMap = useTaskTargetStateMap(projectId, [
@@ -171,15 +175,41 @@ export default function CharacterCard({
 
   const showSelectionMode = hasMultipleImages
 
+  const getQueueStatus = (uiKey: string) => {
+    return taskQueue.queue.find((item) =>
+      item.projectId === projectId &&
+      item.uiKey === uiKey &&
+      (item.status === 'pending' || item.status === 'running'),
+    )?.status ?? null
+  }
+  const assetQueuePrefix = `character-${character.id}-${appearance.id}`
+  const groupTaskKey = `${assetQueuePrefix}-group`
+  const groupQueueStatus = getQueueStatus(groupTaskKey)
+  const isGroupTaskQueued = groupQueueStatus === 'pending'
+  const isAssetQueuePending = taskQueue.queue.some((item) =>
+    item.projectId === projectId &&
+    typeof item.uiKey === 'string' &&
+    item.uiKey.startsWith(assetQueuePrefix) &&
+    item.status === 'pending',
+  )
+  const isAssetQueueRunning = taskQueue.queue.some((item) =>
+    item.projectId === projectId &&
+    typeof item.uiKey === 'string' &&
+    item.uiKey.startsWith(assetQueuePrefix) &&
+    item.status === 'running',
+  )
+
   const isImageTaskRunning = (imageIndex: number) => {
-    return activeTaskKeys.has(`character-${character.id}-${appearance.appearanceIndex}-${imageIndex}`)
+    const imageTaskKey = `${assetQueuePrefix}-${imageIndex}`
+    return activeTaskKeys.has(imageTaskKey) || getQueueStatus(imageTaskKey) === 'running'
   }
 
-  const isGroupTaskRunning = activeTaskKeys.has(`character-${character.id}-${appearance.appearanceIndex}-group`)
+  const isGroupTaskRunning = activeTaskKeys.has(groupTaskKey) || groupQueueStatus === 'running'
 
   const isAnyTaskRunning = isGroupTaskRunning || Array.from(activeTaskKeys).some(key =>
-    key.startsWith(`character-${character.id}-${appearance.appearanceIndex}`)
-  )
+    key.startsWith(assetQueuePrefix)
+  ) || isAssetQueueRunning
+  const isAnyTaskQueued = isGroupTaskQueued || isAssetQueuePending
   const runtimePhase = taskState?.phase
   const appearanceTaskRunning = !!appearance.imageTaskRunning || runtimePhase === 'queued' || runtimePhase === 'processing'
   const appearanceTaskPresentation = appearanceTaskRunning
@@ -197,6 +227,13 @@ export default function CharacterCard({
       resource: 'image',
       hasOutput: !!currentImageUrl,
     })
+    : isAnyTaskQueued
+      ? resolveTaskPresentationState({
+        phase: 'queued',
+        intent: currentImageUrl ? 'regenerate' : 'generate',
+        resource: 'image',
+        hasOutput: !!currentImageUrl,
+      })
     : null
   const displayTaskPresentation = appearanceTaskPresentation || fallbackRunningPresentation
   const confirmSelectionState = isConfirmingSelection
@@ -217,7 +254,14 @@ export default function CharacterCard({
     : null
   const isAppearanceTaskRunning =
     appearanceTaskRunning ||
-    isAnyTaskRunning
+    isAnyTaskRunning ||
+    isAnyTaskQueued
+  const queuedNotice = mobile && isAnyTaskQueued ? (
+    <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
+      <AppIcon name="clock" className="h-3.5 w-3.5" />
+      已加入队列
+    </div>
+  ) : null
 
   const cancelAction = canCancel ? (
     <button
@@ -294,7 +338,7 @@ export default function CharacterCard({
     )
 
     return (
-      <div className="col-span-3 bg-[var(--glass-bg-surface)] rounded-lg border-2 border-[var(--glass-stroke-base)] p-4 shadow-sm transition-all">
+      <div className={`${mobile ? 'col-span-1' : 'col-span-3'} bg-[var(--glass-bg-surface)] rounded-lg border-2 border-[var(--glass-stroke-base)] p-4 shadow-sm transition-all`}>
         <input
           ref={fileInputRef}
           type="file"
@@ -302,6 +346,7 @@ export default function CharacterCard({
           onChange={() => handleUpload()}
           className="hidden"
         />
+        {queuedNotice}
 
         <CharacterCardHeader
           mode="selection"
@@ -463,7 +508,7 @@ export default function CharacterCard({
   )
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className={mobile ? 'flex w-full flex-col gap-3 rounded-2xl bg-slate-50 p-2.5 ring-1 ring-slate-200/80' : 'flex flex-col gap-2'}>
       <input
         ref={fileInputRef}
         type="file"
@@ -471,6 +516,7 @@ export default function CharacterCard({
         onChange={() => handleUpload()}
         className="hidden"
       />
+      {queuedNotice}
       <div className="relative">
         <CharacterCardGallery
           mode="single"

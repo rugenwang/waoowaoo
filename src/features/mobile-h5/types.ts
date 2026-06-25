@@ -1,4 +1,4 @@
-import type { MediaRef } from '@/types/project'
+import type { MediaRef, NovelPromotionProject } from '@/types/project'
 
 export interface MobileProjectSummary {
   id: string
@@ -24,18 +24,21 @@ export interface MobileEpisodeSummary {
   createdAt?: string
 }
 
+export type MobileNovelPromotionData = Partial<Omit<NovelPromotionProject, 'episodes'>> & {
+  episodes?: MobileEpisodeSummary[]
+}
+
 export interface MobileProjectDetail {
   id: string
   name: string
   description: string | null
-  novelPromotionData?: {
-    videoModel?: string | null
-    episodes?: MobileEpisodeSummary[]
-  } | null
+  novelPromotionData?: MobileNovelPromotionData | null
 }
 
 export interface MobileClip {
   id: string
+  clipIndex?: number | null
+  summary?: string | null
   start?: number | null
   end?: number | null
   content?: string | null

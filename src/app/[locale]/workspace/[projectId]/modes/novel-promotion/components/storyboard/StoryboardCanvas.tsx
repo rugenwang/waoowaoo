@@ -92,6 +92,7 @@ interface StoryboardCanvasProps {
   addStoryboardGroup: (insertIndex: number) => Promise<void>
   addingStoryboardGroup: boolean
   setLocalStoryboards: React.Dispatch<React.SetStateAction<NovelPromotionStoryboard[]>>
+  mobile?: boolean
 }
 
 export default function StoryboardCanvas({
@@ -159,6 +160,7 @@ export default function StoryboardCanvas({
   addStoryboardGroup,
   addingStoryboardGroup,
   setLocalStoryboards,
+  mobile = false,
 }: StoryboardCanvasProps) {
   const t = useTranslations('storyboard')
   const previousPanelImageOptionsByPanelId = useMemo(() => {
@@ -316,6 +318,7 @@ export default function StoryboardCanvas({
               onPanelVariant={onPanelVariant}
               submittingVariantPanelId={submittingVariantPanelId}
               previousPanelImageOptionsByPanelId={previousPanelImageOptionsByPanelId}
+              mobile={mobile}
             />
 
             <div className="flex justify-center py-2">

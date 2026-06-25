@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, type CompositionEvent, type ReactNode } from 'react'
 import { RatioSelector, StylePresetSelector, StyleSelector } from '@/components/selectors/RatioStyleSelectors'
 import { resolveTextareaTargetHeight } from '@/lib/ui/textarea-height'
+import { getStoryInputComposerLayoutClasses } from './story-input-layout'
 
 interface StoryInputComposerOption {
   value: string
@@ -40,6 +41,7 @@ interface StoryInputComposerProps {
   onCompositionStart?: () => void
   onCompositionEnd?: (event: CompositionEvent<HTMLTextAreaElement>) => void
   textareaClassName?: string
+  mobile?: boolean
 }
 
 export default function StoryInputComposer({
@@ -66,6 +68,7 @@ export default function StoryInputComposer({
   onCompositionStart,
   onCompositionEnd,
   textareaClassName,
+  mobile = false,
 }: StoryInputComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const textareaMinHeightRef = useRef<number | null>(null)
@@ -107,6 +110,8 @@ export default function StoryInputComposer({
     autoResizeTextarea()
   }, [value, autoResizeTextarea])
 
+  const layoutClasses = getStoryInputComposerLayoutClasses(mobile)
+
   return (
     <div className="relative w-full glass-surface-elevated rounded-2xl">
       <div className="p-6 pb-4">
@@ -129,8 +134,9 @@ export default function StoryInputComposer({
         />
       </div>
 
-      <div className="flex items-center gap-2 overflow-x-auto px-5 pb-4">
-        <div className="flex min-w-max flex-1 items-center gap-2">
+      <div className={layoutClasses.footer}>
+        <div className={layoutClasses.selectors}>
+          <div className={layoutClasses.selectorInner}>
           <div className="w-[118px] flex-shrink-0">
             <RatioSelector
               value={videoRatio}
@@ -155,8 +161,9 @@ export default function StoryInputComposer({
               />
             </div>
           ) : null}
+          </div>
         </div>
-        <div className="ml-auto flex min-w-max items-center gap-2">
+        <div className={layoutClasses.actions}>
           {secondaryActions}
           {primaryAction}
         </div>

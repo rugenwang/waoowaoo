@@ -86,4 +86,5 @@ export interface StoryboardGroupProps {
   ) => Promise<void>
   submittingVariantPanelId: string | null
   previousPanelImageOptionsByPanelId?: Record<string, PreviousPanelImageOption[]>
+  mobile?: boolean
 }

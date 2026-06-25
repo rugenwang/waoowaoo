@@ -65,6 +65,7 @@ interface StoryboardPanelListProps {
   onVariant: (panelIndex: number) => void
   isInsertDisabled: (panelId: string) => boolean
   previousPanelImageOptionsByPanelId?: Record<string, PreviousPanelImageOption[]>
+  mobile?: boolean
 }
 
 export default function StoryboardPanelList({
@@ -117,6 +118,7 @@ export default function StoryboardPanelList({
   onVariant,
   isInsertDisabled,
   previousPanelImageOptionsByPanelId,
+  mobile = false,
 }: StoryboardPanelListProps) {
   const taskQueue = useTaskQueue()
   const queuedPanelIds = useMemo(() => {
@@ -135,7 +137,7 @@ export default function StoryboardPanelList({
   const isVertical = ASPECT_RATIO_CONFIGS[videoRatio]?.isVertical ?? false
 
   return (
-    <div className={`grid gap-4 ${isVertical ? 'grid-cols-5' : 'grid-cols-3'} ${isSubmittingStoryboardTextTask ? 'opacity-50 pointer-events-none' : ''}`}>
+    <div className={`grid gap-4 ${mobile ? 'grid-cols-1' : isVertical ? 'grid-cols-5' : 'grid-cols-3'} ${isSubmittingStoryboardTextTask ? 'opacity-50 pointer-events-none' : ''}`}>
       {textPanels.map((panel, index) => {
         const imageUrl = displayImages[index]
         const globalPanelNumber = storyboardStartIndex + index + 1

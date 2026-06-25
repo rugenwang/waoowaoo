@@ -46,6 +46,7 @@ interface NovelInputStageProps {
   artStyle?: string
   onVideoRatioChange?: (value: string) => void
   onArtStyleChange?: (value: string) => void
+  mobile?: boolean
 }
 
 export default function NovelInputStage({
@@ -61,7 +62,8 @@ export default function NovelInputStage({
   videoRatio = '9:16',
   artStyle = 'american-comic',
   onVideoRatioChange,
-  onArtStyleChange
+  onArtStyleChange,
+  mobile = false,
 }: NovelInputStageProps) {
   const t = useTranslations('novelPromotion')
   const homeT = useTranslations('home')
@@ -169,6 +171,7 @@ export default function NovelInputStage({
       {/* 主输入区域（含底部工具栏） */}
       <div className="relative z-10">
         <StoryInputComposer
+          mobile={mobile}
           value={localText}
           onValueChange={(value) => {
             setLocalText(value)

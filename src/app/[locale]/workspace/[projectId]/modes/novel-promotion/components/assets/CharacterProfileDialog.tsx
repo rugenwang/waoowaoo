@@ -13,6 +13,7 @@ import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import { AppIcon } from '@/components/ui/icons'
 
 interface CharacterProfileDialogProps {
+    mobile?: boolean
     isOpen: boolean
     characterName: string
     profileData: CharacterProfileData
@@ -25,6 +26,7 @@ const ROLE_LEVELS: RoleLevel[] = ['S', 'A', 'B', 'C', 'D']
 const COSTUME_TIERS: CostumeTier[] = [5, 4, 3, 2, 1]
 
 export default function CharacterProfileDialog({
+    mobile = false,
     isOpen,
     characterName,
     profileData,
@@ -99,9 +101,11 @@ export default function CharacterProfileDialog({
     }
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--glass-overlay)]" onClick={onClose}>
+        <div className={`fixed inset-0 z-50 flex bg-[var(--glass-overlay)] ${mobile ? 'items-end' : 'items-center justify-center'}`} onClick={onClose}>
             <div
-                className="bg-[var(--glass-bg-surface)] rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col m-4"
+                className={mobile
+                    ? 'flex max-h-[94dvh] w-full flex-col overflow-hidden rounded-t-[28px] bg-[var(--glass-bg-surface)] shadow-2xl'
+                    : 'bg-[var(--glass-bg-surface)] rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col m-4'}
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* 头部 */}
@@ -261,18 +265,24 @@ export default function CharacterProfileDialog({
                 </div>
 
                 {/* 底部按钮 */}
-                <div className="bg-[var(--glass-bg-surface)] border-t border-[var(--glass-stroke-base)] px-6 py-4 flex gap-3 justify-end shrink-0">
+                <div className={mobile
+                    ? 'grid shrink-0 grid-cols-2 gap-2 border-t border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3'
+                    : 'bg-[var(--glass-bg-surface)] border-t border-[var(--glass-stroke-base)] px-6 py-4 flex gap-3 justify-end shrink-0'}>
                     <button
                         onClick={onClose}
                         disabled={isSaving}
-                        className="px-6 py-2 border border-[var(--glass-stroke-strong)] rounded-lg hover:bg-[var(--glass-bg-muted)] transition-colors disabled:opacity-50"
+                        className={mobile
+                            ? 'min-h-11 rounded-xl border border-[var(--glass-stroke-strong)] px-4 py-2 transition-colors hover:bg-[var(--glass-bg-muted)] disabled:opacity-50'
+                            : 'px-6 py-2 border border-[var(--glass-stroke-strong)] rounded-lg hover:bg-[var(--glass-bg-muted)] transition-colors disabled:opacity-50'}
                     >
                         {t("common.cancel")}
                     </button>
                     <button
                         onClick={handleSubmit}
                         disabled={isSaving}
-                        className="px-6 py-2 bg-[var(--glass-accent-from)] text-white rounded-lg hover:bg-[var(--glass-accent-to)] transition-colors disabled:opacity-50 flex items-center gap-2"
+                        className={mobile
+                            ? 'flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[var(--glass-accent-from)] px-4 py-2 text-center leading-5 text-white transition-colors hover:bg-[var(--glass-accent-to)] disabled:opacity-50'
+                            : 'px-6 py-2 bg-[var(--glass-accent-from)] text-white rounded-lg hover:bg-[var(--glass-accent-to)] transition-colors disabled:opacity-50 flex items-center gap-2'}
                     >
                         {isSaving && <TaskStatusInline state={savingState} className="text-white [&>span]:sr-only [&_svg]:text-white" />}
                         {t('characterProfile.confirmAndGenerate')}

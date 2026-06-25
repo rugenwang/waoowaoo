@@ -11,6 +11,7 @@ interface StoryboardStageShellProps {
   isNextDisabled: boolean
   transitioningState: TaskPresentationState | null
   onNext: () => void
+  mobile?: boolean
 }
 
 export default function StoryboardStageShell({
@@ -19,6 +20,7 @@ export default function StoryboardStageShell({
   isNextDisabled,
   transitioningState,
   onNext,
+  mobile = false,
 }: StoryboardStageShellProps) {
   const t = useTranslations('storyboard')
 
@@ -28,7 +30,7 @@ export default function StoryboardStageShell({
       <button
         onClick={onNext}
         disabled={isNextDisabled}
-        className="glass-btn-base glass-btn-primary fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-2xl px-6 py-3 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+        className={`glass-btn-base glass-btn-primary fixed z-40 flex items-center gap-2 rounded-2xl px-6 py-3 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${mobile ? 'bottom-24 right-4' : 'bottom-6 right-6'}`}
       >
         {isTransitioning ? (
           <TaskStatusInline state={transitioningState} className="text-white [&>span]:text-white [&_svg]:text-white" />

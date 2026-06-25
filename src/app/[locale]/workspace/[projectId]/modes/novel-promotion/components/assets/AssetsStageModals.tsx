@@ -66,6 +66,7 @@ interface EditingProfileState {
 }
 
 interface AssetsStageModalsProps {
+  mobile?: boolean
   projectId: string
   onRefresh: () => void
   onClosePreview: () => void
@@ -105,6 +106,7 @@ interface AssetsStageModalsProps {
 }
 
 export default function AssetsStageModals({
+  mobile = false,
   projectId,
   onRefresh,
   onClosePreview,
@@ -267,6 +269,7 @@ export default function AssetsStageModals({
 
       {editingProfile && (
         <CharacterProfileDialog
+          mobile={mobile}
           isOpen={!!editingProfile}
           characterName={editingProfile.characterName}
           profileData={editingProfile.profileData}

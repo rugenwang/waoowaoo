@@ -15,6 +15,7 @@ interface FolderSidebarProps {
     onCreateFolder: () => void
     onEditFolder: (folder: Folder) => void
     onDeleteFolder: (folderId: string) => void
+    mobile?: boolean
 }
 
 // 内联 SVG 图标
@@ -40,12 +41,13 @@ export function FolderSidebar({
     onSelectFolder,
     onCreateFolder,
     onEditFolder,
-    onDeleteFolder
+    onDeleteFolder,
+    mobile = false,
 }: FolderSidebarProps) {
     const t = useTranslations('assetHub')
 
     return (
-        <div className="w-56 flex-shrink-0">
+        <div className={mobile ? 'w-full' : 'w-56 flex-shrink-0'}>
             <div className="glass-surface p-4">
                 <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-medium text-[var(--glass-text-secondary)]">{t('folders')}</h3>
@@ -89,7 +91,7 @@ export function FolderSidebar({
                             </button>
 
                             {/* 操作按钮 */}
-                            <div className="hidden group-hover:flex items-center gap-0.5">
+                            <div className={`${mobile ? 'flex' : 'hidden group-hover:flex'} items-center gap-0.5`}>
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation()

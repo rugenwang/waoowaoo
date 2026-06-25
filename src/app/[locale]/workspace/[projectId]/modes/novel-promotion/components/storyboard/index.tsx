@@ -22,6 +22,7 @@ interface StoryboardStageProps {
   onBack: () => void
   onNext: () => void
   isTransitioning?: boolean
+  mobile?: boolean
 }
 
 export default function StoryboardStage({
@@ -33,6 +34,7 @@ export default function StoryboardStage({
   onBack,
   onNext,
   isTransitioning = false,
+  mobile = false,
 }: StoryboardStageProps) {
   const controller = useStoryboardStageController({
     projectId,
@@ -253,6 +255,7 @@ export default function StoryboardStage({
         isNextDisabled={isTransitioning || localStoryboards.length === 0}
         transitioningState={transitioningState}
         onNext={onNext}
+        mobile={mobile}
       >
         <StoryboardToolbar
           totalSegments={sortedStoryboards.length}
@@ -338,6 +341,7 @@ export default function StoryboardStage({
           addStoryboardGroup={addStoryboardGroup}
           addingStoryboardGroup={addingStoryboardGroup}
           setLocalStoryboards={setLocalStoryboards}
+          mobile={mobile}
         />
 
         {modalRuntime.editingPanel && (

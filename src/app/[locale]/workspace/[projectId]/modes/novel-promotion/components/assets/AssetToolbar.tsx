@@ -32,6 +32,7 @@ interface AssetToolbarProps {
     episodeId: string | null
     onEpisodeChange: (episodeId: string | null) => void
     episodes: EpisodeOption[]
+    mobile?: boolean
 }
 
 // ─── 剧集筛选 Chip ────────────────────────────────────
@@ -165,6 +166,7 @@ export default function AssetToolbar({
     episodeId,
     onEpisodeChange,
     episodes,
+    mobile = false,
 }: AssetToolbarProps) {
     const t = useTranslations('assets')
     const { data: assets } = useProjectAssets(projectId)
@@ -247,9 +249,9 @@ export default function AssetToolbar({
     }
 
     return (
-        <div className="glass-surface p-4">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
+        <div className={mobile ? 'rounded-[18px] bg-white p-2 shadow-sm ring-1 ring-slate-200/80' : 'glass-surface p-4'}>
+            <div className={mobile ? 'flex items-center gap-2 overflow-x-auto' : 'flex items-center justify-between'}>
+                <div className={mobile ? 'flex min-w-max items-center gap-2' : 'flex items-center gap-4'}>
                     <span className="text-sm font-semibold text-[var(--glass-text-secondary)] inline-flex items-center gap-2">
                         <AppIcon name="diamond" className="w-4 h-4 text-[var(--glass-tone-info-fg)]" />
                         {t("toolbar.assetManagement")}
@@ -262,7 +264,7 @@ export default function AssetToolbar({
                             episodes={episodes}
                         />
                     )}
-                    <span className="text-sm text-[var(--glass-text-tertiary)]">
+                    <span className={mobile ? 'rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500' : 'text-sm text-[var(--glass-text-tertiary)]'}>
                         {t("toolbar.assetCount", { total: totalAssets, appearances: totalAppearances, locations: totalLocations, props: totalProps })}
                     </span>
                     {/* 全局资产分析按钮 */}
@@ -278,7 +280,7 @@ export default function AssetToolbar({
                         </button>
                     )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className={mobile ? 'ml-auto flex shrink-0 items-center gap-2' : 'flex items-center gap-2'}>
                     {/* 打包下载按钮 */}
                     <button
                         onClick={handleDownloadAll}

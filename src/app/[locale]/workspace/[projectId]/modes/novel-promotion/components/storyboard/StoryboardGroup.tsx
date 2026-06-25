@@ -84,6 +84,7 @@ export default function StoryboardGroup({
   onPanelVariant,
   submittingVariantPanelId,
   previousPanelImageOptionsByPanelId,
+  mobile = false,
 }: StoryboardGroupProps) {
   const t = useTranslations('storyboard')
 
@@ -152,7 +153,7 @@ export default function StoryboardGroup({
   )
 
   return (
-    <div className={`glass-surface-elevated p-6 relative ${failedError ? 'border-2 border-[var(--glass-stroke-danger)] bg-[var(--glass-danger-ring)]' : ''}`}>
+    <div className={`glass-surface-elevated relative ${mobile ? 'p-3' : 'p-6'} ${failedError ? 'border-2 border-[var(--glass-stroke-danger)] bg-[var(--glass-danger-ring)]' : ''}`}>
       {failedError && (
         <StoryboardGroupFailedAlert
           failedError={failedError}
@@ -270,6 +271,7 @@ export default function StoryboardGroup({
           submittingVariantPanelId === panelId
         }
         previousPanelImageOptionsByPanelId={previousPanelImageOptionsByPanelId}
+        mobile={mobile}
       />
 
       <StoryboardGroupDialogs

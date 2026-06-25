@@ -22,8 +22,10 @@ import CharacterCard from './CharacterCard'
 import CharacterProfileCard from './CharacterProfileCard'
 import { parseProfileData } from '@/types/character-profile'
 import { AppIcon } from '@/components/ui/icons'
+import { getAssetLayoutClasses } from '@/features/mobile-h5/mobile-asset-layout'
 
 interface CharacterSectionProps {
+    mobile?: boolean
     // 🔥 V6.5 删除：characters prop - 现在内部直接订阅
     projectId: string
     focusCharacterId?: string | null
@@ -74,6 +76,7 @@ interface CharacterSectionProps {
 }
 
 export default function CharacterSection({
+    mobile = false,
     // 🔥 V6.5 删除：characters prop - 现在内部直接订阅
     projectId,
     focusCharacterId = null,
@@ -142,6 +145,7 @@ export default function CharacterSection({
     const scrollAnimationRef = useRef<number | null>(null)
 
     const totalAppearances = characters.reduce((sum, char) => sum + (char.appearances?.length || 0), 0)
+    const layoutClasses = getAssetLayoutClasses(mobile)
 
     useEffect(() => {
         if (!focusCharacterId) return
@@ -198,25 +202,25 @@ export default function CharacterSection({
     }, [characters, focusCharacterId, focusCharacterRequestId])
 
     return (
-        <div className="glass-surface p-6">
-            <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
+        <div className={layoutClasses.section}>
+            <div className={layoutClasses.sectionHeader}>
+                <div className="flex min-w-0 items-center gap-2">
                     <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--glass-bg-muted)] text-[var(--glass-text-secondary)]">
                         <AppIcon name="user" className="h-5 w-5" />
                     </span>
-                    <h3 className="text-lg font-bold text-[var(--glass-text-primary)]">{t("stage.characterAssets")}</h3>
+                    <h3 className={mobile ? 'truncate text-base font-bold text-slate-950' : 'text-lg font-bold text-[var(--glass-text-primary)]'}>{t("stage.characterAssets")}</h3>
                     {isAnalyzingAssets && (
                         <span className="px-2 py-1 text-xs bg-[var(--glass-tone-info-bg)] text-[var(--glass-tone-info-fg)] rounded-lg flex items-center gap-1">
                             <TaskStatusInline state={analyzingAssetsState} />
                         </span>
                     )}
-                    <span className="text-sm text-[var(--glass-text-tertiary)] bg-[var(--glass-bg-muted)]/50 px-2 py-1 rounded-lg">
+                    <span className="shrink-0 rounded-lg bg-[var(--glass-bg-muted)]/50 px-2 py-1 text-xs text-[var(--glass-text-tertiary)]">
                         {t("stage.counts", { characterCount: characters.length, appearanceCount: totalAppearances })}
                     </span>
                 </div>
                 <button
                     onClick={onAddCharacter}
-                    className="glass-btn-base glass-btn-primary flex items-center gap-2 px-4 py-2 font-medium"
+                    className={mobile ? 'hidden' : 'glass-btn-base glass-btn-primary flex items-center gap-2 px-4 py-2 font-medium'}
                 >
                     + {t("character.add")}
                 </button>
@@ -224,20 +228,20 @@ export default function CharacterSection({
 
             {/* 🔥 V7：待确认角色档案 - 内嵌引导横幅 */}
             {unconfirmedCharacters.length > 0 && (
-                <div className="mb-6">
+                <div className={mobile ? 'mb-3 rounded-[20px] bg-white p-3 shadow-sm ring-1 ring-slate-200/80' : 'mb-6'}>
                     {/* 引导横幅 */}
-                    <div className="flex items-center justify-between mb-3 px-1">
-                        <div className="flex items-center gap-2">
+                    <div className={mobile ? 'mb-3 flex flex-col gap-3' : 'flex items-center justify-between mb-3 px-1'}>
+                        <div className="flex min-w-0 items-center gap-2">
                             <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-[var(--glass-tone-info-bg)]">
                                 <AppIcon name="sparkles" className="h-3 w-3 text-[var(--glass-tone-info-fg)]" />
                             </span>
                             <span className="text-sm font-semibold text-[var(--glass-text-primary)]">{t('stage.pendingProfilesBanner')}</span>
-                            <span className="text-xs text-[var(--glass-text-tertiary)]">{t('stage.pendingProfilesHint')}</span>
+                            <span className={mobile ? 'hidden' : 'text-xs text-[var(--glass-text-tertiary)]'}>{t('stage.pendingProfilesHint')}</span>
                         </div>
                         <button
                             onClick={onBatchConfirm}
                             disabled={batchConfirming}
-                            className="glass-btn-base glass-btn-primary px-3 py-1.5 text-sm disabled:opacity-50 flex items-center gap-1.5"
+                            className={mobile ? 'flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white disabled:opacity-50' : 'glass-btn-base glass-btn-primary px-3 py-1.5 text-sm disabled:opacity-50 flex items-center gap-1.5'}
                         >
                             {batchConfirming ? (
                                 <TaskStatusInline state={batchConfirmingState} className="text-white [&>span]:text-white [&_svg]:text-white" />
@@ -253,6 +257,7 @@ export default function CharacterSection({
                             if (!profileData) return null
                             return (
                                 <CharacterProfileCard
+                                    mobile={mobile}
                                     key={character.id}
                                     characterId={character.id}
                                     name={character.name}
@@ -271,7 +276,7 @@ export default function CharacterSection({
             )}
 
             {/* 按角色分组显示：外层 grid 让多角色并排 */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className={layoutClasses.groupGrid}>
                 {characters.map(character => {
                     const appearances = getAppearances(character)
                     const sortedAppearances = [...appearances].sort((a, b) => a.appearanceIndex - b.appearanceIndex)
@@ -286,41 +291,42 @@ export default function CharacterSection({
                         <div
                             key={character.id}
                             id={`project-character-${character.id}`}
-                            className={`glass-surface rounded-xl p-4 scroll-mt-24 transition-all duration-700 ${highlightedCharacterId === character.id ? 'ring-2 ring-[var(--glass-focus-ring)] bg-[var(--glass-tone-info-bg)]/40' : ''}`}
+                            className={`${layoutClasses.characterGroup} scroll-mt-24 transition-all duration-700 ${highlightedCharacterId === character.id ? 'ring-2 ring-[var(--glass-focus-ring)] bg-[var(--glass-tone-info-bg)]/40' : ''}`}
                         >
                             {/* 角色标题 */}
-                            <div className="flex items-center justify-between pb-2">
+                            <div className="flex items-start justify-between gap-3 pb-3">
                                 <div className="flex items-center gap-3">
                                     <h3 className="text-base font-semibold text-[var(--glass-text-primary)]">{character.name}</h3>
                                     <span className="text-xs text-[var(--glass-text-tertiary)]">
                                         {t("character.assetCount", { count: sortedAppearances.length })}
                                     </span>
                                 </div>
-                                <div className="flex flex-col items-end gap-1.5">
+                                <div className={mobile ? 'flex shrink-0 items-center gap-1' : 'flex flex-col items-end gap-1.5'}>
                                     {/* 从资产中心导入按钮 */}
                                     <button
                                         onClick={() => onCopyFromGlobal(character.id)}
                                         className="text-xs text-[var(--glass-tone-info-fg)] hover:text-[var(--glass-tone-info-fg)] flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--glass-tone-info-bg)] transition-colors"
                                     >
                                         <AppIcon name="arrowDownCircle" className="w-4 h-4" />
-                                        {t("character.copyFromGlobal")}
+                                        <span className={mobile ? 'sr-only' : ''}>{t("character.copyFromGlobal")}</span>
                                     </button>
                                     <button
                                         onClick={() => onDeleteCharacter(character.id)}
                                         className="text-xs text-[var(--glass-tone-danger-fg)] hover:text-[var(--glass-tone-danger-fg)] flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--glass-tone-danger-bg)] transition-colors"
                                     >
                                         <AppIcon name="trash" className="w-4 h-4" />
-                                        {t("character.delete")}
+                                        <span className={mobile ? 'sr-only' : ''}>{t("character.delete")}</span>
                                     </button>
                                 </div>
                             </div>
 
                             {/* 形象网格 */}
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            <div className={layoutClasses.assetGrid}>
                                 {sortedAppearances.map(appearance => {
                                     const isPrimary = appearance.appearanceIndex === (primaryAppearance?.appearanceIndex ?? PRIMARY_APPEARANCE_INDEX)
                                     return (
                                         <CharacterCard
+                                            mobile={mobile}
                                             key={`${character.id}-${appearance.appearanceIndex}`}
                                             character={character}
                                             appearance={appearance}
@@ -349,7 +355,7 @@ export default function CharacterSection({
                                                 // 单图：重新生成单张
                                                 if (validImageCount === 1) {
                                                     const selectedIndex = appearance.selectedIndex ?? 0
-                                                    const taskKey = `character-${character.id}-${appearance.appearanceIndex}-${selectedIndex}`
+                                                    const taskKey = `character-${character.id}-${appearance.id}-${selectedIndex}`
                                                     _ulogInfo('[CharacterSection] 调用单张重新生成, imageIndex:', selectedIndex)
                                                     if (!queueMode) onRegisterTransientTaskKey(taskKey)
                                                     void onRegenerateSingle(character.id, appearance.id, selectedIndex).catch(() => {
@@ -358,7 +364,7 @@ export default function CharacterSection({
                                                 }
                                                 // 多图或无图：重新生成整组
                                                 else {
-                                                    const taskKey = `character-${character.id}-${appearance.appearanceIndex}-group`
+                                                    const taskKey = `character-${character.id}-${appearance.id}-group`
                                                     _ulogInfo('[CharacterSection] 调用整组重新生成')
                                                     if (!queueMode) onRegisterTransientTaskKey(taskKey)
                                                     void onRegenerateGroup(character.id, appearance.id, count).catch(() => {
@@ -367,7 +373,7 @@ export default function CharacterSection({
                                                 }
                                             }}
                                             onGenerate={(count) => {
-                                                const taskKey = `character-${character.id}-${appearance.appearanceIndex}-group`
+                                                const taskKey = `character-${character.id}-${appearance.id}-group`
                                                 if (!queueMode) onRegisterTransientTaskKey(taskKey)
                                                 void handleGenerateImage('character', character.id, appearance.id, count).catch(() => {
                                                     if (!queueMode) onClearTaskKey(taskKey)

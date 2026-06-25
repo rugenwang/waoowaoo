@@ -24,8 +24,10 @@ import { AppIcon } from '@/components/ui/icons'
 import { AI_EDIT_BUTTON_CLASS, AI_EDIT_ICON_CLASS } from '@/components/ui/ai-edit-style'
 import AISparklesIcon from '@/components/ui/icons/AISparklesIcon'
 import { canGenerateLocationBackedAsset } from './location-backed-asset'
+import { useTaskQueue } from '@/lib/task-queue'
 
 interface LocationCardProps {
+  mobile?: boolean
   location: Location
   assetType?: 'location' | 'prop'
   onEdit: () => void
@@ -44,6 +46,7 @@ interface LocationCardProps {
 }
 
 export default function LocationCard({
+  mobile = false,
   location,
   assetType = 'location',
   onEdit,
@@ -57,9 +60,10 @@ export default function LocationCard({
   onCopyFromGlobal,
   activeTaskKeys = new Set(),
   projectId,
-  onConfirmSelection
+  onConfirmSelection,
 }: LocationCardProps) {
   // 🔥 使用 mutation
+  const taskQueue = useTaskQueue()
   const uploadImage = useUploadProjectLocationImage(projectId)
   const cancelTask = useCancelTask(projectId)
   const taskStateMap = useTaskTargetStateMap(projectId, [
@@ -127,15 +131,41 @@ export default function LocationCard({
   const currentImageUrl = selectedImage?.imageUrl || imagesWithUrl[0]?.imageUrl || null
   const currentImageIndex = selectedIndex ?? imagesWithUrl[0]?.imageIndex ?? 0
 
+  const assetQueuePrefix = `${assetKey}-${location.id}`
+  const getQueueStatus = (uiKey: string) => {
+    return taskQueue.queue.find((item) =>
+      item.projectId === projectId &&
+      item.uiKey === uiKey &&
+      (item.status === 'pending' || item.status === 'running'),
+    )?.status ?? null
+  }
+  const groupTaskKey = `${assetQueuePrefix}-group`
+  const groupQueueStatus = getQueueStatus(groupTaskKey)
+  const isGroupTaskQueued = groupQueueStatus === 'pending'
+  const isAssetQueuePending = taskQueue.queue.some((item) =>
+    item.projectId === projectId &&
+    typeof item.uiKey === 'string' &&
+    item.uiKey.startsWith(assetQueuePrefix) &&
+    item.status === 'pending',
+  )
+  const isAssetQueueRunning = taskQueue.queue.some((item) =>
+    item.projectId === projectId &&
+    typeof item.uiKey === 'string' &&
+    item.uiKey.startsWith(assetQueuePrefix) &&
+    item.status === 'running',
+  )
+
   const isImageTaskRunning = (imageIndex: number) => {
-    return activeTaskKeys.has(`location-${location.id}-${imageIndex}`)
+    const imageTaskKey = `${assetQueuePrefix}-${imageIndex}`
+    return activeTaskKeys.has(imageTaskKey) || getQueueStatus(imageTaskKey) === 'running'
   }
 
-  const isGroupTaskRunning = activeTaskKeys.has(`location-${location.id}-group`)
+  const isGroupTaskRunning = activeTaskKeys.has(groupTaskKey) || groupQueueStatus === 'running'
 
   const isAnyTaskRunning = isGroupTaskRunning || Array.from(activeTaskKeys).some(key =>
-    key.startsWith(`location-${location.id}`)
-  )
+    key.startsWith(assetQueuePrefix)
+  ) || isAssetQueueRunning
+  const isAnyTaskQueued = isGroupTaskQueued || isAssetQueuePending
 
   const runtimePhase = taskState?.phase
   const locationTaskRunning = (location.images || []).some((image) => !!image.imageTaskRunning) || runtimePhase === 'queued' || runtimePhase === 'processing'
@@ -154,6 +184,13 @@ export default function LocationCard({
       resource: 'image',
       hasOutput: !!currentImageUrl,
     })
+    : isAnyTaskQueued
+      ? resolveTaskPresentationState({
+        phase: 'queued',
+        intent: currentImageUrl ? 'regenerate' : 'generate',
+        resource: 'image',
+        hasOutput: !!currentImageUrl,
+      })
     : null
   const displayTaskPresentation = locationTaskPresentation || fallbackRunningPresentation
   const confirmingSelectionState = isConfirmingSelection
@@ -176,7 +213,14 @@ export default function LocationCard({
   // 统一任务态 + 前端瞬时提交态
   const isTaskRunning =
     locationTaskRunning ||
-    isAnyTaskRunning
+    isAnyTaskRunning ||
+    isAnyTaskQueued
+  const queuedNotice = mobile && isAnyTaskQueued ? (
+    <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
+      <AppIcon name="clock" className="h-3.5 w-3.5" />
+      已加入队列
+    </div>
+  ) : null
 
   const cancelAction = canCancel ? (
     <button
@@ -256,7 +300,7 @@ export default function LocationCard({
     )
 
     return (
-      <div className="col-span-3 glass-surface-elevated p-4 transition-all">
+      <div className={`${mobile ? 'col-span-1' : 'col-span-3'} glass-surface-elevated p-4 transition-all`}>
         <input
           ref={fileInputRef}
           type="file"
@@ -264,6 +308,7 @@ export default function LocationCard({
           onChange={() => handleUpload()}
           className="hidden"
         />
+        {queuedNotice}
         <LocationCardHeader
           mode="selection"
           locationName={location.name}
@@ -390,7 +435,7 @@ export default function LocationCard({
   const canGenerate = canGenerateLocationBackedAsset(location, assetType)
 
   return (
-    <div className="flex flex-col gap-2 glass-surface-elevated p-3">
+    <div className={mobile ? 'flex w-full flex-col gap-3 rounded-[22px] bg-white p-3 shadow-sm ring-1 ring-slate-200/80' : 'flex flex-col gap-2 glass-surface-elevated p-3'}>
       <input
         ref={fileInputRef}
         type="file"
@@ -398,6 +443,7 @@ export default function LocationCard({
         onChange={() => handleUpload()}
         className="hidden"
       />
+      {queuedNotice}
       <div className="relative">
         <LocationImageList
           mode="single"

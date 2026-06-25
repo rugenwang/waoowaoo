@@ -169,6 +169,20 @@ export const ART_STYLES = [
     preview: '古',
     promptZh: '中国真人古风影视写实风格，真人演员质感，真实自然的皮肤、五官、发丝与服装材质，符合故事朝代的传统中式建筑、服饰与礼制细节，古典东方美学构图，真实自然光影，电影级质感，色彩雅致克制，画面细腻通透，人物与场景年代统一，禁止出现现代元素，禁止动漫、插画、卡通或CG建模质感。',
     promptEn: 'Chinese live-action period-drama cinematic realism with real actors, natural skin, facial features, hair, and fabric textures; historically coherent traditional Chinese architecture, costumes, and ritual details appropriate to the story era; classical Eastern composition, natural realistic lighting, refined restrained colors, detailed clean imagery, consistent period setting, no modern elements, and no anime, illustration, cartoon, or CG-rendered look.'
+  },
+  {
+    value: 'chinese-mythology',
+    label: '中国神话风',
+    preview: '神',
+    promptZh: '中国神话风影视写实风格，融合上古神话、山海经、仙山云海、神殿遗迹、瑞兽异兽、神性光辉与东方奇幻史诗氛围；人物保持真人演员质感，皮肤、五官、发丝、服饰材质真实自然，服装与器物符合中国神话语境，场景宏大瑰丽但不脱离真实电影质感，光影庄严神秘，色彩厚重通透，画面精致大气，禁止现代元素，禁止动漫、插画、卡通或CG建模质感。',
+    promptEn: 'Chinese mythology cinematic realism with live-action texture, inspired by ancient Chinese myths, Classic of Mountains and Seas imagery, sacred mountains, cloud seas, divine temples, mythical beasts, divine radiance, and an Eastern fantasy epic atmosphere; characters must keep real-actor skin, facial, hair, and fabric realism; costumes, props, and environments should fit Chinese mythological context; grand and magnificent scenes with believable cinematic lighting, solemn mystic mood, rich transparent colors, refined majestic imagery, no modern elements, and no anime, illustration, cartoon, or CG-rendered look.'
+  },
+  {
+    value: 'chinese-xianxia',
+    label: '中国仙侠风',
+    preview: '仙',
+    promptZh: '中国仙侠影视写实风格，真人演员质感，融合仙门宗派、云海仙山、古风法器、灵气光效、山水秘境、修行洞府与东方仙侠短剧氛围；人物皮肤、五官、发丝、服饰材质真实自然，衣袂飘逸但符合真实布料层次，场景清雅唯美、云雾缭绕、光影柔和通透，动作和表情克制自然，画面电影级、写实唯美、沉浸式仙侠质感，禁止现代元素，禁止动漫、插画、卡通或CG建模质感。',
+    promptEn: 'Chinese xianxia live-action cinematic realism with real-actor texture, blending immortal sects, cloud-covered sacred mountains, ancient magical artifacts, subtle spiritual light effects, poetic mountain-water realms, cultivation caves, and an Eastern xianxia short-drama atmosphere; natural realistic skin, facial features, hair, and fabric textures; flowing robes with believable cloth layers; elegant ethereal environments, drifting mist, soft transparent lighting, restrained natural actions and expressions, cinematic realistic and poetic xianxia immersion, no modern elements, and no anime, illustration, cartoon, or CG-rendered look.'
   }
 ]
 

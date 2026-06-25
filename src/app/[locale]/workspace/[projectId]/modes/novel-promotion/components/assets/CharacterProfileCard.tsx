@@ -12,6 +12,7 @@ import { CharacterProfileData } from '@/types/character-profile'
 import { AppIcon } from '@/components/ui/icons'
 
 interface CharacterProfileCardProps {
+    mobile?: boolean
     characterId: string
     name: string
     profileData: CharacterProfileData
@@ -49,6 +50,7 @@ function isRoleLevel(value: string): value is RoleLevel {
 }
 
 export default function CharacterProfileCard({
+    mobile = false,
     name,
     profileData,
     onEdit,
@@ -168,11 +170,13 @@ export default function CharacterProfileCard({
                 </div>
 
                 {/* 操作按钮 */}
-                <div className="flex gap-2 pt-3 border-t border-[var(--glass-stroke-base)]">
+                <div className={mobile ? 'grid grid-cols-1 gap-2 border-t border-[var(--glass-stroke-base)] pt-3' : 'flex gap-2 pt-3 border-t border-[var(--glass-stroke-base)]'}>
                     <button
                         onClick={onEdit}
                         disabled={isConfirming}
-                        className="glass-btn-base glass-btn-secondary flex-1 px-3 py-1.5 text-sm rounded-lg disabled:opacity-50"
+                        className={mobile
+                            ? 'glass-btn-base glass-btn-secondary flex min-h-11 w-full items-center justify-center rounded-lg px-3 py-2 text-sm disabled:opacity-50'
+                            : 'glass-btn-base glass-btn-secondary flex-1 px-3 py-1.5 text-sm rounded-lg disabled:opacity-50'}
                     >
                         {t('characterProfile.editProfile')}
                     </button>
@@ -180,7 +184,9 @@ export default function CharacterProfileCard({
                         <button
                             onClick={onUseExisting}
                             disabled={isConfirming}
-                            className="glass-btn-base glass-btn-tone-info flex-1 px-3 py-1.5 text-sm rounded-lg disabled:opacity-50"
+                            className={mobile
+                                ? 'glass-btn-base glass-btn-tone-info flex min-h-11 w-full items-center justify-center rounded-lg px-3 py-2 text-sm disabled:opacity-50'
+                                : 'glass-btn-base glass-btn-tone-info flex-1 px-3 py-1.5 text-sm rounded-lg disabled:opacity-50'}
                         >
                             {t('characterProfile.useExisting')}
                         </button>
@@ -188,7 +194,9 @@ export default function CharacterProfileCard({
                     <button
                         onClick={onConfirm}
                         disabled={isConfirming}
-                        className="glass-btn-base glass-btn-primary flex-1 px-3 py-1.5 text-sm rounded-lg disabled:opacity-50"
+                        className={mobile
+                            ? 'glass-btn-base glass-btn-primary flex min-h-11 w-full items-center justify-center whitespace-normal rounded-lg px-3 py-2 text-center text-sm leading-5 disabled:opacity-50'
+                            : 'glass-btn-base glass-btn-primary flex-1 px-3 py-1.5 text-sm rounded-lg disabled:opacity-50'}
                     >
                         {isConfirming ? (
                             <TaskStatusInline state={confirmingState} className="text-white [&>span]:text-white [&_svg]:text-white" />

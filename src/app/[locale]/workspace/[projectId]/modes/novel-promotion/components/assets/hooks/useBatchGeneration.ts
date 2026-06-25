@@ -88,11 +88,11 @@ export function useBatchGeneration({
         for (const character of characters) {
             for (const appearance of character.appearances || []) {
                 if (!isAppearanceTaskRunning(appearance)) continue
-                const groupKey = `character-${character.id}-${appearance.appearanceIndex}-group`
+                const groupKey = `character-${character.id}-${appearance.id}-group`
                 generated.add(groupKey)
                 const imageCount = Math.max(1, appearance.imageUrls?.length || 0)
                 for (let index = 0; index < imageCount; index += 1) {
-                    generated.add(`character-${character.id}-${appearance.appearanceIndex}-${index}`)
+                    generated.add(`character-${character.id}-${appearance.id}-${index}`)
                 }
             }
         }
@@ -113,6 +113,12 @@ export function useBatchGeneration({
             const queueUiKey = item.uiKey || ''
             if (queueUiKey) generated.add(queueUiKey)
         }
+        for (const item of taskQueue.queue) {
+            if (item.projectId !== projectId) continue
+            if (item.status !== 'pending' && item.status !== 'running') continue
+            const queueUiKey = item.uiKey || ''
+            if (queueUiKey) generated.add(queueUiKey)
+        }
         if (!queueMode) {
             for (const key of pendingRegenerationKeys) {
                 generated.add(key)
@@ -120,7 +126,7 @@ export function useBatchGeneration({
         }
 
         return generated
-    }, [characters, locations, pendingRegenerationKeys, projectId, queueMode, taskQueue.activeItems])
+    }, [characters, locations, pendingRegenerationKeys, projectId, queueMode, taskQueue.activeItems, taskQueue.queue])
 
     useEffect(() => {
         if (pendingRegenerationKeys.size === 0) return
@@ -178,7 +184,7 @@ export function useBatchGeneration({
                         appearanceId: app.id,
                         appearanceIndex: app.appearanceIndex,
                         name: char.name,
-                        key: `character-${char.id}-${app.appearanceIndex}-group`
+                        key: `character-${char.id}-${app.id}-group`
                     })
                 }
             })
@@ -320,7 +326,7 @@ export function useBatchGeneration({
                     appearanceId: app.id,
                     appearanceIndex: app.appearanceIndex,
                     name: char.name,
-                    key: `character-${char.id}-${app.appearanceIndex}-group`
+                    key: `character-${char.id}-${app.id}-group`
                 })
             })
         })

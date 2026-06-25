@@ -29,6 +29,7 @@ interface AssetGridProps {
     onLocationEdit?: (location: unknown, imageIndex: number) => void
     onPropEdit?: (prop: unknown, imageIndex: number) => void
     onVoiceSelect?: (characterId: string) => void
+    mobile?: boolean
 }
 
 // ─── 新建资产下拉菜单 ──────────────────────────────────
@@ -142,7 +143,8 @@ export function AssetGrid({
     onCharacterEdit,
     onLocationEdit,
     onPropEdit,
-    onVoiceSelect
+    onVoiceSelect,
+    mobile = false,
 }: AssetGridProps) {
     const t = useTranslations('assetHub')
     const loadingState = loading
@@ -309,18 +311,20 @@ export function AssetGrid({
     return (
         <div className="flex-1 min-w-0">
             {/* Header: 筛选 Tab + 操作按钮 */}
-            <div className="flex items-center justify-between mb-6">
+            <div className={mobile ? 'mb-4 space-y-3' : 'flex items-center justify-between mb-6'}>
                 {/* 左侧筛选 */}
-                <SegmentedControl
-                    options={tabs.map(tab => ({ value: tab.id, label: tab.label }))}
-                    value={filter}
-                    onChange={(val) => setFilter(val as 'all' | 'character' | 'location' | 'prop' | 'voice')}
-                    layout="compact"
-                    className="min-w-max"
-                />
+                <div className={mobile ? 'overflow-x-auto pb-1' : ''}>
+                    <SegmentedControl
+                        options={tabs.map(tab => ({ value: tab.id, label: tab.label }))}
+                        value={filter}
+                        onChange={(val) => setFilter(val as 'all' | 'character' | 'location' | 'prop' | 'voice')}
+                        layout="compact"
+                        className="min-w-max"
+                    />
+                </div>
 
                 {/* 右侧操作按钮 */}
-                <div className="flex items-center gap-3">
+                <div className={`flex items-center gap-3 ${mobile ? 'justify-end' : ''}`}>
                     {onDownloadAll && (
                         <button
                             onClick={onDownloadAll}

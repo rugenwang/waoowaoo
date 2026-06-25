@@ -1,5 +1,5 @@
 import { toDisplayImageUrl } from '@/lib/media/image-url'
-import type { MobileEpisodeDetail, MobilePanel, MobilePanelFrame, MobileStoryboard } from './types'
+import type { MobileEpisodeDetail, MobilePanel, MobilePanelFrame } from './types'
 
 export function displayMediaUrl(value: string | null | undefined): string | null {
   return toDisplayImageUrl(value) || value || null
@@ -162,6 +162,28 @@ export function getSortedFrames(panel: MobilePanel): MobilePanelFrame[] {
   return Array.isArray(panel.frames)
     ? [...panel.frames].sort((left, right) => left.frameIndex - right.frameIndex)
     : []
+}
+
+export function canReferencePreviousPanel(
+  panels: Array<Pick<MobilePanel, 'id'>>,
+  panelId: string,
+): boolean {
+  return panels.findIndex((panel) => panel.id === panelId) > 0
+}
+
+export function shouldDisplayPanelFrames(frames: Array<{ id: string }>): boolean {
+  return frames.length > 0
+}
+
+export function resolveSelectedPanelFrameId(
+  frames: Array<{ id: string; frameIndex: number }>,
+  preferredFrameId: string | null,
+): string | null {
+  if (preferredFrameId && frames.some((frame) => frame.id === preferredFrameId)) {
+    return preferredFrameId
+  }
+  const firstFrame = [...frames].sort((left, right) => left.frameIndex - right.frameIndex)[0]
+  return firstFrame?.id ?? null
 }
 
 export function getPanelImageUrl(panel: MobilePanel): string | null {

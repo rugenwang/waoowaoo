@@ -9,7 +9,7 @@ import { useTranslations } from 'next-intl'
  * 🔥 V6.5 重构：直接订阅 useProjectAssets，消除 props drilling
  */
 
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import { CharacterAppearance } from '@/types/project'
 import { isAbortError } from '@/lib/error-utils'
 import { useTaskQueue } from '@/lib/task-queue'
@@ -40,6 +40,12 @@ function getErrorMessage(error: unknown, fallback: string): string {
     return fallback
 }
 
+function extractSubmittedTaskId(data: unknown): string {
+    if (!data || typeof data !== 'object') return ''
+    const taskId = (data as { taskId?: unknown }).taskId
+    return typeof taskId === 'string' ? taskId : ''
+}
+
 export function useCharacterActions({
     projectId,
     showToast
@@ -49,7 +55,7 @@ export function useCharacterActions({
     const queueMode = taskQueue.enabled
     // 🔥 直接订阅缓存 - 消除 props drilling
     const { data: assets } = useProjectAssets(projectId)
-    const characters = assets?.characters ?? []
+    const characters = useMemo(() => assets?.characters ?? [], [assets?.characters])
 
     // 🔥 使用刷新函数 - mutations 完成后刷新缓存
     const refreshAssets = useRefreshProjectAssets(projectId)
@@ -147,15 +153,13 @@ export function useCharacterActions({
                     group: 'assets',
                     projectId,
                     target: { targetType: 'CharacterAppearance', targetId: appearanceId },
-                    uiKey: typeof appearanceIndex === 'number'
-                        ? `character-${characterId}-${appearanceIndex}-${imageIndex}`
-                        : `character-${characterId}-${appearanceId}-${imageIndex}`,
+                    uiKey: `character-${characterId}-${appearanceId}-${imageIndex}`,
                     label: typeof appearanceIndex === 'number'
                         ? `角色：${characterName}（形象 ${appearanceIndex} 图 ${imageIndex}）`
                         : `角色：${characterName}（图 ${imageIndex}）`,
                     submit: async () => {
-                        const res = await regenerateSingleImage.mutateAsync({ characterId, appearanceId, imageIndex }) as any
-                        return { taskId: String(res?.taskId || '') }
+                        const res = await regenerateSingleImage.mutateAsync({ characterId, appearanceId, imageIndex })
+                        return { taskId: extractSubmittedTaskId(res) }
                     },
                     onDone: async () => { refreshAssets() },
                     onFail: async () => { refreshAssets() },
@@ -189,15 +193,13 @@ export function useCharacterActions({
                     group: 'assets',
                     projectId,
                     target: { targetType: 'CharacterAppearance', targetId: appearanceId },
-                    uiKey: typeof appearanceIndex === 'number'
-                        ? `character-${characterId}-${appearanceIndex}-group`
-                        : `character-${characterId}-${appearanceId}-group`,
+                    uiKey: `character-${characterId}-${appearanceId}-group`,
                     label: typeof appearanceIndex === 'number'
                         ? `角色：${characterName}（形象 ${appearanceIndex}）`
                         : `角色：${characterName}`,
                     submit: async () => {
-                        const res = await regenerateGroup.mutateAsync({ characterId, appearanceId, count }) as any
-                        return { taskId: String(res?.taskId || '') }
+                        const res = await regenerateGroup.mutateAsync({ characterId, appearanceId, count })
+                        return { taskId: extractSubmittedTaskId(res) }
                     },
                     onDone: async () => { refreshAssets() },
                     onFail: async () => { refreshAssets() },

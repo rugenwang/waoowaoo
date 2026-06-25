@@ -1,11 +1,14 @@
 'use client'
 
 import { useState } from "react"
+import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import Navbar from "@/components/Navbar"
+import MobileAuthHeader from '@/components/auth/MobileAuthHeader'
 import PasswordStrengthIndicator from "@/components/auth/PasswordStrengthIndicator"
 import { apiFetch } from '@/lib/api-fetch'
 import { Link, useRouter } from '@/i18n/navigation'
+import { isMobileAuthTarget } from '@/lib/auth/redirect-target'
 
 export default function SignUp() {
   const [name, setName] = useState("")
@@ -15,7 +18,10 @@ export default function SignUp() {
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const router = useRouter()
+  const searchParams = useSearchParams()
   const t = useTranslations('auth')
+  const nextTarget = searchParams?.get('next')
+  const mobileAuth = isMobileAuthTarget(nextTarget)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -52,7 +58,9 @@ export default function SignUp() {
       if (response.ok) {
         setSuccess(t('signupSuccess'))
         setTimeout(() => {
-          router.push({ pathname: '/auth/signin' })
+          router.push(nextTarget
+            ? { pathname: '/auth/signin', query: { next: nextTarget } }
+            : { pathname: '/auth/signin' })
         }, 2000)
       } else {
         setError(data.message || t('signupFailed'))
@@ -66,10 +74,11 @@ export default function SignUp() {
 
   return (
     <div className="glass-page min-h-screen">
-      <Navbar />
-      <div className="flex items-center justify-center px-4 py-12">
+      <div className="hidden md:block"><Navbar /></div>
+      <MobileAuthHeader />
+      <div className="flex items-center justify-center px-4 py-6 md:py-12">
         <div className="max-w-md w-full">
-          <div className="glass-surface-modal p-8">
+          <div className="glass-surface-modal p-5 sm:p-8">
             <div className="text-center mb-8">
               <h1 className="text-3xl font-bold text-[var(--glass-text-primary)] mb-2">
                 {t('createAccount')}
@@ -154,13 +163,18 @@ export default function SignUp() {
             <div className="mt-6 text-center">
               <p className="text-[var(--glass-text-secondary)]">
                 {t('hasAccount')}{" "}
-                <Link href={{ pathname: '/auth/signin' }} className="text-[var(--glass-tone-info-fg)] hover:underline font-medium">
+                <Link
+                  href={nextTarget
+                    ? { pathname: '/auth/signin', query: { next: nextTarget } }
+                    : { pathname: '/auth/signin' }}
+                  className="text-[var(--glass-tone-info-fg)] hover:underline font-medium"
+                >
                   {t('signinNow')}
                 </Link>
               </p>
             </div>
 
-            <div className="mt-6 text-center">
+            <div className={`mt-6 text-center ${mobileAuth ? 'hidden' : ''}`}>
               <Link href={{ pathname: '/' }} className="text-[var(--glass-text-tertiary)] hover:text-[var(--glass-text-secondary)] text-sm">
                 {t('backToHome')}
               </Link>

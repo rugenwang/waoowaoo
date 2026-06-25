@@ -42,6 +42,14 @@ function extractSubmittedTaskId(data: unknown): string {
   return typeof taskId === 'string' ? taskId : ''
 }
 
+function requireSubmittedTaskId(data: unknown, label: string): string {
+  const taskId = extractSubmittedTaskId(data).trim()
+  if (!taskId) {
+    throw new Error(`${label}任务提交成功但未返回任务 ID`)
+  }
+  return taskId
+}
+
 // Hooks
 import { useCharacterActions } from './assets/hooks/useCharacterActions'
 import { useLocationActions } from './assets/hooks/useLocationActions'
@@ -60,6 +68,7 @@ import AssetToolbar from './assets/AssetToolbar'
 import AssetFilterBar, { type AssetKindFilter } from './assets/AssetFilterBar'
 import AssetsStageStatusOverlays from './assets/AssetsStageStatusOverlays'
 import AssetsStageModals from './assets/AssetsStageModals'
+import { AppIcon } from '@/components/ui/icons'
 
 interface AssetsStageProps {
   projectId: string
@@ -69,6 +78,7 @@ interface AssetsStageProps {
   // 🔥 通过 props 触发全局分析（避免 URL 参数竞态条件）
   triggerGlobalAnalyze?: boolean
   onGlobalAnalyzeComplete?: () => void
+  mobile?: boolean
 }
 
 export default function AssetsStage({
@@ -77,7 +87,8 @@ export default function AssetsStage({
   focusCharacterId = null,
   focusCharacterRequestId = 0,
   triggerGlobalAnalyze = false,
-  onGlobalAnalyzeComplete
+  onGlobalAnalyzeComplete,
+  mobile = false,
 }: AssetsStageProps) {
   const queryClient = useQueryClient()
   const taskQueue = useTaskQueue()
@@ -170,7 +181,7 @@ export default function AssetsStage({
             })
           }
           const data = await response.json().catch(() => ({}))
-          return { taskId: extractSubmittedTaskId(data) }
+          return { taskId: requireSubmittedTaskId(data, '角色图片') }
         },
         onDone: async () => {
           refreshAssets()
@@ -216,7 +227,7 @@ export default function AssetsStage({
             })
           }
           const data = await response.json().catch(() => ({}))
-          return { taskId: extractSubmittedTaskId(data) }
+          return { taskId: requireSubmittedTaskId(data, '场景图片') }
         },
         onDone: async () => {
           refreshAssets()
@@ -262,7 +273,7 @@ export default function AssetsStage({
             })
           }
           const data = await response.json().catch(() => ({}))
-          return { taskId: extractSubmittedTaskId(data) }
+          return { taskId: requireSubmittedTaskId(data, '道具图片') }
         },
         onDone: async () => {
           refreshAssets()
@@ -284,7 +295,7 @@ export default function AssetsStage({
   // 本地 UI 状态
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'warning' | 'error' } | null>(null)
-  const [kindFilter, setKindFilter] = useState<AssetKindFilter>('all')
+  const [kindFilter, setKindFilter] = useState<AssetKindFilter>(mobile ? 'character' : 'all')
   const [episodeFilter, setEpisodeFilter] = useState<string | null>(null)
 
   // 获取剧集列表
@@ -526,7 +537,7 @@ export default function AssetsStage({
   })
 
   return (
-    <div className="space-y-4">
+    <div className={mobile ? 'space-y-3' : 'space-y-4'}>
       <AssetsStageStatusOverlays
         toast={toast}
         onCloseToast={() => setToast(null)}
@@ -539,6 +550,7 @@ export default function AssetsStage({
 
       {/* 资产工具栏 */}
       <AssetToolbar
+        mobile={mobile}
         projectId={projectId}
         totalAssets={totalAssets}
         totalAppearances={totalAppearances}
@@ -555,6 +567,7 @@ export default function AssetsStage({
 
       {/* 资产筛选栏 */}
       <AssetFilterBar
+        mobile={mobile}
         kindFilter={kindFilter}
         onKindFilterChange={setKindFilter}
         counts={{
@@ -565,8 +578,25 @@ export default function AssetsStage({
         }}
       />
 
+      {mobile && kindFilter !== 'all' ? (
+        <button
+          type="button"
+          onClick={() => {
+            if (kindFilter === 'character') setShowAddCharacter(true)
+            if (kindFilter === 'location') setShowAddLocation(true)
+            if (kindFilter === 'prop') setShowAddProp(true)
+          }}
+          className="flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm active:scale-[0.99]"
+          aria-label={kindFilter === 'character' ? '新增角色' : kindFilter === 'location' ? '新增场景' : '新增道具'}
+        >
+          <AppIcon name="plus" className="h-5 w-5" />
+          {kindFilter === 'character' ? '新增角色' : kindFilter === 'location' ? '新增场景' : '新增道具'}
+        </button>
+      ) : null}
+
       {(kindFilter === 'all' || kindFilter === 'character') && (
           <CharacterSection
+            mobile={mobile}
             key="character"
             projectId={projectId}
             focusCharacterId={focusCharacterId}
@@ -608,6 +638,7 @@ export default function AssetsStage({
       )}
       {(kindFilter === 'all' || kindFilter === 'location') && (
           <LocationSection
+            mobile={mobile}
             key="location"
             projectId={projectId}
             activeTaskKeys={activeTaskKeys}
@@ -630,6 +661,7 @@ export default function AssetsStage({
       )}
       {(kindFilter === 'all' || kindFilter === 'prop') && (
           <LocationSection
+            mobile={mobile}
             key="prop"
             projectId={projectId}
             assetType="prop"
@@ -655,6 +687,7 @@ export default function AssetsStage({
       )}
 
       <AssetsStageModals
+        mobile={mobile}
         projectId={projectId}
         onRefresh={onRefresh}
         onClosePreview={() => setPreviewImage(null)}

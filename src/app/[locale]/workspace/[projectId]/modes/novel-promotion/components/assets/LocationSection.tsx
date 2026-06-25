@@ -15,8 +15,10 @@ import LocationCard from './LocationCard'
 import { AppIcon } from '@/components/ui/icons'
 import { resolveLocationBackedGenerateType } from './location-backed-asset'
 import { useTaskQueue } from '@/lib/task-queue'
+import { getAssetLayoutClasses } from '@/features/mobile-h5/mobile-asset-layout'
 
 interface LocationSectionProps {
+    mobile?: boolean
     // 🔥 V6.5 删除：locations prop - 现在内部直接订阅
     projectId: string
     assetType?: 'location' | 'prop'
@@ -42,6 +44,7 @@ interface LocationSectionProps {
 }
 
 export default function LocationSection({
+    mobile = false,
     // 🔥 V6.5 删除：locations prop - 现在内部直接订阅
     projectId,
     assetType = 'location',
@@ -73,18 +76,19 @@ export default function LocationSection({
     const locations = filterIds ? allLocations.filter((l) => filterIds.has(l.id)) : allLocations
     const assetKey = assetType === 'prop' ? 'prop' : 'location'
     const generateType = resolveLocationBackedGenerateType(assetType)
+    const layoutClasses = getAssetLayoutClasses(mobile)
 
     return (
-        <div className="glass-surface p-6">
-            <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
+        <div className={layoutClasses.section}>
+            <div className={layoutClasses.sectionHeader}>
+                <div className="flex min-w-0 items-center gap-2">
                     <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--glass-tone-info-bg)] text-[var(--glass-tone-info-fg)]">
                         <AppIcon name="imageLandscape" className="h-5 w-5" />
                     </span>
-                    <h3 className="text-lg font-bold text-[var(--glass-text-primary)]">
+                    <h3 className={mobile ? 'truncate text-base font-bold text-slate-950' : 'text-lg font-bold text-[var(--glass-text-primary)]'}>
                         {assetType === 'prop' ? t('stage.propAssets') : t("stage.locationAssets")}
                     </h3>
-                    <span className="text-sm text-[var(--glass-text-tertiary)] bg-[var(--glass-bg-muted)]/50 px-2 py-1 rounded-lg">
+                    <span className="shrink-0 rounded-lg bg-[var(--glass-bg-muted)]/50 px-2 py-1 text-xs text-[var(--glass-text-tertiary)]">
                         {assetType === 'prop'
                             ? t('stage.propCounts', { count: locations.length })
                             : t("stage.locationCounts", { count: locations.length })}
@@ -92,15 +96,16 @@ export default function LocationSection({
                 </div>
                 <button
                     onClick={onAddLocation}
-                    className="glass-btn-base glass-btn-primary flex items-center gap-2 px-4 py-2 font-medium"
+                    className={mobile ? 'hidden' : 'glass-btn-base glass-btn-primary flex items-center gap-2 px-4 py-2 font-medium'}
                 >
                     + {t(`${assetKey}.add`)}
                 </button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-6 xl:grid-cols-6 gap-6">
+            <div className={layoutClasses.locationGrid}>
                 {locations.map(location => (
                     <LocationCard
+                        mobile={mobile}
                         key={location.id}
                         location={location}
                         assetType={assetType}

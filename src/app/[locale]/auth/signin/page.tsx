@@ -5,9 +5,9 @@ import { signIn } from "next-auth/react"
 import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import Navbar from "@/components/Navbar"
+import MobileAuthHeader from '@/components/auth/MobileAuthHeader'
 import { Link, useRouter } from '@/i18n/navigation'
-import { buildAuthenticatedHomeTarget } from '@/lib/home/default-route'
-import { resolveSafePostLoginTarget } from '@/lib/auth/redirect-target'
+import { isMobileAuthTarget, resolveSafePostLoginTarget } from '@/lib/auth/redirect-target'
 
 export default function SignIn() {
   const [username, setUsername] = useState("")
@@ -17,6 +17,8 @@ export default function SignIn() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const t = useTranslations('auth')
+  const nextTarget = searchParams?.get('next')
+  const mobileAuth = isMobileAuthTarget(nextTarget)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -35,7 +37,7 @@ export default function SignIn() {
       } else if (result?.error) {
         setError(t('loginFailed'))
       } else {
-        router.push(resolveSafePostLoginTarget(searchParams?.get('next')))
+        router.push(resolveSafePostLoginTarget(nextTarget))
         router.refresh()
       }
     } catch {
@@ -47,10 +49,11 @@ export default function SignIn() {
 
   return (
     <div className="glass-page min-h-screen">
-      <Navbar />
-      <div className="flex items-center justify-center px-4 py-12">
+      <div className="hidden md:block"><Navbar /></div>
+      <MobileAuthHeader />
+      <div className="flex items-center justify-center px-4 py-6 md:py-12">
         <div className="max-w-md w-full">
-          <div className="glass-surface-modal p-8">
+          <div className="glass-surface-modal p-5 sm:p-8">
             <div className="text-center mb-8">
               <h1 className="text-3xl font-bold text-[var(--glass-text-primary)] mb-2">
                 {t('welcomeBack')}
@@ -111,13 +114,18 @@ export default function SignIn() {
             <div className="mt-6 text-center">
               <p className="text-[var(--glass-text-secondary)]">
                 {t('noAccount')}{" "}
-                <Link href={{ pathname: '/auth/signup' }} className="text-[var(--glass-tone-info-fg)] hover:underline font-medium">
+                <Link
+                  href={mobileAuth && nextTarget
+                    ? { pathname: '/auth/signup', query: { next: nextTarget } }
+                    : { pathname: '/auth/signup' }}
+                  className="text-[var(--glass-tone-info-fg)] hover:underline font-medium"
+                >
                   {t('signupNow')}
                 </Link>
               </p>
             </div>
 
-            <div className="mt-6 text-center">
+            <div className={`mt-6 text-center ${mobileAuth ? 'hidden' : ''}`}>
               <Link href={{ pathname: '/' }} className="text-[var(--glass-text-tertiary)] hover:text-[var(--glass-text-secondary)] text-sm">
                 {t('backToHome')}
               </Link>
