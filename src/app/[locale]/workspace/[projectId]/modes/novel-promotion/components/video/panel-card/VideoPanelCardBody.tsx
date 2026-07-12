@@ -8,7 +8,7 @@ import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapa
 import { AppIcon } from '@/components/ui/icons'
 import type { VideoPanelRuntime } from './hooks/useVideoPanelActions'
 import { useUpdateProjectPanelDuration } from '@/lib/query/mutations/useVideoMutations'
-import { useRegenerateProjectVideoPrompt } from '@/lib/query/hooks'
+import { useRegenerateProjectVideoPrompt, useUpdateProjectPanelVideoPrompt } from '@/lib/query/hooks'
 import { shouldShowError } from '@/lib/error-utils'
 import { extractErrorMessage } from '@/lib/errors/extract'
 
@@ -35,10 +35,13 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
 
   const updateDurationMutation = useUpdateProjectPanelDuration(runtime.layout.projectId)
   const regenerateVideoPrompt = useRegenerateProjectVideoPrompt(runtime.layout.projectId)
+  const updateBaseVideoPrompt = useUpdateProjectPanelVideoPrompt(runtime.layout.projectId)
   const currentDuration = panel.textPanel?.duration
   const [isEditingDuration, setIsEditingDuration] = useState(false)
   const [editingDuration, setEditingDuration] = useState<string>('')
   const [promptModalOpen, setPromptModalOpen] = useState(false)
+  const [basePromptModalOpen, setBasePromptModalOpen] = useState(false)
+  const [baseEditingPrompt, setBaseEditingPrompt] = useState('')
   const [dubbingMode, setDubbingMode] = useState<'video-vocal' | 'character-voice' | null>(null)
   const [promptRequirement, setPromptRequirement] = useState('')
   const [promptCandidate, setPromptCandidate] = useState<string | null>(null)
@@ -106,14 +109,35 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
   }
 
   const isFirstLastFrameGenerated = panel.videoGenerationMode === 'firstlastframe' && !!panel.videoUrl
-  const hasDialogueForDubbing = voiceManager.localVoiceLines.length > 0
+  const showsPanelDubbing = !!panel.panelId
   const panelDubbingAudioSrc = panel.panelId
     ? `/api/novel-promotion/${encodeURIComponent(layout.projectId)}/panel-dubbing/audio?panelId=${encodeURIComponent(panel.panelId)}&v=${encodeURIComponent(panel.dubbingAudioUrl || '')}`
     : panel.dubbingAudioUrl || ''
   const showsIncomingLinkBadge = layout.isLastFrame && !!layout.prevPanel
   const showsOutgoingLinkBadge = layout.isLinked && !!layout.nextPanel
-  const showsPromptEditor = !layout.isLastFrame || layout.isLinked
+  const showsPromptEditor = true
   const showsFirstLastFrameActions = layout.isLinked && !!layout.nextPanel
+  const baseVideoPrompt = (
+    panel.groupVideoPrompt
+    || panel.videoPrompt
+    || panel.textPanel?.video_prompt
+    || ''
+  ).trim()
+  const showsBaseVideoPrompt = layout.isLinked
+  const baseVideoPromptField: 'groupVideoPrompt' | 'videoPrompt' = panel.groupVideoPrompt ? 'groupVideoPrompt' : 'videoPrompt'
+  const openBasePromptModal = () => {
+    setBaseEditingPrompt(baseVideoPrompt)
+    setBasePromptModalOpen(true)
+  }
+  const handleSaveBaseVideoPrompt = async () => {
+    await updateBaseVideoPrompt.mutateAsync({
+      storyboardId: panel.storyboardId,
+      panelIndex: panel.panelIndex,
+      value: baseEditingPrompt,
+      field: baseVideoPromptField,
+    })
+    setBasePromptModalOpen(false)
+  }
   const handleGenerateVideoPromptCandidate = async () => {
     try {
       const result = await regenerateVideoPrompt.mutateAsync({
@@ -150,6 +174,117 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
       }
     }
   }
+
+  const voiceAndDubbingSection = computed.showLipSyncSection ? (
+    <div className="mt-2">
+      <div className="flex gap-2">
+        <button
+          onClick={computed.canLipSync ? lipSync.handleStartLipSync : undefined}
+          disabled={!computed.canLipSync || taskStatus.isLipSyncTaskRunning || lipSync.executingLipSync}
+          className="flex-1 py-1.5 text-xs rounded-lg transition-all flex items-center justify-center gap-1 bg-[var(--glass-accent-from)] text-white disabled:opacity-50"
+        >
+          {taskStatus.isLipSyncTaskRunning || lipSync.executingLipSync ? (
+            <TaskStatusInline state={taskStatus.lipSyncInlineState} className="text-white [&>span]:text-white [&_svg]:text-white" />
+          ) : (
+            <>{t('panelCard.lipSync')}</>
+          )}
+        </button>
+
+        {(taskStatus.isLipSyncTaskRunning || panel.lipSyncVideoUrl) && voiceManager.hasMatchedAudio && (
+          <button onClick={lipSync.handleStartLipSync} disabled={lipSync.executingLipSync} className="flex-shrink-0 px-3 py-1.5 text-xs rounded-lg bg-[var(--glass-tone-warning-fg)] text-white">
+            {t('panelCard.redo')}
+          </button>
+        )}
+      </div>
+
+      {voiceManager.audioGenerateError && (
+        <div className="mt-1 p-1.5 bg-[var(--glass-tone-danger-bg)] border border-[var(--glass-stroke-danger)] rounded text-[10px] text-[var(--glass-tone-danger-fg)]">
+          {voiceManager.audioGenerateError}
+        </div>
+      )}
+
+      {voiceManager.localVoiceLines.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {voiceManager.localVoiceLines.map((voiceLine) => {
+            const isVoiceTaskRunning = voiceManager.isVoiceLineTaskRunning(voiceLine.id)
+            const voiceAudioRunningState = isVoiceTaskRunning
+              ? resolveTaskPresentationState({ phase: 'processing', intent: 'generate', resource: 'audio', hasOutput: !!voiceLine.audioUrl })
+              : null
+
+            return (
+              <div key={voiceLine.id} className="flex items-start gap-1.5 p-1.5 bg-[var(--glass-bg-muted)] rounded text-[10px]">
+                {voiceLine.audioUrl ? (
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      voiceManager.handlePlayVoiceLine(voiceLine)
+                    }}
+                    className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition-colors bg-[var(--glass-bg-muted)]"
+                    title={voiceManager.playingVoiceLineId === voiceLine.id ? t('panelCard.stopVoice') : t('panelCard.play')}
+                  >
+                    <AppIcon name="play" className="w-3 h-3" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void voiceManager.handleGenerateAudio(voiceLine)
+                    }}
+                    disabled={isVoiceTaskRunning}
+                    className="flex-shrink-0 px-1.5 py-0.5 bg-[var(--glass-accent-from)] text-white rounded disabled:opacity-50"
+                    title={t('panelCard.generateAudio')}
+                  >
+                    {isVoiceTaskRunning ? (
+                      <TaskStatusInline state={voiceAudioRunningState} className="text-white [&>span]:text-white [&_svg]:text-white" />
+                    ) : (
+                      tCommon('generate')
+                    )}
+                  </button>
+                )}
+                <div className="flex-1 min-w-0">
+                  <span className="text-[var(--glass-text-tertiary)]">{voiceLine.speaker}: </span>
+                  <span className="text-[var(--glass-text-secondary)]">&ldquo;{voiceLine.content}&rdquo;</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  ) : null
+
+  const panelDubbingSection = showsPanelDubbing ? (
+    <div className="mt-2 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        {panel.videoUrl && (
+          <button
+            type="button"
+            onClick={() => setDubbingMode('video-vocal')}
+            className="inline-flex items-center gap-1 rounded-lg bg-[var(--glass-accent-from)] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--glass-accent-to)]"
+          >
+            <AppIcon name="audioWave" className="h-3.5 w-3.5" />
+            视频配音
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setDubbingMode('character-voice')}
+          className="inline-flex items-center gap-1 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--glass-text-secondary)] transition hover:border-[var(--glass-tone-info-fg)] hover:text-[var(--glass-tone-info-fg)]"
+        >
+          <AppIcon name="mic" className="h-3.5 w-3.5" />
+          角色视频配音
+        </button>
+      </div>
+      {panel.dubbingAudioUrl && (
+        <div className="space-y-1">
+          <div className="text-[10px] text-[var(--glass-text-tertiary)]">
+            当前配音音频{panel.dubbingSourceType === 'video-vocal' ? ' · 视频人声' : panel.dubbingSourceType === 'character-voice' ? ' · 角色音色' : ''}
+          </div>
+          <audio controls preload="metadata" src={panelDubbingAudioSrc} className="h-10 w-full" />
+        </div>
+      )}
+    </div>
+  ) : null
 
   return (
     <div className="p-4 space-y-2">
@@ -212,6 +347,33 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                 {t('firstLastFrame.asFirstFrameFor', { number: panelIndex + 2 })}
               </span>
             )}
+          </div>
+        )}
+
+        {showsBaseVideoPrompt && (
+          <div className="mb-3 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-2">
+            <div className="mb-1 flex items-center justify-between gap-2 text-xs font-medium text-[var(--glass-text-tertiary)]">
+              <span className="inline-flex items-center gap-1">
+                <AppIcon name="video" className="h-3.5 w-3.5" />
+                {t('firstLastFrame.baseVideoPrompt')}
+              </span>
+              <button
+                type="button"
+                onClick={openBasePromptModal}
+                disabled={updateBaseVideoPrompt.isPending}
+                className="inline-flex items-center gap-1 p-0.5 text-[11px] text-[var(--glass-text-tertiary)] transition-colors hover:text-[var(--glass-tone-info-fg)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <AppIcon name="edit" className="h-3.5 w-3.5" />
+                {t('panelCard.edit')}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={openBasePromptModal}
+              className="block max-h-28 w-full overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-transparent p-1 text-left text-xs leading-5 text-[var(--glass-text-secondary)] transition hover:border-[var(--glass-tone-info-fg)] hover:bg-[var(--glass-bg-surface)]"
+            >
+              {baseVideoPrompt || <span className="text-[var(--glass-text-tertiary)] italic">{t('panelCard.clickToEditPrompt')}</span>}
+            </button>
           </div>
         )}
 
@@ -306,6 +468,68 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
               document.body,
             ) : null}
 
+            {basePromptModalOpen && typeof document !== 'undefined' ? createPortal(
+              <div
+                className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+                onClick={updateBaseVideoPrompt.isPending ? undefined : () => setBasePromptModalOpen(false)}
+              >
+                <div
+                  className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] shadow-2xl"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between border-b border-[var(--glass-stroke-subtle)] px-5 py-4">
+                    <div>
+                      <div className="text-sm font-semibold text-[var(--glass-text-primary)]">
+                        {t('firstLastFrame.baseVideoPrompt')}
+                      </div>
+                      <div className="mt-1 text-xs text-[var(--glass-text-tertiary)]">
+                        {t('promptModal.title', { number: panelIndex + 1 })}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={updateBaseVideoPrompt.isPending}
+                      onClick={() => setBasePromptModalOpen(false)}
+                      className="rounded-full p-2 text-[var(--glass-text-tertiary)] transition hover:bg-[var(--glass-bg-muted)] hover:text-[var(--glass-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <AppIcon name="close" className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-5">
+                    <textarea
+                      value={baseEditingPrompt}
+                      onChange={(event) => setBaseEditingPrompt(event.target.value)}
+                      autoFocus
+                      className="min-h-[48vh] w-full resize-y rounded-lg border border-[var(--glass-stroke-focus)] bg-[var(--glass-bg-surface)] px-4 py-3 text-sm leading-6 text-[var(--glass-text-secondary)] outline-none focus:ring-2 focus:ring-[var(--glass-tone-info-fg)]"
+                      placeholder={t('promptModal.placeholder')}
+                    />
+                    <p className="mt-2 text-xs text-[var(--glass-text-tertiary)]">
+                      {t('firstLastFrame.baseVideoPromptHint')}
+                    </p>
+                  </div>
+                  <div className="flex justify-end gap-3 border-t border-[var(--glass-stroke-subtle)] px-5 py-4">
+                    <button
+                      type="button"
+                      onClick={() => setBasePromptModalOpen(false)}
+                      disabled={updateBaseVideoPrompt.isPending}
+                      className="rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] px-4 py-2 text-sm text-[var(--glass-text-secondary)] transition hover:bg-[var(--glass-bg-surface)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {t('panelCard.cancel')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveBaseVideoPrompt}
+                      disabled={updateBaseVideoPrompt.isPending}
+                      className="rounded-lg bg-[var(--glass-accent-from)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[var(--glass-accent-to)] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {updateBaseVideoPrompt.isPending ? '...' : t('panelCard.save')}
+                    </button>
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            ) : null}
+
             {showsFirstLastFrameActions ? (() => {
               const linkedNextPanel = layout.nextPanel!
               const linkedNextStartImage = Array.isArray(linkedNextPanel.frames)
@@ -315,57 +539,61 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                   .at(0)?.imageUrl || linkedNextPanel.imageUrl
                 : linkedNextPanel.imageUrl
               return (
-                <div className="mt-2 flex items-center gap-2">
-                  <button
-                    onClick={() => actions.onGenerateFirstLastFrame(
-                      panel.storyboardId,
-                      panel.panelIndex,
-                      linkedNextPanel.storyboardId,
-                      linkedNextPanel.panelIndex,
-                      panelKey,
-                      inheritedFirstLastGenerationOptions,
-                      panel.panelId,
-                    )}
-                    disabled={
-                      taskStatus.isVideoTaskRunning
-                      || !panel.imageUrl
-                      || !linkedNextStartImage
-                      || !layout.flModel
-                      || layout.flMissingCapabilityFields.length > 0
-                    }
-                    className="flex-shrink-0 min-w-[120px] py-2 px-3 text-sm font-medium rounded-lg shadow-sm transition-all disabled:opacity-50 bg-[var(--glass-accent-from)] text-white"
-                  >
-                    {isFirstLastFrameGenerated ? t('firstLastFrame.generated') : taskStatus.isVideoTaskRunning ? taskStatus.taskRunningVideoLabel : t('firstLastFrame.generate')}
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <ModelCapabilityDropdown
-                      compact
-                      models={layout.flModelOptions}
-                      value={layout.flModel || undefined}
-                      onModelChange={actions.onFlModelChange}
-                      capabilityFields={layout.flCapabilityFields.map((field) => ({
-                        field: field.field,
-                        label: field.label,
-                        options: field.options,
-                        disabledOptions: field.disabledOptions,
-                      }))}
-                      capabilityOverrides={inheritedFirstLastGenerationOptions}
-                      onCapabilityChange={(field, rawValue) => {
-                        if (field === 'duration') {
-                          const duration = rawValue === '' ? null : Number(rawValue)
-                          actions.onUpdatePanelDuration(
-                            panel.storyboardId,
-                            panel.panelIndex,
-                            Number.isFinite(duration as number) ? (duration as number) : null,
-                          )
-                          return
-                        }
-                        actions.onFlCapabilityChange(field, rawValue)
-                      }}
-                      placeholder={t('panelCard.selectModel')}
-                    />
+                <>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      onClick={() => actions.onGenerateFirstLastFrame(
+                        panel.storyboardId,
+                        panel.panelIndex,
+                        linkedNextPanel.storyboardId,
+                        linkedNextPanel.panelIndex,
+                        panelKey,
+                        inheritedFirstLastGenerationOptions,
+                        panel.panelId,
+                      )}
+                      disabled={
+                        taskStatus.isVideoTaskRunning
+                        || !panel.imageUrl
+                        || !linkedNextStartImage
+                        || !layout.flModel
+                        || layout.flMissingCapabilityFields.length > 0
+                      }
+                      className="flex-shrink-0 min-w-[120px] py-2 px-3 text-sm font-medium rounded-lg shadow-sm transition-all disabled:opacity-50 bg-[var(--glass-accent-from)] text-white"
+                    >
+                      {isFirstLastFrameGenerated ? t('firstLastFrame.generated') : taskStatus.isVideoTaskRunning ? taskStatus.taskRunningVideoLabel : t('firstLastFrame.generate')}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <ModelCapabilityDropdown
+                        compact
+                        models={layout.flModelOptions}
+                        value={layout.flModel || undefined}
+                        onModelChange={actions.onFlModelChange}
+                        capabilityFields={layout.flCapabilityFields.map((field) => ({
+                          field: field.field,
+                          label: field.label,
+                          options: field.options,
+                          disabledOptions: field.disabledOptions,
+                        }))}
+                        capabilityOverrides={inheritedFirstLastGenerationOptions}
+                        onCapabilityChange={(field, rawValue) => {
+                          if (field === 'duration') {
+                            const duration = rawValue === '' ? null : Number(rawValue)
+                            actions.onUpdatePanelDuration(
+                              panel.storyboardId,
+                              panel.panelIndex,
+                              Number.isFinite(duration as number) ? (duration as number) : null,
+                            )
+                            return
+                          }
+                          actions.onFlCapabilityChange(field, rawValue)
+                        }}
+                        placeholder={t('panelCard.selectModel')}
+                      />
+                    </div>
                   </div>
-                </div>
+                  {voiceAndDubbingSection}
+                  {panelDubbingSection}
+                </>
               )
             })() : (
               <>
@@ -420,116 +648,8 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                   </div>
                 </div>
 
-                {computed.showLipSyncSection && (
-                  <div className="mt-2">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={computed.canLipSync ? lipSync.handleStartLipSync : undefined}
-                        disabled={!computed.canLipSync || taskStatus.isLipSyncTaskRunning || lipSync.executingLipSync}
-                        className="flex-1 py-1.5 text-xs rounded-lg transition-all flex items-center justify-center gap-1 bg-[var(--glass-accent-from)] text-white disabled:opacity-50"
-                      >
-                        {taskStatus.isLipSyncTaskRunning || lipSync.executingLipSync ? (
-                          <TaskStatusInline state={taskStatus.lipSyncInlineState} className="text-white [&>span]:text-white [&_svg]:text-white" />
-                        ) : (
-                          <>{t('panelCard.lipSync')}</>
-                        )}
-                      </button>
-
-                      {(taskStatus.isLipSyncTaskRunning || panel.lipSyncVideoUrl) && voiceManager.hasMatchedAudio && (
-                        <button onClick={lipSync.handleStartLipSync} disabled={lipSync.executingLipSync} className="flex-shrink-0 px-3 py-1.5 text-xs rounded-lg bg-[var(--glass-tone-warning-fg)] text-white">
-                          {t('panelCard.redo')}
-                        </button>
-                      )}
-                    </div>
-
-                    {voiceManager.audioGenerateError && (
-                      <div className="mt-1 p-1.5 bg-[var(--glass-tone-danger-bg)] border border-[var(--glass-stroke-danger)] rounded text-[10px] text-[var(--glass-tone-danger-fg)]">
-                        {voiceManager.audioGenerateError}
-                      </div>
-                    )}
-
-                    {hasDialogueForDubbing && (
-                      <div className="mt-2 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-2">
-                        <div className="mb-2 flex flex-wrap items-center gap-2">
-                          {panel.videoUrl && (
-                            <button
-                              type="button"
-                              onClick={() => setDubbingMode('video-vocal')}
-                              className="inline-flex items-center gap-1 rounded-lg bg-[var(--glass-accent-from)] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--glass-accent-to)]"
-                            >
-                              <AppIcon name="audioWave" className="h-3.5 w-3.5" />
-                              视频配音
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => setDubbingMode('character-voice')}
-                            className="inline-flex items-center gap-1 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--glass-text-secondary)] transition hover:border-[var(--glass-tone-info-fg)] hover:text-[var(--glass-tone-info-fg)]"
-                          >
-                            <AppIcon name="mic" className="h-3.5 w-3.5" />
-                            角色视频配音
-                          </button>
-                        </div>
-                        {panel.dubbingAudioUrl && (
-                          <div className="space-y-1">
-                            <div className="text-[10px] text-[var(--glass-text-tertiary)]">
-                              当前配音音频{panel.dubbingSourceType === 'video-vocal' ? ' · 视频人声' : panel.dubbingSourceType === 'character-voice' ? ' · 角色音色' : ''}
-                            </div>
-                            <audio controls preload="metadata" src={panelDubbingAudioSrc} className="h-10 w-full" />
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {voiceManager.localVoiceLines.length > 0 && (
-                      <div className="mt-2 space-y-1">
-                        {voiceManager.localVoiceLines.map((voiceLine) => {
-                          const isVoiceTaskRunning = voiceManager.isVoiceLineTaskRunning(voiceLine.id)
-                          const voiceAudioRunningState = isVoiceTaskRunning
-                            ? resolveTaskPresentationState({ phase: 'processing', intent: 'generate', resource: 'audio', hasOutput: !!voiceLine.audioUrl })
-                            : null
-
-                          return (
-                            <div key={voiceLine.id} className="flex items-start gap-1.5 p-1.5 bg-[var(--glass-bg-muted)] rounded text-[10px]">
-                              {voiceLine.audioUrl ? (
-                                <button
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    voiceManager.handlePlayVoiceLine(voiceLine)
-                                  }}
-                                  className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition-colors bg-[var(--glass-bg-muted)]"
-                                  title={voiceManager.playingVoiceLineId === voiceLine.id ? t('panelCard.stopVoice') : t('panelCard.play')}
-                                >
-                                  <AppIcon name="play" className="w-3 h-3" />
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    void voiceManager.handleGenerateAudio(voiceLine)
-                                  }}
-                                  disabled={isVoiceTaskRunning}
-                                  className="flex-shrink-0 px-1.5 py-0.5 bg-[var(--glass-accent-from)] text-white rounded disabled:opacity-50"
-                                  title={t('panelCard.generateAudio')}
-                                >
-                                  {isVoiceTaskRunning ? (
-                                    <TaskStatusInline state={voiceAudioRunningState} className="text-white [&>span]:text-white [&_svg]:text-white" />
-                                  ) : (
-                                    tCommon('generate')
-                                  )}
-                                </button>
-                              )}
-                              <div className="flex-1 min-w-0">
-                                <span className="text-[var(--glass-text-tertiary)]">{voiceLine.speaker}: </span>
-                                <span className="text-[var(--glass-text-secondary)]">&ldquo;{voiceLine.content}&rdquo;</span>
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
+                {voiceAndDubbingSection}
+                {panelDubbingSection}
               </>
             )}
           </>

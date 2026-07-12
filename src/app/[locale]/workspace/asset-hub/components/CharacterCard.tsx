@@ -102,6 +102,7 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
     const generatedImageCount = imageUrls.filter(u => isValidUrl(u)).length
     const hasMultipleImages = generatedImageCount > 1
     const effectiveSelectedIndex: number | null = appearance?.selectedIndex ?? null
+    const selectedImageHasUrl = effectiveSelectedIndex !== null && isValidUrl(imageUrls[effectiveSelectedIndex])
     const currentImageUrl = appearance?.imageUrl || (effectiveSelectedIndex !== null ? imageUrls[effectiveSelectedIndex] : null) || imageUrls.find(u => u) || null
     const hasPreviousVersion = !!(appearance?.previousImageUrl || (appearance?.previousImageUrls && appearance.previousImageUrls.length > 0))
 
@@ -332,6 +333,9 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
                             ariaLabel={tAssets('image.regenCountPrefix')}
                             className="inline-flex h-6 items-center justify-center gap-1 rounded-md px-1.5 hover:bg-[var(--glass-tone-info-bg)] transition-colors disabled:opacity-50"
                         />
+                        <button onClick={() => fileInputRef.current?.click()} disabled={uploadImage.isPending || isBusy} className="glass-btn-base glass-btn-soft h-6 w-6 rounded-md" title={tAssets('image.upload')}>
+                            <AppIcon name="upload" className="w-4 h-4 text-[var(--glass-tone-success-fg)]" />
+                        </button>
                         {hasPreviousVersion && (
                             <button onClick={handleUndo} className="glass-btn-base glass-btn-soft h-6 w-6 rounded-md" title={tAssets('image.undo')}>
                                 <AppIcon name="sparkles" className="w-4 h-4 text-[var(--glass-tone-warning-fg)]" />
@@ -393,7 +397,7 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
                 </div>
 
                 {/* 确认按钮 */}
-                {effectiveSelectedIndex !== null && (
+                {selectedImageHasUrl && (
                     <div className="mt-4 flex justify-end">
                         <button onClick={handleConfirmSelection} disabled={selectImage.isPending} className="glass-btn-base glass-btn-tone-success px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
                             {selectImage.isPending ? (
@@ -483,6 +487,11 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
                 ) : (
                     <div className="flex h-full flex-col items-center justify-center px-4 py-6 text-[var(--glass-text-tertiary)]">
                         <AppIcon name="image" className="w-12 h-12 mb-3" />
+                        {taskErrorDisplay && !isBusy && (
+                            <div className="mb-3 max-w-full text-center text-xs font-medium text-[var(--glass-tone-danger-fg)] line-clamp-3">
+                                {taskErrorDisplay.message}
+                            </div>
+                        )}
                         <ImageGenerationInlineCountButton
                             prefix={<span>{tAssets('image.generateCountPrefix')}</span>}
                             suffix={<span>{tAssets('image.generateCountSuffix')}</span>}
@@ -494,6 +503,10 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
                             className="glass-btn-base glass-btn-primary flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg"
                             selectClassName="appearance-none bg-transparent border-0 pl-0 pr-3 text-sm font-semibold text-current outline-none cursor-pointer leading-none transition-colors"
                         />
+                        <button onClick={() => fileInputRef.current?.click()} disabled={uploadImage.isPending} className="glass-btn-base glass-btn-secondary mt-2 flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg">
+                            <AppIcon name="upload" className="w-4 h-4 text-[var(--glass-tone-success-fg)]" />
+                            {tAssets('image.upload')}
+                        </button>
                     </div>
                 )}
                 {isExecuting && (
@@ -515,7 +528,7 @@ export function CharacterCard({ character, onImageClick, onImageEdit, onVoiceDes
                         <AppIcon name="close" className="w-4 h-4" />
                     </button>
                 )}
-                {taskErrorDisplay && !isBusy && (
+                {taskErrorDisplay && !isBusy && displayImageUrl && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--glass-danger-ring)] text-[var(--glass-tone-danger-fg)] p-3 gap-1">
                         <AppIcon name="alert" className="w-6 h-6" />
                         <span className="text-xs text-center font-medium line-clamp-3">{taskErrorDisplay.message}</span>

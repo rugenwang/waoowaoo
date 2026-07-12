@@ -68,9 +68,10 @@ export default function LocationImageList(props: LocationImageListProps) {
     return (
       <div className="grid grid-cols-3 gap-3">
         {props.images.map((img) => {
-          const isThisSelected = props.selectedImageId
+          const hasImage = !!img.imageUrl
+          const isThisSelected = hasImage && (props.selectedImageId
             ? img.id === props.selectedImageId
-            : img.isSelected
+            : !!img.isSelected)
           const slotTaskRunning =
             props.isImageTaskRunning(img.imageIndex) ||
             (props.isGroupTaskRunning && !img.imageUrl)
@@ -140,8 +141,8 @@ export default function LocationImageList(props: LocationImageListProps) {
                   )}
                 </div>
 
-                <div className="absolute top-2 right-2 z-20 flex items-center gap-1">
-                  {img.imageUrl && (
+                {hasImage && (
+                  <div className="absolute top-2 right-2 z-20 flex items-center gap-1">
                     <button
                       onClick={(event) => handleDownload(
                         event,
@@ -154,24 +155,24 @@ export default function LocationImageList(props: LocationImageListProps) {
                     >
                       <AppIcon name="download" className="h-4 w-4" />
                     </button>
-                  )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      if (phase !== 'generating' && phase !== 'regenerating' && img.imageUrl) {
-                        props.onSelectImage?.(props.locationId, isThisSelected ? null : img.imageIndex)
-                      }
-                    }}
-                    disabled={phase === 'generating' || phase === 'regenerating' || !img.imageUrl}
-                    className={`flex h-7 w-7 items-center justify-center rounded-full shadow-sm transition-all ${isThisSelected
-                      ? 'bg-[var(--glass-tone-success-fg)] text-white'
-                      : 'bg-[var(--glass-bg-surface-strong)] hover:bg-[var(--glass-accent-from)] hover:text-white'
-                      } disabled:opacity-50`}
-                    title={isThisSelected ? t('image.cancelSelection') : t('image.useThis')}
-                  >
-                    <AppIcon name="check" className="w-4 h-4" />
-                  </button>
-                </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (phase !== 'generating' && phase !== 'regenerating') {
+                          props.onSelectImage?.(props.locationId, isThisSelected ? null : img.imageIndex)
+                        }
+                      }}
+                      disabled={phase === 'generating' || phase === 'regenerating'}
+                      className={`flex h-7 w-7 items-center justify-center rounded-full shadow-sm transition-all ${isThisSelected
+                        ? 'bg-[var(--glass-tone-success-fg)] text-white'
+                        : 'bg-[var(--glass-bg-surface-strong)] hover:bg-[var(--glass-accent-from)] hover:text-white'
+                        } disabled:opacity-50`}
+                      title={isThisSelected ? t('image.cancelSelection') : t('image.useThis')}
+                    >
+                      <AppIcon name="check" className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )

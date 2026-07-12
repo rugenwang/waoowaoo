@@ -39,6 +39,10 @@ type LocalVideoOptions = {
     frameTimeSec?: number
     frameIndex?: number
   }>
+  loraPaths?: Array<{
+    path?: string
+    weight?: number
+  }>
 }
 
 function requireBaseUrl(baseUrl: string | undefined, providerId: string): string {
@@ -391,6 +395,7 @@ export class LocalVideoGenerator extends BaseVideoGenerator {
       body: JSON.stringify({
         prompt: prompt || '',
         keyframes,
+        ...(Array.isArray(opt.loraPaths) && opt.loraPaths.length > 0 ? { lora_paths: opt.loraPaths } : null),
         ...(typeof duration === 'number' ? { seconds: duration } : null),
         ...(typeof fps === 'number' ? { fps } : null),
         ...(typeof dims.width === 'number' ? { width: dims.width } : null),

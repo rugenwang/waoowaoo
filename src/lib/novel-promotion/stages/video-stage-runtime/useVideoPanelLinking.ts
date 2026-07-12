@@ -8,6 +8,13 @@ interface MutationLike<TInput = unknown> {
   mutateAsync: (input: TInput) => Promise<unknown>
 }
 
+interface PanelLinkUpdate {
+  panelKey: string
+  storyboardId: string
+  panelIndex: number
+  linked: boolean
+}
+
 interface UseVideoPanelLinkingParams {
   allPanels: VideoPanel[]
   updatePanelLinkMutation: MutationLike<{
@@ -99,8 +106,39 @@ export function useVideoPanelLinking({
     }
   }, [applyOverride, linkedPanels, updatePanelLinkMutation])
 
+  const handleSetLinks = useCallback(async (updates: PanelLinkUpdate[]) => {
+    const dedupedUpdates = updates.filter((update, index, list) =>
+      update.panelKey
+      && list.findIndex((candidate) => candidate.panelKey === update.panelKey) === index,
+    )
+    if (dedupedUpdates.length === 0) return
+
+    const previousValues = new Map<string, boolean>()
+    dedupedUpdates.forEach((update) => {
+      previousValues.set(update.panelKey, linkedPanels.get(update.panelKey) || false)
+      applyOverride(update.panelKey, update.linked)
+    })
+
+    try {
+      await Promise.all(dedupedUpdates.map((update) =>
+        updatePanelLinkMutation.mutateAsync({
+          storyboardId: update.storyboardId,
+          panelIndex: update.panelIndex,
+          linked: update.linked,
+        }),
+      ))
+    } catch (error) {
+      _ulogError('Failed to save batch link state:', error)
+      previousValues.forEach((value, key) => {
+        applyOverride(key, value)
+      })
+      throw error
+    }
+  }, [applyOverride, linkedPanels, updatePanelLinkMutation])
+
   return {
     linkedPanels,
     handleToggleLink,
+    handleSetLinks,
   }
 }

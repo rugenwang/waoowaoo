@@ -197,6 +197,137 @@ describe('run stream state-machine', () => {
     expect(state?.stepsById['clip_y_phase1']?.textOutput).toBe('new-output')
   })
 
+  it('reopens a failed run when a failed step retries with a higher attempt', () => {
+    const runId = 'run-retry-after-failure'
+    const state = applySequence([
+      { runId, event: 'run.start', ts: '2026-02-26T23:00:00.000Z', status: 'running' },
+      {
+        runId,
+        event: 'step.start',
+        ts: '2026-02-26T23:00:01.000Z',
+        status: 'running',
+        stepId: 'clip_x_phase1',
+        stepAttempt: 1,
+        stepTitle: 'A',
+        stepIndex: 1,
+        stepTotal: 1,
+      },
+      {
+        runId,
+        event: 'step.error',
+        ts: '2026-02-26T23:00:02.000Z',
+        status: 'failed',
+        stepId: 'clip_x_phase1',
+        stepAttempt: 1,
+        message: 'phase failed',
+      },
+      {
+        runId,
+        event: 'run.error',
+        ts: '2026-02-26T23:00:03.000Z',
+        status: 'failed',
+        message: 'phase failed',
+      },
+      {
+        runId,
+        event: 'run.start',
+        ts: '2026-02-26T23:00:04.000Z',
+        status: 'running',
+      },
+      {
+        runId,
+        event: 'step.start',
+        ts: '2026-02-26T23:00:05.000Z',
+        status: 'running',
+        stepId: 'clip_x_phase1',
+        stepAttempt: 2,
+        stepTitle: 'A',
+        stepIndex: 1,
+        stepTotal: 1,
+      },
+      {
+        runId,
+        event: 'step.complete',
+        ts: '2026-02-26T23:00:06.000Z',
+        status: 'completed',
+        stepId: 'clip_x_phase1',
+        stepAttempt: 2,
+        text: 'retry-ok',
+      },
+      {
+        runId,
+        event: 'run.complete',
+        ts: '2026-02-26T23:00:07.000Z',
+        status: 'completed',
+        payload: { ok: true },
+      },
+    ])
+
+    expect(state?.status).toBe('completed')
+    expect(state?.errorMessage).toBe('')
+    expect(state?.stepsById['clip_x_phase1']?.status).toBe('completed')
+    expect(state?.stepsById['clip_x_phase1']?.attempt).toBe(2)
+    expect(state?.stepsById['clip_x_phase1']?.textOutput).toBe('retry-ok')
+  })
+
+  it('shows immediate running feedback after a failed step retry is submitted', () => {
+    const runId = 'run-retry-submitted'
+    const state = applySequence([
+      { runId, event: 'run.start', ts: '2026-02-26T23:00:00.000Z', status: 'running' },
+      {
+        runId,
+        event: 'step.start',
+        ts: '2026-02-26T23:00:01.000Z',
+        status: 'running',
+        stepId: 'clip_x_phase1',
+        stepAttempt: 1,
+        stepTitle: 'A',
+        stepIndex: 1,
+        stepTotal: 1,
+      },
+      {
+        runId,
+        event: 'step.error',
+        ts: '2026-02-26T23:00:02.000Z',
+        status: 'failed',
+        stepId: 'clip_x_phase1',
+        stepAttempt: 1,
+        message: 'phase failed',
+      },
+      {
+        runId,
+        event: 'run.error',
+        ts: '2026-02-26T23:00:03.000Z',
+        status: 'failed',
+        message: 'phase failed',
+      },
+      {
+        runId,
+        event: 'run.start',
+        ts: '2026-02-26T23:00:04.000Z',
+        status: 'running',
+      },
+      {
+        runId,
+        event: 'step.start',
+        ts: '2026-02-26T23:00:04.100Z',
+        status: 'running',
+        stepId: 'clip_x_phase1',
+        stepAttempt: 2,
+        stepTitle: 'A',
+        stepIndex: 1,
+        stepTotal: 1,
+        message: '重试已提交，等待执行',
+      },
+    ])
+
+    expect(state?.status).toBe('running')
+    expect(state?.errorMessage).toBe('')
+    expect(state?.stepsById['clip_x_phase1']?.status).toBe('running')
+    expect(state?.stepsById['clip_x_phase1']?.attempt).toBe(2)
+    expect(state?.stepsById['clip_x_phase1']?.message).toBe('重试已提交，等待执行')
+  })
+
   it('reopens completed step when late chunk arrives, then finalizes on run.complete', () => {
     const runId = 'run-4'
     const state = applySequence([

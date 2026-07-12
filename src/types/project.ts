@@ -301,6 +301,7 @@ export interface NovelPromotionProject {
   localStoryboardUsePanelDescriptionEnabled?: boolean
   progressPopupEnabled?: boolean
   forcedStoryboardDurationSec?: 8 | 10 | 15 | 20 | null
+  localVideoLoras?: string | null
   audioUrl: string | null
   media?: MediaRef | null
   srtContent: string | null

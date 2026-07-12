@@ -16,6 +16,24 @@ vi.mock('@/components/ui/icons', () => ({
   AppIcon: ({ name }: { name: string }) => React.createElement('span', null, name),
 }))
 
+vi.mock('@/lib/query/mutations/useVideoMutations', () => ({
+  useUpdateProjectPanelDuration: () => ({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
+}))
+
+vi.mock('@/lib/query/hooks', () => ({
+  useRegenerateProjectVideoPrompt: () => ({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
+  useUpdateProjectPanelVideoPrompt: () => ({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
+}))
+
 function createRuntime(overrides: Partial<VideoPanelRuntime> = {}): VideoPanelRuntime {
   const translate = (key: string, values?: Record<string, unknown>) => {
     if (key === 'firstLastFrame.asLastFrameFor') {
@@ -163,5 +181,42 @@ describe('VideoPanelCardBody', () => {
     expect(markup).toContain('作为镜头 4 的首帧')
     expect(markup).toContain('视频提示词')
     expect(markup).toContain('生成首尾帧视频')
+  })
+
+  it('keeps normal video generation available when panel is only used as incoming last frame', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(VideoPanelCardBody, {
+        runtime: createRuntime({
+          layout: {
+            ...createRuntime().layout,
+            isLinked: false,
+            isLastFrame: true,
+            nextPanel: null,
+          },
+        } as Partial<VideoPanelRuntime>),
+      }),
+    )
+
+    expect(markup).toContain('作为镜头 2 的尾帧')
+    expect(markup).toContain('视频提示词')
+    expect(markup).toContain('生成视频')
+    expect(markup).not.toContain('生成首尾帧视频')
+  })
+
+  it('keeps panel dubbing available when the panel has no matched voice lines', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(VideoPanelCardBody, {
+        runtime: createRuntime({
+          computed: {
+            showLipSyncSection: false,
+            canLipSync: false,
+            hasVisibleBaseVideo: false,
+          },
+        }),
+      }),
+    )
+
+    expect(markup).toContain('角色视频配音')
+    expect(markup).not.toContain('panelCard.lipSync')
   })
 })

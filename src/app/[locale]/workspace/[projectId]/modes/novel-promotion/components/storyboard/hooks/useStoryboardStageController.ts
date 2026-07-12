@@ -174,6 +174,7 @@ export function useStoryboardStageController({
     handleRemoveCharacter,
     handleRemoveLocation,
     handleRemoveProp,
+    queueMode,
     runningCount,
     pendingPanelCount,
     handleGenerateAllPanels,
@@ -223,6 +224,6 @@ export function useStoryboardStageController({
     getDefaultAssetsForClip, handleEditSubmit, handlePanelUpdate, handleAddCharacter, handleSetLocation, handleAddProp, handleRemoveCharacter, handleRemoveLocation, handleRemoveProp,
     retrySave,
     updatePhotographyPlanMutation, updatePanelActingNotesMutation,
-    addingStoryboardGroupState, transitioningState, runningCount, pendingPanelCount, handleGenerateAllPanels,
+    addingStoryboardGroupState, transitioningState, queueMode, runningCount, pendingPanelCount, handleGenerateAllPanels,
   }
 }

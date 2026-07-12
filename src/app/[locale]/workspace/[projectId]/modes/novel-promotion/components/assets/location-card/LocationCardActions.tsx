@@ -11,6 +11,8 @@ type LocationCardActionsProps =
   | {
     mode: 'selection'
     selectedIndex: number | null
+    selectedImageHasUrl: boolean
+    hasSelectableImage: boolean
     isConfirmingSelection: boolean
     confirmingSelectionState: TaskPresentationState | null
     onConfirmSelection?: () => void
@@ -31,11 +33,13 @@ export default function LocationCardActions(props: LocationCardActionsProps) {
   if (props.mode === 'selection') {
     return (
       <>
-        <div className="mt-3 text-xs text-[var(--glass-text-tertiary)] text-center">
-          {t('image.selectTip')}
-        </div>
+        {props.hasSelectableImage && (
+          <div className="mt-3 text-xs text-[var(--glass-text-tertiary)] text-center">
+            {t('image.selectTip')}
+          </div>
+        )}
 
-        {props.selectedIndex !== null && props.onConfirmSelection && (
+        {props.selectedIndex !== null && props.selectedImageHasUrl && props.onConfirmSelection && (
           <div className="mt-4 flex justify-end">
             <button
               onClick={props.onConfirmSelection}

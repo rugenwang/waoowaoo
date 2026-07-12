@@ -154,6 +154,7 @@ export function useStoryboardBatchPanelGeneration({
   ])
 
   return {
+    queueMode,
     runningCount,
     pendingPanelCount,
     handleGenerateAllPanels,

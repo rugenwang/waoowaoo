@@ -15,6 +15,7 @@ import {
   withPreviousTailDependency,
 } from '@/lib/novel-promotion/panel-tail-reference'
 import { loadPreviousPanelTailImageInfo } from '@/lib/novel-promotion/previous-panel-tail'
+import { rebuildPanelFrameReferencePrompts } from '@/lib/novel-promotion/panel-frame-reference-prompts'
 
 function hasFrameImage(frame: { imageUrl?: string | null; imageMediaId?: string | null } | null | undefined) {
   return Boolean(
@@ -157,6 +158,7 @@ export const POST = apiHandler(async (
       data: { usePreviousPanelTailAsReference: requestedUsePreviousTail },
     })
     ;(frame.panel as { usePreviousPanelTailAsReference?: boolean }).usePreviousPanelTailAsReference = requestedUsePreviousTail
+    await rebuildPanelFrameReferencePrompts(frame.panelId)
   }
 
   const panelUsesPreviousTailAsReference = Boolean(
@@ -202,6 +204,7 @@ export const POST = apiHandler(async (
           where: { id: frame.panelId },
           data: { usePreviousPanelTailAsReference: false },
         })
+        await rebuildPanelFrameReferencePrompts(frame.panelId)
       }
     } else if (!previousTailInfo.imageUrl) {
       throw new ApiError('INVALID_PARAMS', {

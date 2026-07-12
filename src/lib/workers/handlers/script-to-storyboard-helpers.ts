@@ -1,6 +1,10 @@
 import { safeParseJson, safeParseJsonArray } from '@/lib/json-repair'
 import { prisma } from '@/lib/prisma'
 import type { StoryboardPanel } from '@/lib/storyboard-phases'
+import {
+  hasPanelCharacterContinuity,
+  isSamePanelLocation,
+} from '@/lib/novel-promotion/panel-character-continuity'
 
 export type JsonRecord = Record<string, unknown>
 
@@ -77,6 +81,14 @@ function readString(record: JsonRecord, keys: string[]): string | null {
     if (typeof value === 'string' && value.trim()) return value.trim()
   }
   return null
+}
+
+export function shouldDefaultUsePreviousPanelTail(panel: StoryboardPanel, previousPanel: StoryboardPanel | null): boolean {
+  return Boolean(
+    previousPanel &&
+    isSamePanelLocation(previousPanel.location, panel.location) &&
+    hasPanelCharacterContinuity(previousPanel?.characters, panel.characters),
+  )
 }
 
 export function cleanVideoPromptText(value: string | null): string | null {
@@ -200,16 +212,17 @@ function removeModelPlannedPreviousTailDependency(value: unknown): Array<string 
 
 function buildOrderedReferenceLabels(panel: StoryboardPanel, dependencies: unknown): string[] {
   const labels: string[] = []
-  for (const item of normalizeDependencyItems(dependencies)) {
+  const dependencyItems = normalizeDependencyItems(dependencies)
+  for (const item of dependencyItems) {
     if (typeof item === 'string' && item.toUpperCase() === 'FP') {
       labels.push('上一个连续分镜的尾帧 FP，作为当前分镜的参考图')
     } else if (typeof item === 'number') {
-      labels.push(`分镜组已生成关键帧 F${item + 1}`)
+      labels.push(`分镜组第 ${item + 1} 关键帧`)
     }
   }
 
   const location = readString(panel, ['location'])
-  if (location) {
+  if (location && dependencyItems.length === 0) {
     labels.push(`当前分镜场景图：${location}`)
   }
 
@@ -230,37 +243,12 @@ function buildOrderedReferenceLabels(panel: StoryboardPanel, dependencies: unkno
   return labels
 }
 
-function hasReferenceIntro(prompt: string | null): boolean {
-  return Boolean(prompt && /(?:参考图|输入参考图)\s*F\d+|Input reference\s+F\d+/i.test(prompt))
-}
-
-function containsPreviousTailReference(prompt: string): boolean {
-  return /(?:上一(?:个)?(?:连续)?分镜(?:的)?尾帧|上一尾帧|previous(?:\s+\w+){0,4}\s+tail|previous\s+panel\s+tail|FP)/i.test(prompt)
-}
-
-function dependencyIncludesPreviousTail(dependencies: unknown): boolean {
-  return normalizeDependencyItems(dependencies).some((item) => typeof item === 'string' && item.toUpperCase() === 'FP')
-}
-
 function ensureFramePromptReferenceIntro(
   prompt: string | null,
-  panel: StoryboardPanel,
-  dependencies: unknown,
 ): string | null {
   const cleanPrompt = typeof prompt === 'string' ? prompt.trim() : ''
   if (!cleanPrompt) return null
-  if (hasReferenceIntro(cleanPrompt) && (!containsPreviousTailReference(cleanPrompt) || dependencyIncludesPreviousTail(dependencies))) {
-    return cleanPrompt
-  }
-  const promptBody = hasReferenceIntro(cleanPrompt) ? stripReferenceIntro(cleanPrompt) : cleanPrompt
-  const labels = buildOrderedReferenceLabels(panel, dependencies)
-  if (labels.length === 0) {
-    return `无额外输入参考图；当前画面：${promptBody}`
-  }
-  const referenceIntro = labels
-    .map((label, index) => `参考图F${index + 1}为${label}`)
-    .join('，')
-  return `${referenceIntro}；当前画面：${promptBody}`
+  return stripReferenceIntro(cleanPrompt)
 }
 
 function buildReferencePolicyWithOrderedReferences(
@@ -284,7 +272,16 @@ function clampFrameTime(value: number | null, duration: number | null, fallback:
   return Math.round(clamped * 10) / 10
 }
 
-function normalizePanelFrameRows(panel: StoryboardPanel, duration: number | null): PanelFramePersistenceRow[] {
+function withPreviousTailForFirstFrame(dependencies: Array<string | number>, frameIndex: number, enabled: boolean): Array<string | number> {
+  if (!enabled || frameIndex !== 0) return dependencies
+  return ['FP', ...dependencies.filter((item) => !(typeof item === 'string' && item.toUpperCase() === 'FP'))]
+}
+
+function normalizePanelFrameRows(
+  panel: StoryboardPanel,
+  duration: number | null,
+  options: { usePreviousPanelTailAsReference?: boolean } = {},
+): PanelFramePersistenceRow[] {
   const rawFrames = Array.isArray(panel.frames) ? panel.frames.slice(0, MAX_PANEL_FRAMES) : []
   const sourceRows = rawFrames
     .map((item) => asJsonRecord(item))
@@ -303,6 +300,11 @@ function normalizePanelFrameRows(panel: StoryboardPanel, duration: number | null
       )
       const dependencies = frame.dependency_frame_ids ?? frame.dependencyFrameIds ?? frame.dependencies ?? frame.depends_on
       const safeDependencies = removeModelPlannedPreviousTailDependency(dependencies)
+      const referenceDependencies = withPreviousTailForFirstFrame(
+        safeDependencies,
+        frameIndex,
+        options.usePreviousPanelTailAsReference === true,
+      )
       const imagePrompt = readString(frame, ['image_prompt', 'imagePrompt', 'prompt', 'description'])
       const referencePolicy = frame.reference_policy ?? frame.referencePolicy ?? frame.references ?? null
       return {
@@ -310,10 +312,10 @@ function normalizePanelFrameRows(panel: StoryboardPanel, duration: number | null
         frameTimeSec,
         frameRole: readString(frame, ['frame_role', 'frameRole', 'role']) || (index === 0 ? 'hero' : 'continuity'),
         dependencyFrameIds: toJsonArrayText(safeDependencies),
-        imagePrompt: ensureFramePromptReferenceIntro(imagePrompt, panel, safeDependencies),
+        imagePrompt: ensureFramePromptReferenceIntro(imagePrompt),
         videoPrompt: cleanVideoPromptText(readString(frame, ['video_prompt', 'videoPrompt', 'motion_prompt', 'motionPrompt'])),
         promptJson: toJsonText(frame),
-        referencePolicy: toJsonText(buildReferencePolicyWithOrderedReferences(referencePolicy, panel, safeDependencies)),
+        referencePolicy: toJsonText(buildReferencePolicyWithOrderedReferences(referencePolicy, panel, referenceDependencies)),
         generationStatus: 'pending',
       }
     })
@@ -324,12 +326,14 @@ function normalizePanelFrameRows(panel: StoryboardPanel, duration: number | null
       dependencyFrameIds: null,
       imagePrompt: ensureFramePromptReferenceIntro(
         readString(panel, ['image_prompt', 'imagePrompt', 'description', 'source_text']),
-        panel,
-        [],
       ),
       videoPrompt: cleanVideoPromptText(readString(panel, ['video_prompt', 'videoPrompt'])),
       promptJson: null,
-      referencePolicy: toJsonText(buildReferencePolicyWithOrderedReferences(null, panel, [])),
+      referencePolicy: toJsonText(buildReferencePolicyWithOrderedReferences(
+        null,
+        panel,
+        withPreviousTailForFirstFrame([], 0, options.usePreviousPanelTailAsReference === true),
+      )),
       generationStatus: 'pending',
     }]
 
@@ -341,7 +345,10 @@ function normalizePanelFrameRows(panel: StoryboardPanel, duration: number | null
     }))
 }
 
-export function buildPanelFramePersistence(panel: StoryboardPanel): PanelFramePersistence {
+export function buildPanelFramePersistence(
+  panel: StoryboardPanel,
+  options: { usePreviousPanelTailAsReference?: boolean } = {},
+): PanelFramePersistence {
   const declaredMode = readString(panel, ['panel_mode', 'panelMode', 'mode'])
   const durationFromGroup = normalizeDurationSeconds(
     readNumber(panel, ['duration_sec', 'durationSec', 'group_duration_sec', 'groupDurationSec']),
@@ -351,7 +358,7 @@ export function buildPanelFramePersistence(panel: StoryboardPanel): PanelFramePe
     durationFromGroup ?? durationFromPanel ?? 0,
     MAX_PANEL_GROUP_DURATION_SEC,
   ) || null
-  const frames = normalizePanelFrameRows(panel, duration)
+  const frames = normalizePanelFrameRows(panel, duration, options)
   const hasMultipleFrames = frames.length > 1
   const panelMode = declaredMode === 'group' || declaredMode === 'complex' || hasMultipleFrames
     ? 'group'
@@ -586,7 +593,7 @@ function buildFallbackFrame(panel: StoryboardPanel, index: number, total: number
     frame_time_sec: frameTimeSec,
     frame_role: index === 0 ? 'hero' : index === total - 1 ? 'ending' : 'continuity',
     dependency_frame_ids: dependencyFrameIds,
-    image_prompt: ensureFramePromptReferenceIntro(String(baseImagePrompt), panel, dependencyFrameIds),
+    image_prompt: ensureFramePromptReferenceIntro(String(baseImagePrompt)),
     video_prompt: panel.video_prompt || panel.description || panel.source_text || '',
     reference_policy: buildReferencePolicyWithOrderedReferences(referencePolicy, panel, dependencyFrameIds),
   }
@@ -813,6 +820,7 @@ export async function persistStoryboardsAndPanels(params: {
   }
   return await prisma.$transaction(async (tx) => {
     const persisted: PersistedStoryboard[] = []
+    let previousPanel: StoryboardPanel | null = null
     for (const clipEntry of clipPanels) {
       const storyboard = await tx.novelPromotionStoryboard.upsert({
         where: { clipId: clipEntry.clipId },
@@ -849,7 +857,8 @@ export async function persistStoryboardsAndPanels(params: {
       const persistedPanels: PersistedStoryboard['panels'] = []
       for (let i = 0; i < clipEntry.finalPanels.length; i += 1) {
         const panel = clipEntry.finalPanels[i]
-        const framePersistence = buildPanelFramePersistence(panel)
+        const usePreviousPanelTailAsReference = shouldDefaultUsePreviousPanelTail(panel, previousPanel)
+        const framePersistence = buildPanelFramePersistence(panel, { usePreviousPanelTailAsReference })
         const panelVideoPrompt = cleanVideoPromptText(panel.video_prompt || null)
         const panelDescription = cleanPanelDescriptionText(panel)
         const created = await panelModel.create({
@@ -872,6 +881,7 @@ export async function persistStoryboardsAndPanels(params: {
             groupDurationSec: framePersistence.groupDurationSec,
             groupVideoPrompt: framePersistence.groupVideoPrompt,
             groupPlanJson: framePersistence.groupPlanJson,
+            usePreviousPanelTailAsReference,
           },
           select: {
             id: true,
@@ -884,6 +894,7 @@ export async function persistStoryboardsAndPanels(params: {
         })
         await createPanelFrames(tx, created.id, framePersistence.frames)
         persistedPanels.push(created)
+        previousPanel = panel
       }
 
       persisted.push({
@@ -905,6 +916,7 @@ export async function persistStoryboardOutputs(params: {
     const persisted: PersistedStoryboard[] = []
     const panelIdByStoryboardRef = new Map<string, string>()
     const storyboardIdByRef = new Map<string, string>()
+    let previousPanel: StoryboardPanel | null = null
 
     for (const clipEntry of params.clipPanels) {
       const storyboard = await tx.novelPromotionStoryboard.upsert({
@@ -951,7 +963,8 @@ export async function persistStoryboardOutputs(params: {
       const persistedPanels: PersistedStoryboard['panels'] = []
       for (let i = 0; i < clipEntry.finalPanels.length; i += 1) {
         const panel = clipEntry.finalPanels[i]
-        const framePersistence = buildPanelFramePersistence(panel)
+        const usePreviousPanelTailAsReference = shouldDefaultUsePreviousPanelTail(panel, previousPanel)
+        const framePersistence = buildPanelFramePersistence(panel, { usePreviousPanelTailAsReference })
         const panelVideoPrompt = cleanVideoPromptText(panel.video_prompt || null)
         const panelDescription = cleanPanelDescriptionText(panel)
         const created = await panelModel.create({
@@ -974,6 +987,7 @@ export async function persistStoryboardOutputs(params: {
             groupDurationSec: framePersistence.groupDurationSec,
             groupVideoPrompt: framePersistence.groupVideoPrompt,
             groupPlanJson: framePersistence.groupPlanJson,
+            usePreviousPanelTailAsReference,
           },
           select: {
             id: true,
@@ -988,6 +1002,7 @@ export async function persistStoryboardOutputs(params: {
         panelIdByStoryboardRef.set(`${storyboard.id}:${created.panelIndex}`, created.id)
         panelIdByStoryboardRef.set(`${clipEntry.clipId}:${created.panelIndex}`, created.id)
         persistedPanels.push(created)
+        previousPanel = panel
       }
 
       persisted.push({

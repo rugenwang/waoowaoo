@@ -223,7 +223,7 @@ export function useStoryboardPanelAssetActions({
     },
     [getPanelEditData, removePropFromPanel, updatePanelEdit],
   )
-  const { runningCount, pendingPanelCount, handleGenerateAllPanels } =
+  const { queueMode, runningCount, pendingPanelCount, handleGenerateAllPanels } =
     useStoryboardBatchPanelGeneration({
       sortedStoryboards,
       submittingPanelImageIds,
@@ -242,6 +242,7 @@ export function useStoryboardPanelAssetActions({
     handleRemoveCharacter,
     handleRemoveLocation,
     handleRemoveProp,
+    queueMode,
     runningCount,
     pendingPanelCount,
     handleGenerateAllPanels,

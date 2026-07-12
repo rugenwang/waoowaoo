@@ -1,160 +1,48 @@
-You are a storyboard planning director.
-Generate an initial panel sequence for one clip.
+You are a senior cinematic storyboard director. Convert the input into chronological production-ready panels and return a strict JSON array only.
 
-Character library names:
-{characters_lib_name}
+ASSETS AND CONTENT
+Character library: {characters_lib_name}
+Location library: {locations_lib_name}
+Character introduction: {characters_introduction}
+Appearances: {characters_appearance_list}
+Character descriptions: {characters_full_description}
+Props: {props_description}
+Clip: {clip_json}
+Content: {clip_content}
 
-Location library names:
-{locations_lib_name}
+PANEL SCHEMA
+Every panel requires panel_number, description, characters, props, location, scene_type, source_text, shot_type, camera_move, video_prompt, duration, duration_sec, panel_mode, group_video_prompt, frames.
+- Names, appearances, locations, and props must come from assets. Characters are objects. Reuse a complete slot phrase for stable placement; omit slot for movement or transition space.
+- description contains visible facts, exact names, action, placement, facing, and restrained expression only.
+- Cover speaker, listener reaction, and necessary action without fragmenting one continuous beat excessively.
+- props lists visible, handled, or story-identifying prop assets; otherwise [].
 
-Character introduction mapping:
-{characters_introduction}
+MODE AND DURATION
+- single: one stable visual state or simple spoken line, exactly one hero frame.
+- group: continuous action, movement, staged emotion, fight, chase, or transition, 2-20 frames. Most use 2-8; ultra-dense action may approach one frame per second.
+- duration_sec <=20. Estimate Chinese speech at 2-3 characters per second, then add action, pauses, camera, and environment time.
+- Timeline runs continuously from 00:00 to duration_sec and frame_time_sec aligns with it.
 
-Character appearance list:
-{characters_appearance_list}
+FRAME RULES
+Every frame requires frame_index, frame_time_sec, frame_role, dependency_frame_ids, image_prompt, video_prompt, reference_policy.
+- Frame 0 is the original pre-action state. Dependencies reference earlier indexes only. Never output FP.
+- image_prompt describes one still moment and states current location, inherited state, this-frame change, and unchanged state.
+- Identify visible people as age/gender + character name. Preserve screen side, front/back order, facing, spacing, and axis continuity.
+- Store ordered references only in reference_policy: dependencies first; omit repeated location images when a dependency exists; otherwise use location, character, then prop images. image_prompt must contain only the visual scene and must never include F1/F2/Fn or reference-image explanations.
+- Dependency frames control spatial state; character images control identity/face/hair/outfit; location images control environment; prop images control appearance; text controls explicit changes only.
 
-Character full descriptions:
-{characters_full_description}
+VIDEO PROMPTS
+Write video_prompt/group_video_prompt in Chinese with two parts:
+1. A concise base paragraph starting with 高清4K or 4K and containing only quality, current environment, lighting, visual style, and background music. No specific person, action, expression, dialogue, narration, camera sequence, adjective stacking, or negative defect list. End with `背景音乐为……，贯穿整段视频`.
+2. A continuous `00:00-00:04：...` timeline. Each segment has one action stage, one primary camera behavior, and at most one transition; static is valid. State screen side, front/back, facing, distance, and movement direction for interactions.
+- First timeline mention uses age/gender + character name. A known but unreferenced character is written as 镜头外角色+name outside dialogue only, never inside 【对白】.
+- Dialogue must be embedded in the timeline segment where it occurs, immediately after the speaker's action, using 【对白】 followed by the character name and source dialogue in Chinese corner brackets. Do not output a separate dialogue list after the timeline or repeat dialogue timestamps.
+- Timeline format example (the output remains Chinese): `00:00-00:03：平视中景固定镜，画面左侧年轻女子林晚转向右侧青年男性周明，低声说：【对白】林晚：「我明白了。」周明保持安静，目光落在林晚身上。`
+- Use 【对白】 only for actual character speech and preserve source text. Use 【旁白】 for narration, internal monologue, or voice-over, embedded in the timeline segment where it occurs.
+- Before every 【旁白】 write exactly: `画面内所有可见人物嘴唇全程保持自然静止，不做发声动作，不出现说话口型；声音来自画面外，不与任何画面人物绑定。`
+- Never mix 【对白】 and 【旁白】 in one segment. Narration segments ban speaking-mouth/lip-sync actions and prefer back, profile, reaction, or environment compositions.
 
-Prop descriptions:
-{props_description}
+CAMERA TERMS
+Shot sizes: extreme wide, wide, full, medium, close-up, extreme close-up, OTS. Angles: eye-level, high, low, overhead, Dutch. Basic: static, pan, tilt, push/dolly, pull, truck, track, jib, orbit, zoom, rack focus. Special only when motivated: stable/shaky handheld, whip, rotate, dive, pass-through. Never combine static and moving instructions in one clause.
 
-Clip metadata JSON:
-{clip_json}
-
-Clip content:
-{clip_content}
-
-Task:
-Create a coherent panel plan that covers the full clip content in chronological order.
-
-Output format (JSON array only):
-[
-  {
-    "panel_number": 1,
-    "description": "visual action description",
-	    "characters": [
-	      { "name": "Character Name", "appearance": "appearance name", "slot": "the position beneath the throne steps at the center of the hall" }
-	    ],
-	    "props": [],
-	    "location": "location name",
-    "scene_type": "daily",
-    "source_text": "exact or near-exact source excerpt",
-    "shot_type": "medium shot",
-    "camera_move": "static",
-    "video_prompt": "short visual motion prompt",
-    "duration": 3,
-    "duration_sec": 3,
-    "panel_mode": "single",
-    "frames": [
-      {
-        "frame_index": 0,
-        "frame_time_sec": 0,
-        "frame_role": "hero",
-        "dependency_frame_ids": [],
-        "image_prompt": "Input reference F1 is current storyboard location image, F2 is character image, F3 is prop image if visible; current still image: 4K image prompt for the single representative frame",
-        "video_prompt": "short motion prompt for this frame",
-        "reference_policy": { "type": "single_frame", "ordered_references": ["current storyboard location image", "character image", "prop image if visible"], "note": "one stable image is enough" }
-      }
-    ]
-  }
-]
-
-Panel mode semantics:
-- `panel_mode` is the storyboard structure type. It tells the system whether this top-level panel should be generated from one representative image or from a connected group of key frames.
-- `panel_mode="single"` means one image is enough: one spoken line, one stable reaction, one simple expression, one small/static action. `frames` must contain exactly 1 item with `frame_index=0`, `frame_time_sec=0`, `frame_role="hero"`, `dependency_frame_ids=[]`. Do not output `group_video_prompt`.
-- `panel_mode="group"` means the panel is a continuous video beat needing 2-20 connected key frames, decided by duration + action density + transition/camera-movement density: visible movement, turning, walking, chasing, fighting, scene transition, multi-stage emotion/action, or clearly different beginning/end states. Frames must be chronological and later frames should depend on earlier frames through `dependency_frame_ids`.
-- Duration and timeline are mandatory before output: count all Chinese dialogue/voiceover/inner-monologue characters in `source_text`; pure speaking time is 2-3 Chinese characters per second. `duration_sec` must not be shorter than pure speaking time, and must also include action time, pauses, camera/transition time, and environment/establishing buffer.
-- The sum of all timeline ranges in `video_prompt` / `group_video_prompt` must equal `duration_sec`; the timeline must start at 00:00 and the final range must end exactly at `duration_sec`.
-- `frames.frame_time_sec` must use the same timeline: frame_index 0 must be 0, later frame_index values must increase in playback order, and the final key state should be at or near the tail of `duration_sec`.
-- A single top-level panel/group must not exceed 20 seconds. If dialogue + action + pauses + camera/environment time exceeds 20 seconds, split into another top-level panel/group instead of compressing the dialogue.
-- Do not make every panel `group` just because the user selected an 8/10/15/20 second duration preference. Use `group` only when multiple visual states are truly needed. Simple panels remain `single`.
-- For group panels, `duration_sec` must be <= 20 seconds. The first frame must be the original/before-action state, not the completed result.
-- Group frame count rule: 6-8s low density = 2 frames; 9-12s low/medium density = 3-4 frames; 13-16s medium/high density = 4-6 frames; 17-20s medium/high density = 5-8 frames.
-- Increase frame count when there are many actions, position changes, prop interactions, multi-person interactions, scene transitions, flashbacks/dreams, or dense camera moves such as orbit, dive, tracking, whip pan, dolly, push, pull, or pass-through shots.
-- Ultra-high density action/camera movement should approach 1 frame per second, capped by duration_sec, so a 20s group may use up to 20 frames. Use this for continuous fighting, melee, high-speed chase, repeated dodge/block/combo actions, explosion/falling, rapid cutting, continuous transitions, or dense whip-pan/pass-through/tracking camera combinations.
-- If a non-ultra-high-density 20s beat needs more than 8 key states, split it into two top-level group panels. If it is clearly ultra-high-density action/camera movement, keep one group and output up to 20 frames.
-- Top-level `props` must list visible or interacted prop asset names selected from Props info. Distinctive objects such as backpacks, bags, watches, rings, bracelets, phones, books, umbrellas, cups, cameras, keys, suitcases, weapons, magical tools, tokens, and folders must be prop assets, not character appearance. If no prop is visible or used, output `props: []`.
-- Do NOT output `FP` during initial storyboard planning. Previous-tail linking is a manual storyboard-page option and will be added by the system only after the user enables it. If a panel seems suitable for previous-tail continuity, mention it only in `description` or `reference_policy.note`; do not put `FP` in `dependency_frame_ids` or `ordered_references`.
-- Every frame, including `panel_mode="single"`, must include `reference_policy.ordered_references`. This tells downstream image generation what each input reference image means.
-- Ordered reference sequence must be: dependency frame references first, then location reference image(s), then character reference image(s) in `characters` order, then prop reference image(s) in `props` order.
-- `frame.image_prompt` must start by explaining the input reference order, for example: `Input references F1-F2 are Office scene references, F3 is character image: Lin Wan · default, F4 is prop folder; current still image...`. Here F1/F2/Fn means input reference image order, not storyboard keyframe numbers.
-- In every `frame.image_prompt`, each visible person must be written as age/gender/temperament + character name, not a generic label only. Good examples: `young woman Lin Wan stands on screen-left`, `middle-aged man Mr. Wang sits behind the desk`, `young man Lu Ze looks toward the doorway`. If age/gender is uncertain, still include the character name with the action.
-- A single panel should still be treated as a one-frame group for image planning: `frame_index=0`, `frame_role="hero"`, one representative image prompt, and a complete reference policy for location/characters/props.
-- Location can use multiple reference images when the shot needs multiple spatial anchors such as room layout, hallway direction, furniture, doors/windows, or indoor/outdoor relationship. Explain which location reference controls which spatial part in `reference_policy` and `image_prompt`.
-
-Mode examples:
-[
-  {
-    "panel_number": 1,
-    "panel_mode": "group",
-    "duration_sec": 8,
-	    "description": "Continuous group: Zhang San enters the office, looks at Li Si and Wang Wu, and announces the meeting",
-	    "characters": [{"name": "Zhang San", "appearance": "default"}, {"name": "Li Si", "appearance": "default"}, {"name": "Wang Wu", "appearance": "default"}],
-	    "props": [],
-	    "location": "Office",
-    "scene_type": "daily",
-    "source_text": "Zhang San walks into the office and says: meeting time.",
-    "frames": [
-      {
-        "frame_index": 0,
-        "frame_time_sec": 0,
-        "frame_role": "hero",
-        "dependency_frame_ids": [],
-        "image_prompt": "Input reference F1 is current storyboard location image: Office, F2 is character image: Zhang San · default, F3 is character image: Li Si · default, F4 is character image: Wang Wu · default; current still image: 4K image, office medium shot, original before-action state: young man Zhang San has just opened the door, young man Li Si works at the left desk, young man Wang Wu writes at the right desk, all characters fully and properly clothed, natural light, clear image.",
-        "video_prompt": "Zhang San enters the office while Li Si and Wang Wu are still working, keeping spatial continuity clear.",
-        "reference_policy": {"type": "base", "ordered_references": ["current storyboard location image: Office", "character image: Zhang San · default", "character image: Li Si · default", "character image: Wang Wu · default"], "note": "opening original state for this group"}
-      },
-      {
-        "frame_index": 1,
-        "frame_time_sec": 4,
-        "frame_role": "dialogue",
-        "dependency_frame_ids": [0],
-        "image_prompt": "Input reference F1 is generated keyframe F1 from this storyboard group, F2 is current storyboard location image: Office, F3 is character image: Zhang San · default, F4 is character image: Li Si · default, F5 is character image: Wang Wu · default; current still image: 4K image, office closer shot, young man Zhang San speaks at the doorway while young man Li Si and young man Wang Wu raise their heads toward him, clothing, light, and office layout consistent with frame 0.",
-        "video_prompt": "Zhang San announces the meeting; Li Si and Wang Wu look up from their work, continuing the positions from frame 0.",
-        "reference_policy": {"type": "depends_on_previous", "ordered_references": ["generated keyframe F1 from this storyboard group", "current storyboard location image: Office", "character image: Zhang San · default", "character image: Li Si · default", "character image: Wang Wu · default"], "note": "refer to frame 0 for character, clothing, scene, and lighting continuity"}
-      }
-    ]
-  },
-  {
-    "panel_number": 2,
-    "panel_mode": "single",
-    "duration_sec": 4,
-	    "description": "Single panel: Zhang San adds one line at the office doorway, focusing on his face and lip movement",
-	    "characters": [{"name": "Zhang San", "appearance": "default"}],
-	    "props": [],
-	    "location": "Office",
-    "scene_type": "daily",
-    "source_text": "Zhang San adds: hurry up.",
-    "frames": [
-      {
-        "frame_index": 0,
-        "frame_time_sec": 0,
-        "frame_role": "hero",
-        "dependency_frame_ids": [],
-        "image_prompt": "Input reference F1 is current storyboard location image: Office, F2 is character image: Zhang San · default; current still image: 4K image, office doorway close shot, young man Zhang San looks into the room, fully and properly clothed, serious expression, lips slightly parted before speaking, natural office lighting, clear image.",
-        "video_prompt": "Zhang San adds one spoken line at the doorway; focus on his face, expression, and lip movement.",
-        "reference_policy": {"type": "single_frame", "ordered_references": ["current storyboard location image: Office", "character image: Zhang San · default"], "note": "one speaking shot only; if the user manually enables previous-tail linking, the system will add FP as an extra reference"}
-      }
-    ]
-  }
-]
-
-Planning rules:
-1. Keep strict chronological order.
-2. Avoid missing key beats from clip_content.
-3. Keep panel transitions smooth and logically continuous.
-4. Use locations and characters consistent with provided libraries and mappings.
-5. Prefer concrete, visible actions over abstract wording.
-6. If location context contains available slots, treat them as preferred placement anchors rather than mandatory hard boundaries.
-7. Prefer assigning a `slot` by copying one full placement phrase from `available_slots` verbatim when a character is stably positioned in the scene.
-8. You may omit `slot` when the shot is mainly about movement, entry/exit, path traversal, transition space, temporary space, empty space, imagination, dream, memory, or abstract/non-literal space.
-9. When no `slot` is used, decide placement freely from source text, action flow, and cinematic staging instead of forcing one of the provided slots.
-10. Do not shorten, rewrite, summarize, or replace a provided slot phrase with a short token such as `slot_1`, `left`, or `throne_front`.
-11. Every top-level panel must include `panel_mode`, `duration_sec`, and `frames`.
-12. `single` panels must have exactly 1 frame. `group` panels must have 2-20 frames, based on duration, action density, and transition/camera-movement density; ultra-high-density action/camera movement may approach 1 frame per second.
-12.1 Duration must follow the 2-3 Chinese characters per second dialogue rule, plus action/pause/camera/environment time. Keep `duration_sec`, prompt timeline end time, and `frames.frame_time_sec` aligned.
-13. Every panel must include `props`; use an empty array when no provided prop asset is visible or used.
-13. Return strict JSON only.
-14. Every frame must include `reference_policy.ordered_references` in the order `dependency frames -> location image(s) -> character image(s) -> prop image(s)`, and every `frame.image_prompt` must explain what input reference F1/F2/Fn means. Do not output FP during planning.
-15. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.
+Do not invent dialogue, narration, outfit, hair color, or hairstyle details absent from source/assets. Use Chinese corner brackets 「」 for quoted speech inside JSON strings. Return JSON only.

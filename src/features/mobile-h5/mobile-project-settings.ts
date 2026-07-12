@@ -1,4 +1,9 @@
 import type { CapabilitySelections } from '@/lib/model-config-contract'
+import {
+  DEFAULT_LTX_VIDEO_LORAS,
+  normalizeLtxVideoLoras,
+  type LtxVideoLoraConfig,
+} from '@/lib/ltx-lora-config'
 import type { MobileNovelPromotionData } from './types'
 
 export interface MobileProjectSettingsSnapshot {
@@ -17,6 +22,7 @@ export interface MobileProjectSettingsSnapshot {
   localStoryboardUsePanelDescriptionEnabled: boolean
   progressPopupEnabled: boolean
   forcedStoryboardDurationSec: 8 | 10 | 15 | 20 | null
+  localVideoLoras: LtxVideoLoraConfig[]
 }
 
 function parseCapabilityOverrides(raw: MobileNovelPromotionData['capabilityOverrides']): CapabilitySelections {
@@ -65,5 +71,8 @@ export function getMobileProjectSettingsSnapshot(
     forcedStoryboardDurationSec: duration === 8 || duration === 10 || duration === 15 || duration === 20
       ? duration
       : null,
+    localVideoLoras: normalizeLtxVideoLoras(projectData?.localVideoLoras).length > 0
+      ? normalizeLtxVideoLoras(projectData?.localVideoLoras)
+      : DEFAULT_LTX_VIDEO_LORAS,
   }
 }

@@ -45,6 +45,7 @@ interface ProjectSnapshotInput {
   localStoryboardUsePanelDescriptionEnabled: boolean
   progressPopupEnabled: boolean
   forcedStoryboardDurationSec: 8 | 10 | 15 | 20 | null
+  localVideoLoras: string | null
 }
 
 interface BuildWorkspaceControllerViewModelParams {

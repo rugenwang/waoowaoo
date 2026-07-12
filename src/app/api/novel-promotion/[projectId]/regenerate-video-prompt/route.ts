@@ -4,6 +4,7 @@ import { apiHandler, ApiError } from '@/lib/api-errors'
 import { prisma } from '@/lib/prisma'
 import { getProjectModelConfig } from '@/lib/config-service'
 import { executeAiTextStep } from '@/lib/ai-runtime/client'
+import { NARRATION_VISUAL_GUARD } from '@/lib/novel-promotion/storyboard-video-prompt-normalizer'
 
 type PromptField = 'videoPrompt' | 'groupVideoPrompt' | 'firstLastFramePrompt'
 
@@ -13,7 +14,7 @@ function parsePromptField(value: unknown): PromptField {
 }
 
 function cleanVideoPromptText(value: string): string {
-  return value
+  const cleaned = value
     .replace(/^```(?:json|text|markdown)?\s*/i, '')
     .replace(/```\s*$/i, '')
     .replace(/^["']|["']$/g, '')
@@ -24,6 +25,11 @@ function cleanVideoPromptText(value: string): string {
     .replace(/[ \t]+([，。；：])/g, '$1')
     .replace(/；{2,}/g, '；')
     .trim()
+
+  return cleaned.replace(/【旁白】/g, (marker, offset) => {
+    const prefix = cleaned.slice(Math.max(0, offset - NARRATION_VISUAL_GUARD.length), offset)
+    return prefix === NARRATION_VISUAL_GUARD ? marker : `${NARRATION_VISUAL_GUARD}${marker}`
+  })
 }
 
 function readCurrentPrompt(panel: {
@@ -36,7 +42,7 @@ function readCurrentPrompt(panel: {
   return panel.videoPrompt || panel.groupVideoPrompt || ''
 }
 
-function buildVideoPromptInstruction(params: {
+export function buildVideoPromptInstruction(params: {
   field: PromptField
   additionalRequirement: string
   currentPrompt: string
@@ -47,46 +53,27 @@ function buildVideoPromptInstruction(params: {
     : params.field === 'groupVideoPrompt'
       ? '分镜组视频提示词'
       : '单分镜视频提示词'
-  return `你是专业短剧/影视 AI 生视频提示词导演。请根据分镜上下文，重新生成一条高质量中文${targetName}。
 
-【必须沿用的视频提示词格式】
-1. 第一段必须是「正面提示词 + 背景音乐风格」：
-   - 必须以「高清4K」「高清 4K」或「4K」开头。
-   - 包含电影级质感、画面稳定清晰、场景光影、人物描述、动作流畅、表情自然克制、生动但不夸张、无画面闪烁、无脸部崩坏、无肢体畸形。
-   - 多人物同镜时必须明确区分年龄段、性别、身形、气质、站位和朝向，镜头中不要出现形象、相貌一样的人。
-   - 如果当前分镜、角色资产、关键帧或前后帧存在参考图，参考图只作为外观一致性依据；禁止在视频提示词中体现或编造衣服颜色、头发颜色、发型形态、发长、卷直、刘海、扎发/披发等外观细节，也不要输出外观一致性的规则句；成品提示词只写年龄段、性别、身形、气质、站位、动作和方向关系。
-   - 必须包含「背景音乐为...，贯穿整段视频」。
-2. 后续必须是按时间轴的一段式自然镜头描述：
-   - 格式类似：00:00-00:04：平视中景固定镜......；随后镜头缓慢推近......；表情特写......；【对话】某人声音...语气...地说：「...」；背景音......
-   - 时间轴必须从 00:00 开始，递增覆盖当前分镜时长。
-   - 必须先按对白估时：真实对白、旁白、内心独白按「2~3 个汉字 = 1 秒」计算纯说话时长；时间轴不得短于对白纯说话时长，还要加上动作画面、停顿留白、运镜/转场和环境/空镜时长。
-   - 如果上下文 JSON 中有 durationSec，时间轴最后一段必须结束于 durationSec，所有时间段相加必须等于 durationSec；如果没有 durationSec，则按上述估时规则生成总时长。
-   - 如果按对白 + 动作 + 停顿 + 运镜 + 环境估算明显超过 20 秒，不能压缩对白；应只覆盖当前分镜能容纳的内容，并在提示词中保持本段动作完整。
-   - 每段必须包含自然运镜、人物站位、方向关系、动作、表情、背景音。
-   - 涉及动作、对话、对视、触碰、追逐、阻拦、递物等多人互动时，必须写清画面左/右、前/后、近/远、面对/背对、从哪一侧走向哪一侧。例如：「画面左侧年轻女子转头对右侧年轻女子说」「后方年轻女子上前半步，轻拍前方年轻女子右肩」。
-   - 运镜必须使用「视角/景别 + 运镜 + 画面内容」的自然电影语言。推荐：「平视中景固定镜」「越肩推镜，从人物肩后推进到对方正面」「轻微斜角近景，强化压迫感」。禁止：「镜头平视固定」「镜头越肩推进」「镜头斜角拍」。
-   - 同一句内不能运镜矛盾：固定镜不能同时推进/拉远/跟拍；如果需要先固定再推进，拆成两个连续小句。
-	   - 避免重复病句，例如不要写「面无表情表情冷峻」，应写「面无表情，神色冷峻，眼神冰冷」。
-	   - 有真实角色台词才写【对话】，并写清情绪、声音质感、语气和表情；没有台词时直接省略对话部分，禁止写「无台词」「暂无台词」等占位。
-	   - 如果原文是旁白、内心独白、画外音或叙述性文字，禁止标为【对话】，必须使用「【旁白】」标注，并写清旁白声音质感、语气和情绪。
-3. 运镜可从这些类型中选择并自然扩写：推镜、拉镜、摇镜、移镜、跟镜、固定镜、俯拍、仰拍、平视、斜角拍、环绕镜、俯冲、升降镜、甩镜、变焦镜、旋转镜、穿梭镜、平稳手持、颠簸手持。
-4. 背景音乐必须从这些类型中选择一种：紧张悬疑大片配乐、史诗恢弘交响乐、热血激昂战斗史诗、暗黑压抑氛围感配乐、悲壮苍凉电影原声、燃向高燃英雄主题曲、治愈温柔轻音乐、伤感催泪抒情纯音乐、宁静空灵古风禅意、神秘诡异悬疑氛围、低沉压抑阴暗曲风、轻快舒缓治愈小调、古风江湖侠义配乐、古风悲情婉转二胡、仙侠空灵仙乐、古装宫廷典雅乐、武侠对决紧张古风、烟雨江南温婉古风、硬核格斗打击乐、快节奏江湖对决 BGM、霸气出场气场音乐、急促鼓点战斗配乐、街头硬汉摇滚风、高级感氛围感纯音、低沉卡点节奏感音乐、温柔叙事旁白配乐、氛围感沉浸式背景音乐、极简冷淡风纯音乐、未来科技空灵电子乐、悬疑探案低沉音效、末日废土苍凉配乐、赛博朋克暗黑电音。
+  return `你是专业影视 AI 生视频提示词导演。根据上下文重新生成一条中文${targetName}，只输出最终正文。
 
-【禁止】
-- 禁止使用旧版五行格式「运镜：人物：动作：表情：台词：」。
-- 禁止出现圆圈数字编号符号，例如 ①②③。
-- 禁止写「主运镜」「辅助运镜」。
-- 禁止生硬拼接运镜词，例如「镜头平视固定」「镜头越肩推进」「镜头斜角拍」。
-- 禁止同一句内固定镜和运动镜头互相矛盾。
-- 禁止没有台词时写「【对话】无台词」或类似占位。
-- 禁止把旁白、内心独白、画外音写成【对话】。
-	- 禁止同一镜头内出现两个或多个形象、相貌几乎一样的人。
-	- 禁止多人动作/对话缺少方向关系，例如只写「她对她说」「拍了一下她」。
-	- 禁止体现或编造衣服颜色、头发颜色、发型形态、发长、卷直、刘海、扎发/披发等外观细节；有参考图时也不要写外观一致性的规则句，不允许用文字重新设计服装或头发。
-	- 禁止出现这些容易毁脸、怪异或夸张的表情动作词：瞪眼、瞪大双眼、怒目圆睁、怒视、凶狠瞪视、死鱼眼、无神大眼、眼睛超大、双眼过大、眼神呆滞、歪嘴、邪笑、怪笑、诡异笑容、嘴角夸张上扬、咬牙切齿、咬紧牙关、嘴唇紧闭用力、五官扭曲、面部紧绷、面部狰狞、脸部扭曲、表情扭曲、瞳孔放大、眼球突出、眼白过多、挑眉过度、挑眉凶狠、脸部僵硬、面无表情呆滞、怪异表情、夸张表情、惊悚表情、恐怖表情、畸形表情、不自然表情、歪头、扭头、头部大幅偏转、怪异肢体动作。
-	- 禁止输出解释、JSON、Markdown，只输出最终视频提示词正文。
+【统一结构】
+第一段以“高清4K”或“4K”开头，只写画质、当前环境、光线、视觉风格和背景音乐；不写具体人物、动作、表情、对白、旁白或运镜，不堆砌近义形容词，不写无闪烁/无崩脸/无畸形等负面词。结尾写“背景音乐为……，贯穿整段视频”。
 
-【当前视频提示词】
+第二部分使用连续时间轴，例如“00:00-00:04：……”。从 00:00 开始，结尾严格等于 durationSec；没有 durationSec 时按对白 2-3 个汉字约 1 秒，并加动作、停顿、运镜和环境时间，总时长不超过 20 秒。
+- 每段只写一个动作阶段、一个主要运镜、最多一次转场；固定镜可以单独使用。
+- 多人互动写清画面左/右、前/后、近/远、朝向和移动方向。
+- 角色首次出现写“年龄段+性别+角色名”，后续可写角色名。
+- 分镜未引用但必须提及的已有角色，只在对白外写“镜头外角色+角色名”；禁止把“镜头外角色”写进【对白】。
+- 对白必须嵌入实际发生的时间段，紧跟说话人的动作，统一写作“【对白】角色名：「原文台词」”；禁止在连续时间轴结束后单独输出对白或再次标注对白时间。
+- 时间轴格式示例：`00:00-00:03：平视中景固定镜，画面左侧年轻女子林晚转向右侧青年男性周明，低声说：【对白】林晚：「我明白了。」周明保持安静，目光落在林晚身上。`
+- 真正由画面角色说出的原文台词使用【对白】；没有台词就省略，禁止占位。
+- 旁白、内心独白、画外音使用【旁白】，并嵌入实际发生的时间段。每个【旁白】前必须写：“${NARRATION_VISUAL_GUARD}”
+- 同一时间段不得同时出现【对白】和【旁白】；旁白段禁止开口、说话、嘴唇翕动或对口型，优先背影、侧面、反应或环境画面。
+
+【镜头语言】
+景别、角度和运镜分开选择。基础运镜使用固定、摇镜、倾斜、推进、拉远、横移、跟拍、升降、环绕、变焦、焦点转移；平稳/颠簸手持、甩镜、旋转、俯冲、穿梭仅在剧情需要时使用。同一句禁止既固定又运动。
+
+【当前提示词】
 ${params.currentPrompt || '暂无'}
 
 【分镜上下文 JSON】
@@ -95,7 +82,7 @@ ${params.contextJson}
 【用户补充要求】
 ${params.additionalRequirement || '无'}
 
-请直接输出最终视频提示词。`
+直接输出最终视频提示词。`
 }
 
 export const POST = apiHandler(async (
@@ -122,28 +109,14 @@ export const POST = apiHandler(async (
 
   const panel = await prisma.novelPromotionPanel.findFirst({
     where: panelId
-      ? {
-          id: panelId,
-          storyboard: { episode: { novelPromotionProject: { projectId } } },
-        }
-      : {
-          storyboardId,
-          panelIndex,
-          storyboard: { episode: { novelPromotionProject: { projectId } } },
-    },
-    include: {
-      frames: { orderBy: { frameIndex: 'asc' } },
-    },
+      ? { id: panelId, storyboard: { episode: { novelPromotionProject: { projectId } } } }
+      : { storyboardId, panelIndex, storyboard: { episode: { novelPromotionProject: { projectId } } } },
+    include: { frames: { orderBy: { frameIndex: 'asc' } } },
   })
-
-  if (!panel) {
-    throw new ApiError('NOT_FOUND')
-  }
+  if (!panel) throw new ApiError('NOT_FOUND')
 
   const modelConfig = await getProjectModelConfig(projectId, session.user.id)
-  if (!modelConfig.analysisModel) {
-    throw new Error('请先在项目设置中配置分析模型')
-  }
+  if (!modelConfig.analysisModel) throw new Error('请先在项目设置中配置分析模型')
 
   const duration = panel.duration || panel.groupDurationSec || null
   const contextPayload = {
@@ -175,11 +148,10 @@ export const POST = apiHandler(async (
       referencePolicy: frame.referencePolicy,
     })),
   }
-  const currentPrompt = readCurrentPrompt(panel, field)
   const prompt = buildVideoPromptInstruction({
     field,
     additionalRequirement,
-    currentPrompt,
+    currentPrompt: readCurrentPrompt(panel, field),
     contextJson: JSON.stringify(contextPayload, null, 2),
   })
 
@@ -201,9 +173,7 @@ export const POST = apiHandler(async (
   })
 
   const videoPrompt = cleanVideoPromptText(res.text)
-  if (!videoPrompt) {
-    throw new ApiError('NO_RESULT', { message: '大模型没有返回有效视频提示词' })
-  }
+  if (!videoPrompt) throw new ApiError('NO_RESULT', { message: '大模型没有返回有效视频提示词' })
 
   return NextResponse.json({
     success: true,

@@ -11,8 +11,14 @@ interface VideoToolbarProps {
   failedCount: number
   isAnyTaskRunning: boolean
   queueModeEnabled?: boolean
+  firstLastFrameLinkableCount?: number
+  firstLastFrameUnlinkedCount?: number
+  firstLastFrameLinkedCount?: number
+  isBatchUpdatingFirstLastFrames?: boolean
   isDownloading: boolean
   onGenerateAll: () => void
+  onLinkAllFirstLastFrames?: () => void
+  onUnlinkAllFirstLastFrames?: () => void
   onDownloadAll: () => void
   onBack: () => void
   onEnterEditor?: () => void  // 进入剪辑器
@@ -26,8 +32,14 @@ export default function VideoToolbar({
   failedCount,
   isAnyTaskRunning,
   queueModeEnabled = false,
+  firstLastFrameLinkableCount = 0,
+  firstLastFrameUnlinkedCount = 0,
+  firstLastFrameLinkedCount = 0,
+  isBatchUpdatingFirstLastFrames = false,
   isDownloading,
   onGenerateAll,
+  onLinkAllFirstLastFrames,
+  onUnlinkAllFirstLastFrames,
   onDownloadAll,
   onBack,
   onEnterEditor,
@@ -50,9 +62,32 @@ export default function VideoToolbar({
       hasOutput: videosWithUrl > 0,
     })
     : null
+  const linkAllDisabled = !onLinkAllFirstLastFrames
+    || firstLastFrameUnlinkedCount <= 0
+    || isBatchUpdatingFirstLastFrames
+  const unlinkAllDisabled = !onUnlinkAllFirstLastFrames
+    || firstLastFrameLinkedCount <= 0
+    || isBatchUpdatingFirstLastFrames
+  const shouldLinkFirstLastFrames = firstLastFrameUnlinkedCount > 0
+  const firstLastFrameBatchAction = shouldLinkFirstLastFrames
+    ? onLinkAllFirstLastFrames
+    : onUnlinkAllFirstLastFrames
+  const firstLastFrameBatchDisabled = shouldLinkFirstLastFrames ? linkAllDisabled : unlinkAllDisabled
+  const firstLastFrameBatchTitle = firstLastFrameLinkableCount === 0
+    ? t('firstLastFrame.batchLinkNoPairs')
+    : shouldLinkFirstLastFrames
+      ? t('firstLastFrame.batchLinkTitle', { count: firstLastFrameUnlinkedCount })
+      : firstLastFrameLinkedCount === 0
+        ? t('firstLastFrame.batchUnlinkNone')
+        : t('firstLastFrame.batchUnlinkTitle', { count: firstLastFrameLinkedCount })
+  const firstLastFrameBatchLabel = isBatchUpdatingFirstLastFrames
+    ? t('firstLastFrame.batchUpdating')
+    : shouldLinkFirstLastFrames
+      ? t('firstLastFrame.batchLink', { count: firstLastFrameUnlinkedCount })
+      : t('firstLastFrame.batchUnlink', { count: firstLastFrameLinkedCount })
   return (
     <div className="glass-surface p-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
           <span className="text-sm font-semibold text-[var(--glass-text-secondary)]">
              {t('toolbar.title')}
@@ -70,7 +105,7 @@ export default function VideoToolbar({
             )}
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             onClick={onGenerateAll}
             disabled={isAnyTaskRunning && !queueModeEnabled}
@@ -85,6 +120,17 @@ export default function VideoToolbar({
               </>
             )}
           </button>
+          {(onLinkAllFirstLastFrames || onUnlinkAllFirstLastFrames) && (
+            <button
+              onClick={firstLastFrameBatchAction}
+              disabled={firstLastFrameBatchDisabled}
+              className="glass-btn-base glass-btn-secondary flex items-center gap-2 px-4 py-2 text-sm font-medium border border-[var(--glass-stroke-base)] disabled:opacity-50 disabled:cursor-not-allowed"
+              title={firstLastFrameBatchTitle}
+            >
+              <AppIcon name="link" className="w-4 h-4" />
+              <span>{firstLastFrameBatchLabel}</span>
+            </button>
+          )}
           <button
             onClick={onDownloadAll}
             disabled={videosWithUrl === 0 || isDownloading}

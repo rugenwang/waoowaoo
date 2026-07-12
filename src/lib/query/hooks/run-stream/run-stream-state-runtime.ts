@@ -206,6 +206,14 @@ export function useRunStreamState<TParams extends Record<string, unknown>>(
       throw new Error(errorMessage)
     }
 
+    const payloadRecord = payload && typeof payload === 'object'
+      ? (payload as Record<string, unknown>)
+      : null
+    const currentStep = runStateRef.current?.stepsById[stepId]
+    const retryAttempt = typeof payloadRecord?.retryAttempt === 'number' && Number.isFinite(payloadRecord.retryAttempt)
+      ? Math.max(1, Math.floor(payloadRecord.retryAttempt))
+      : Math.max(1, (currentStep?.attempt || 1) + 1)
+
     applyEvent({
       runId,
       event: 'run.start',
@@ -213,12 +221,28 @@ export function useRunStreamState<TParams extends Record<string, unknown>>(
       status: 'running',
       message: 'retrying failed step',
     })
+    applyEvent({
+      runId,
+      event: 'step.start',
+      ts: new Date().toISOString(),
+      status: 'running',
+      stepId,
+      stepAttempt: retryAttempt,
+      stepTitle: currentStep?.title || stepId,
+      stepIndex: currentStep?.stepIndex || 1,
+      stepTotal: currentStep?.stepTotal || 1,
+      dependsOn: currentStep?.dependsOn || [],
+      groupId: currentStep?.groupId || undefined,
+      parallelKey: currentStep?.parallelKey || undefined,
+      retryable: currentStep?.retryable,
+      message: '重试已提交，等待执行',
+    })
     setIsRecoveredRunning(true)
     return {
       runId,
       status: 'running',
       summary: null,
-      payload: payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null,
+      payload: payloadRecord,
       errorMessage: '',
     }
   }, [applyEvent])

@@ -26,6 +26,7 @@ import {
   buildPromptAssetContext,
   compileAssetPromptFragments,
 } from '@/lib/assets/services/asset-prompt-context'
+import { normalizeStoryboardVideoPrompts } from '@/lib/novel-promotion/storyboard-video-prompt-normalizer'
 
 type StoryboardClipInput = {
   id: string
@@ -516,15 +517,19 @@ export async function runScriptToStoryboardAtomicRetry(params: {
       },
       retryStepAttempt: params.retryStepAttempt,
     })
+    phase3Panels = normalizeStoryboardVideoPrompts(
+      phase3Panels,
+      params.novelPromotionData.characters || [],
+    )
     phase3PanelsByClipId[params.clip.id] = phase3Panels
   }
 
   if (params.retryTarget.phase !== 'phase1') {
-    const finalPanels = mergePanelsWithRules({
+    const finalPanels = normalizeStoryboardVideoPrompts(mergePanelsWithRules({
       finalPanels: requireRows(phase3Panels, 'storyboard.clip.phase3'),
       photographyRules: requireRows(phase2Cinematography, 'storyboard.clip.phase2.cine'),
       actingDirections: requireRows(phase2Acting, 'storyboard.clip.phase2.acting'),
-    })
+    }), params.novelPromotionData.characters || [])
     clipPanels.push({
       clipId: params.clip.id,
       clipIndex: params.clipIndex + 1,

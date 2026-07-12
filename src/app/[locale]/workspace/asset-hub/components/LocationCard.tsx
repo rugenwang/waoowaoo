@@ -23,6 +23,7 @@ import {
   countGeneratedImageSlots,
   resolveGroupedImageSlotPhase,
   resolveDisplayImageSlots,
+  shouldShowImageSlotGrid,
 } from '@/lib/image-generation/slot-state'
 import { AppIcon } from '@/components/ui/icons'
 import { AI_EDIT_BUTTON_CLASS, AI_EDIT_ICON_CLASS } from '@/components/ui/ai-edit-style'
@@ -99,6 +100,7 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
     try { new URL(url); return true } catch { return false }
   }
   const displayImageUrl = isValidUrl(currentImageUrl) ? currentImageUrl : null
+  const selectedImageHasUrl = effectiveSelectedIndex !== null && isValidUrl(selectedImage?.imageUrl)
   const serverTaskRunning = (location.images || []).some((image) => image.imageTaskRunning)
   const transientSubmitting = generateImage.isPending
   const runtimeTaskState = taskStateMap.getState('GlobalLocation', location.id)
@@ -121,7 +123,12 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
     requestedCount: generatedImageCount > 1 ? generatedImageCount : generationCount,
   })
   const displaySlotCount = displaySelectionImages.length
-  const hasMultipleImages = generatedImageCount > 1
+  const showSelectionMode = shouldShowImageSlotGrid({
+    totalSlotCount: displaySlotCount,
+    generatedCount: generatedImageCount,
+    hasRunningTask: isBusy,
+    hasAnyError: displaySelectionImages.some((img) => !!img.lastError || !!img.imageErrorMessage),
+  })
   const singleImageAspectClassName = assetType === 'prop' ? 'aspect-[3/2]' : 'aspect-square'
   const displayTaskPresentation = isBusy
     ? resolveTaskPresentationState({
@@ -243,7 +250,7 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
   }
 
   // 多图选择模式
-  if (displaySlotCount > 1) {
+  if (showSelectionMode) {
     const selectionStatusText = isBusy || generatedImageCount < displaySlotCount
       ? tAssets('image.generatedProgress', { generated: generatedImageCount, total: displaySlotCount })
       : effectiveSelectedIndex !== null
@@ -300,6 +307,9 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
               ariaLabel={tAssets('image.regenCountPrefix')}
               className="inline-flex h-6 items-center justify-center gap-1 rounded-md px-1.5 hover:bg-[var(--glass-tone-info-bg)] transition-colors disabled:opacity-50"
             />
+            <button onClick={() => fileInputRef.current?.click()} disabled={uploadImage.isPending || isBusy} className="glass-btn-base glass-btn-soft h-6 w-6 rounded-md" title={tAssets('image.upload')}>
+              <AppIcon name="upload" className="w-4 h-4 text-[var(--glass-tone-success-fg)]" />
+            </button>
             {hasPreviousVersion && (
               <button onClick={handleUndo} className="glass-btn-base glass-btn-soft h-6 w-6 rounded-md" title={tAssets('image.undo')}>
                 <AppIcon name="sparkles" className="w-4 h-4 text-[var(--glass-tone-warning-fg)]" />
@@ -322,7 +332,8 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
         {/* 图片列表 */}
         <div className="grid grid-cols-3 gap-3">
           {displaySelectionImages.map((img) => {
-            const isThisSelected = img.isSelected
+            const hasImage = !!img.imageUrl
+            const isThisSelected = hasImage && img.isSelected
             const hasPendingEmptySlots = isBusy && generatedImageCount < displaySlotCount
             const slotTaskRunning = hasPendingEmptySlots
               ? !img.imageUrl && isBusy
@@ -347,7 +358,7 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
                       onImageClick?.(img.imageUrl)
                     }
                   }}
-                  className={`rounded-lg overflow-hidden border-2 transition-all ${img.imageUrl ? 'cursor-zoom-in' : 'cursor-default'} ${isThisSelected ? 'border-[var(--glass-stroke-success)] ring-2 ring-[var(--glass-success-ring)]' : 'border-[var(--glass-stroke-base)] hover:border-[var(--glass-stroke-focus)]'}`}
+                  className={`rounded-lg overflow-hidden border-2 transition-all ${hasImage ? 'cursor-zoom-in' : 'cursor-default'} ${isThisSelected ? 'border-[var(--glass-stroke-success)] ring-2 ring-[var(--glass-success-ring)]' : 'border-[var(--glass-stroke-base)] hover:border-[var(--glass-stroke-focus)]'}`}
                 >
                   {img.imageUrl ? (
                     <MediaImageWithLoading
@@ -381,25 +392,27 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
                     {tAssets('image.optionNumber', { number: img.imageIndex + 1 })}
                   </div>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    // 允许在“组任务仍在跑”的情况下先选中已生成的图片，避免 taskState 卡住导致必须重开页面才能点选
-                    if (!img.imageUrl || slotTaskRunning) return
-                    handleSelectImage(isThisSelected ? null : img.imageIndex)
-                  }}
-                  disabled={!img.imageUrl || slotTaskRunning}
-                  className={`absolute top-2 right-2 glass-btn-base h-7 w-7 rounded-full ${isThisSelected ? 'glass-btn-tone-success' : 'glass-btn-secondary'} disabled:opacity-50`}
-                >
-                  <AppIcon name="check" className="w-4 h-4" />
-                </button>
+                {hasImage && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      // 允许在“组任务仍在跑”的情况下先选中已生成的图片，避免 taskState 卡住导致必须重开页面才能点选
+                      if (slotTaskRunning) return
+                      handleSelectImage(isThisSelected ? null : img.imageIndex)
+                    }}
+                    disabled={slotTaskRunning}
+                    className={`absolute top-2 right-2 glass-btn-base h-7 w-7 rounded-full ${isThisSelected ? 'glass-btn-tone-success' : 'glass-btn-secondary'} disabled:opacity-50`}
+                  >
+                    <AppIcon name="check" className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             )
           })}
         </div>
 
         {/* 确认按钮 */}
-        {effectiveSelectedIndex !== null && (
+        {selectedImageHasUrl && (
           <div className="mt-4 flex justify-end">
             <button onClick={handleConfirmSelection} disabled={selectImage.isPending} className="glass-btn-base glass-btn-tone-success px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
               {selectImage.isPending ? (
@@ -472,6 +485,11 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
         ) : (
             <div className="flex h-full flex-col items-center justify-center px-4 py-6 text-[var(--glass-text-tertiary)]">
                 <AppIcon name="image" className="w-12 h-12 mb-3" />
+            {taskErrorDisplay && !isBusy && (
+              <div className="mb-3 max-w-full text-center text-xs font-medium text-[var(--glass-tone-danger-fg)] line-clamp-3">
+                {taskErrorDisplay.message}
+              </div>
+            )}
             <ImageGenerationInlineCountButton
               prefix={<span>{tAssets('image.generateCountPrefix')}</span>}
               suffix={<span>{tAssets('image.generateCountSuffix')}</span>}
@@ -483,6 +501,10 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
               className="glass-btn-base glass-btn-primary flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg"
               selectClassName="appearance-none bg-transparent border-0 pl-0 pr-3 text-sm font-semibold text-current outline-none cursor-pointer leading-none transition-colors"
             />
+            <button onClick={() => fileInputRef.current?.click()} disabled={uploadImage.isPending} className="glass-btn-base glass-btn-secondary mt-2 flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg">
+              <AppIcon name="upload" className="w-4 h-4 text-[var(--glass-tone-success-fg)]" />
+              {tAssets('image.upload')}
+            </button>
           </div>
         )}
         {/* 执行中：显示进度遮罩；待生成：显示“待生成”角标（不盖全屏遮罩） */}
@@ -505,7 +527,7 @@ export function LocationCard({ location, assetType = 'location', onImageClick, o
             <AppIcon name="close" className="w-4 h-4" />
           </button>
         )}
-        {taskErrorDisplay && !isBusy && (
+        {taskErrorDisplay && !isBusy && displayImageUrl && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--glass-danger-ring)] text-[var(--glass-tone-danger-fg)] p-3 gap-1">
             <AppIcon name="alert" className="w-6 h-6" />
             <span className="text-xs text-center font-medium line-clamp-3">{taskErrorDisplay.message}</span>

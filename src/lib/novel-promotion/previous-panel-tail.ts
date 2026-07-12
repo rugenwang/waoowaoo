@@ -5,6 +5,7 @@ interface PreviousTailPanel {
   id: string
   panelIndex: number
   panelMode: string | null
+  location: string | null
   imageUrl: string | null
   imageMedia: {
     storageKey: string | null
@@ -52,6 +53,7 @@ export async function loadPreviousPanelTailImageInfo(params: {
   imageUrl: string | null
   previousPanelId: string | null
   previousPanelExists: boolean
+  previousPanelLocation: string | null
 }> {
   const currentPanel = await prisma.novelPromotionPanel.findFirst({
     where: {
@@ -73,6 +75,7 @@ export async function loadPreviousPanelTailImageInfo(params: {
       imageUrl: null,
       previousPanelId: null,
       previousPanelExists: false,
+      previousPanelLocation: null,
     }
   }
 
@@ -86,6 +89,7 @@ export async function loadPreviousPanelTailImageInfo(params: {
       id: true,
       panelIndex: true,
       panelMode: true,
+      location: true,
       imageUrl: true,
       imageMedia: {
         select: {
@@ -125,6 +129,7 @@ export async function loadPreviousPanelTailImageInfo(params: {
       imageUrl: null,
       previousPanelId: null,
       previousPanelExists: false,
+      previousPanelLocation: null,
     }
   }
 
@@ -133,5 +138,6 @@ export async function loadPreviousPanelTailImageInfo(params: {
     imageUrl: resolvePreviousPanelTailImageUrl(previousPanel),
     previousPanelId: previousPanel.id,
     previousPanelExists: true,
+    previousPanelLocation: previousPanel.location,
   }
 }

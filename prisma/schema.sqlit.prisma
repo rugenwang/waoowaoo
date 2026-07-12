@@ -304,6 +304,8 @@ model NovelPromotionProject {
   progressPopupEnabled Boolean @default(false)
   // 分镜生成时尽量把每个分镜组控制到指定秒数；null/0 表示不强制
   forcedStoryboardDurationSec Int?
+  // 本地 local 视频模型（wo -> ltx）LoRA 列表 JSON：[{ path, weight }]，按数组顺序加载
+  localVideoLoras String?                 @db.Text
   editModel       String? // 用户配置的修图/编辑模型
   videoResolution String                    @default("720p")
   capabilityOverrides String?

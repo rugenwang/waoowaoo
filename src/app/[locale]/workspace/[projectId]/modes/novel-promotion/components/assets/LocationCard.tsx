@@ -19,7 +19,11 @@ import LocationImageList from './location-card/LocationImageList'
 import LocationCardActions from './location-card/LocationCardActions'
 import { getImageGenerationCountOptions } from '@/lib/image-generation/count'
 import { useImageGenerationCount } from '@/lib/image-generation/use-image-generation-count'
-import { countGeneratedImageSlots, resolveDisplayImageSlots } from '@/lib/image-generation/slot-state'
+import {
+  countGeneratedImageSlots,
+  resolveDisplayImageSlots,
+  shouldShowImageSlotGrid,
+} from '@/lib/image-generation/slot-state'
 import { AppIcon } from '@/components/ui/icons'
 import { AI_EDIT_BUTTON_CLASS, AI_EDIT_ICON_CLASS } from '@/components/ui/ai-edit-style'
 import AISparklesIcon from '@/components/ui/icons/AISparklesIcon'
@@ -126,6 +130,7 @@ export default function LocationCard({
     ? orderedImages.find((img) => img.id === location.selectedImageId)
     : orderedImages.find((img) => img.isSelected)
   const selectedIndex = selectedImage?.imageIndex ?? null
+  const selectedImageHasUrl = !!selectedImage?.imageUrl
 
   // 当前显示的图片及其 imageIndex
   const currentImageUrl = selectedImage?.imageUrl || imagesWithUrl[0]?.imageUrl || null
@@ -238,20 +243,26 @@ export default function LocationCard({
     hasRunningTask: isTaskRunning,
     requestedCount: generatedImageCount > 1 ? generatedImageCount : generationCount,
   })
+  const hasSelectableImage = displaySelectionImages.some((img) => !!img.imageUrl)
   const displaySlotCount = displaySelectionImages.length
   const hasMultipleImages = generatedImageCount > 1
 
   // 检查是否有历史版本（用于撤回功能）
   const hasPreviousVersion = location.images?.some(img => img.previousImageUrl) || false
 
-  const showSelectionMode = displaySlotCount > 1
+  const showSelectionMode = shouldShowImageSlotGrid({
+    totalSlotCount: displaySlotCount,
+    generatedCount: generatedImageCount,
+    hasRunningTask: isTaskRunning,
+    hasAnyError: displaySelectionImages.some((img) => !!img.lastError || !!img.imageErrorMessage),
+  })
   const singleImageAspectClassName = assetType === 'prop' ? 'aspect-[3/2]' : 'aspect-square'
 
   // 选择模式：显示名字在上，三张图片在下
   if (showSelectionMode) {
     const selectionStatusText = isTaskRunning || generatedImageCount < displaySlotCount
       ? t('image.generatedProgress', { generated: generatedImageCount, total: displaySlotCount })
-      : selectedIndex !== null
+      : selectedImageHasUrl && selectedIndex !== null
         ? t('image.optionSelected', { number: selectedIndex + 1 })
         : t('image.selectFirst')
 
@@ -313,7 +324,7 @@ export default function LocationCard({
           mode="selection"
           locationName={location.name}
           summary={location.summary}
-          selectedIndex={selectedIndex}
+          selectedIndex={selectedImageHasUrl ? selectedIndex : null}
           statusText={selectionStatusText}
           actions={selectionHeaderActions}
         />
@@ -324,7 +335,7 @@ export default function LocationCard({
           locationName={location.name}
           images={displaySelectionImages}
           selectedImageId={location.selectedImageId}
-          selectedIndex={selectedIndex}
+          selectedIndex={selectedImageHasUrl ? selectedIndex : null}
           isGroupTaskRunning={isGroupTaskRunning}
           isImageTaskRunning={isImageTaskRunning}
           displayTaskPresentation={displayTaskPresentation}
@@ -335,9 +346,11 @@ export default function LocationCard({
         <LocationCardActions
           mode="selection"
           selectedIndex={selectedIndex}
+          selectedImageHasUrl={selectedImageHasUrl}
+          hasSelectableImage={hasSelectableImage}
           isConfirmingSelection={isConfirmingSelection}
           confirmingSelectionState={confirmingSelectionState}
-          onConfirmSelection={selectedIndex !== null && onConfirmSelection
+          onConfirmSelection={selectedImageHasUrl && selectedIndex !== null && onConfirmSelection
             ? () => {
               setIsConfirmingSelection(true)
               void Promise.resolve(onConfirmSelection(location.id)).finally(() => {

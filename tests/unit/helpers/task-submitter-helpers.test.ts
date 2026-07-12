@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { TASK_TYPE } from '@/lib/task/types'
 import { getTaskFlowMeta } from '@/lib/llm-observe/stage-pipeline'
-import { isActiveTaskStatus, normalizeTaskPayload, shouldAttachNewTaskToReusableRun } from '@/lib/task/submitter'
+import {
+  isActiveTaskStatus,
+  normalizeTaskPayload,
+  shouldAttachNewTaskToReusableRun,
+  shouldDedupeReusableRunTask,
+} from '@/lib/task/submitter'
 
 describe('task submitter helpers', () => {
   it('fills default flow metadata when payload misses flow fields', () => {
@@ -65,5 +70,16 @@ describe('task submitter helpers', () => {
     expect(shouldAttachNewTaskToReusableRun('processing')).toBe(false)
     expect(shouldAttachNewTaskToReusableRun('failed')).toBe(true)
     expect(shouldAttachNewTaskToReusableRun(null)).toBe(true)
+  })
+
+  it('does not dedupe explicit failed-step retries against a stale active task', () => {
+    expect(shouldDedupeReusableRunTask('processing', {
+      episodeId: 'episode-1',
+    })).toBe(true)
+    expect(shouldDedupeReusableRunTask('processing', {
+      runId: 'run-1',
+      retryStepKey: 'clip_clip-1_phase3_detail',
+      retryStepAttempt: 2,
+    })).toBe(false)
   })
 })

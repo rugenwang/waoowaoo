@@ -97,5 +97,12 @@ describe('image slot state', () => {
       hasRunningTask: false,
       hasAnyError: false,
     })).toBe(true)
+
+    expect(shouldShowImageSlotGrid({
+      totalSlotCount: 3,
+      generatedCount: 0,
+      hasRunningTask: false,
+      hasAnyError: true,
+    })).toBe(false)
   })
 })

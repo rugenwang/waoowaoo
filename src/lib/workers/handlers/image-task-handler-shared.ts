@@ -27,6 +27,29 @@ interface CharacterLike {
   appearances?: CharacterAppearanceLike[]
 }
 
+const DEFAULT_APPEARANCE_NAMES = new Set(['初始形象', '默认形象', 'default', 'initial'])
+
+export function selectCharacterAppearance<T extends { changeReason?: string | null }>(
+  characterName: string,
+  appearances: T[],
+  requestedAppearance?: string | null,
+): T | undefined {
+  const requested = String(requestedAppearance || '').trim()
+  if (!requested || DEFAULT_APPEARANCE_NAMES.has(requested.toLowerCase())) return appearances[0]
+
+  const matched = appearances.find(
+    (appearance) => String(appearance.changeReason || '').trim().toLowerCase() === requested.toLowerCase(),
+  )
+  if (matched) return matched
+
+  const available = appearances
+    .map((appearance) => String(appearance.changeReason || '').trim())
+    .filter(Boolean)
+  throw new Error(
+    `角色“${characterName}”没有形象“${requested}”${available.length > 0 ? `，可用形象：${available.join('、')}` : ''}`,
+  )
+}
+
 interface LocationImageLike {
   description?: string | null
   availableSlots?: string | null
@@ -304,11 +327,7 @@ export async function collectPanelReferenceImageEntries(
     if (!character) continue
 
     const appearances = character.appearances || []
-    let appearance = appearances[0]
-    if (item.appearance) {
-      const matched = appearances.find((a) => (a.changeReason || '').toLowerCase() === item.appearance!.toLowerCase())
-      if (matched) appearance = matched
-    }
+    const appearance = selectCharacterAppearance(item.name, appearances, item.appearance)
 
     if (!appearance) continue
 

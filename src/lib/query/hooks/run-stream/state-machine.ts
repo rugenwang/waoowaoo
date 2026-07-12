@@ -366,7 +366,9 @@ export function applyRunStreamEvent(prev: RunState | null, event: RunStreamEvent
 
   if (incomingAttempt > step.attempt) {
     resetStepForRetry(step, incomingAttempt)
+    base.status = 'running'
     base.errorMessage = ''
+    base.terminalAt = null
   }
 
   step.updatedAt = now

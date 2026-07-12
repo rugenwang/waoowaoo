@@ -126,15 +126,22 @@ export default function WorkspaceRunStreamConsoles({
     stream: RunStreamState,
     stepId: string,
   ) => {
-    const input = typeof window !== 'undefined'
-      ? window.prompt('可选：输入重试模型（留空使用当前模型）')
-      : null
-    const modelOverride = typeof input === 'string' ? input.trim() : ''
-    await stream.retryStep({
-      stepId,
-      modelOverride: modelOverride || undefined,
-      reason: 'user_retry_from_console',
-    })
+    try {
+      const input = typeof window !== 'undefined'
+        ? window.prompt('可选：输入重试模型（留空使用当前模型）')
+        : null
+      const modelOverride = typeof input === 'string' ? input.trim() : ''
+      await stream.retryStep({
+        stepId,
+        modelOverride: modelOverride || undefined,
+        reason: 'user_retry_from_console',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (typeof window !== 'undefined') {
+        window.alert(`重试失败：${message}`)
+      }
+    }
   }
 
   return (

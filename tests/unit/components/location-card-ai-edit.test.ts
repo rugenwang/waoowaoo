@@ -6,7 +6,9 @@ import { NextIntlClientProvider } from 'next-intl'
 import type { AbstractIntlMessages } from 'next-intl'
 import { AI_EDIT_BUTTON_CLASS } from '@/components/ui/ai-edit-style'
 
-const locationImageListMock = vi.hoisted(() => vi.fn((props: { overlayActions?: React.ReactNode }) => createElement('div', null, props.overlayActions ?? null)))
+const locationImageListMock = vi.hoisted(() => vi.fn((props: { mode?: string; overlayActions?: React.ReactNode }) => (
+  createElement('div', { 'data-location-image-list-mode': props.mode }, props.overlayActions ?? null)
+)))
 const uploadMutationMock = vi.hoisted(() => ({
   isPending: false,
   mutate: vi.fn(),
@@ -14,6 +16,19 @@ const uploadMutationMock = vi.hoisted(() => ({
 
 vi.mock('@/lib/query/mutations', () => ({
   useUploadProjectLocationImage: () => uploadMutationMock,
+  useCancelTask: () => ({ isPending: false, mutate: vi.fn() }),
+}))
+
+vi.mock('@/lib/query/hooks/useTaskTargetStateMap', () => ({
+  useTaskTargetStateMap: () => ({
+    getState: () => null,
+  }),
+}))
+
+vi.mock('@/lib/task-queue', () => ({
+  useTaskQueue: () => ({
+    queue: [],
+  }),
 }))
 
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/assets/location-card/LocationCardHeader', () => ({
@@ -183,5 +198,73 @@ describe('LocationCard AI edit button', () => {
 
     const firstCall = locationImageListMock.mock.calls[0]?.[0] as { aspectClassName?: string } | undefined
     expect(firstCall?.aspectClassName).toBe('aspect-square')
+  })
+
+  it('falls back to single failed-image mode with upload when all generated options failed', async () => {
+    locationImageListMock.mockClear()
+    Reflect.set(globalThis, 'React', React)
+    const { default: LocationCard } = await import('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/assets/LocationCard')
+    const html = renderToStaticMarkup(
+      createElement(
+        TestIntlProvider,
+        {
+          locale: 'zh',
+          messages: messages as unknown as AbstractIntlMessages,
+          timeZone: 'Asia/Shanghai',
+        },
+        createElement(LocationCard, {
+          location: {
+            id: 'location-failed',
+            name: '冷殿_晨',
+            summary: '姜璃感应同心玉异动',
+            selectedImageId: 'failed-1',
+            images: [
+              {
+                id: 'failed-1',
+                imageIndex: 0,
+                description: '方案1',
+                imageUrl: null,
+                previousImageUrl: null,
+                previousDescription: null,
+                isSelected: true,
+                lastError: { code: 'GENERATION_FAILED', message: 'failed' },
+              },
+              {
+                id: 'failed-2',
+                imageIndex: 1,
+                description: '方案2',
+                imageUrl: null,
+                previousImageUrl: null,
+                previousDescription: null,
+                isSelected: false,
+                lastError: { code: 'GENERATION_FAILED', message: 'failed' },
+              },
+              {
+                id: 'failed-3',
+                imageIndex: 2,
+                description: '方案3',
+                imageUrl: null,
+                previousImageUrl: null,
+                previousDescription: null,
+                isSelected: false,
+                lastError: { code: 'GENERATION_FAILED', message: 'failed' },
+              },
+            ],
+          },
+          assetType: 'location',
+          onEdit: () => undefined,
+          onDelete: () => undefined,
+          onRegenerate: () => undefined,
+          onGenerate: () => undefined,
+          onImageClick: () => undefined,
+          onImageEdit: () => undefined,
+          projectId: 'project-1',
+        }),
+      ),
+    )
+
+    const firstCall = locationImageListMock.mock.calls[0]?.[0] as { mode?: string } | undefined
+    expect(firstCall?.mode).toBe('single')
+    expect(html).toContain('title="上传图片"')
   })
 })

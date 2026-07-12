@@ -13,7 +13,7 @@ import { WorkspaceStageRuntimeProvider } from './WorkspaceStageRuntimeContext'
 import { useNovelPromotionWorkspaceController } from './hooks/useNovelPromotionWorkspaceController'
 import type { NovelPromotionWorkspaceProps } from './types'
 import { TaskQueueProvider } from '@/lib/task-queue'
-import { parseModelKeyStrict } from '@/lib/model-config-contract'
+import { shouldAllowParallelStoryboardVideo } from '@/lib/task-queue/model-policy'
 import QueueProgressPopup from '@/components/task/QueueProgressPopup'
 import '@/styles/animations.css'
 
@@ -76,10 +76,10 @@ function NovelPromotionWorkspaceContent(props: NovelPromotionWorkspaceProps) {
     return <div className="text-center text-(--glass-text-secondary)">{vm.i18n.tc('loading')}</div>
   }
 
-  const storyboardModelProvider = parseModelKeyStrict(vm.project.storyboardModel)?.provider || null
-  const videoModelProvider = parseModelKeyStrict(vm.project.videoModel)?.provider || null
-  const allowParallelStoryboardVideo =
-    !(storyboardModelProvider === 'local' && videoModelProvider === 'local')
+  const allowParallelStoryboardVideo = shouldAllowParallelStoryboardVideo({
+    storyboardModel: vm.project.storyboardModel,
+    videoModel: vm.project.videoModel,
+  })
 
   return (
     <TaskQueueProvider
@@ -123,6 +123,7 @@ function NovelPromotionWorkspaceContent(props: NovelPromotionWorkspaceProps) {
           localStoryboardUsePanelDescriptionEnabled={vm.project.localStoryboardUsePanelDescriptionEnabled}
           progressPopupEnabled={vm.project.progressPopupEnabled}
           forcedStoryboardDurationSec={vm.project.forcedStoryboardDurationSec}
+          localVideoLoras={vm.project.localVideoLoras}
           onUpdateConfig={vm.actions.handleUpdateConfig}
           globalAssetText={vm.project.globalAssetText}
           projectName={project.name}

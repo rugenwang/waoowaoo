@@ -784,8 +784,14 @@ export async function resolveVideoSourceFromGeneration(
     runtimeSelections,
   })
 
+  const parsedModel = parseModelKeyStrict(params.modelId)
   const providerCapabilityOptions: Record<string, unknown> = { ...capabilityOptions }
   delete providerCapabilityOptions.generationMode
+  if (parsedModel?.provider === 'local') {
+    const projectConfig = await getProjectModelConfig(job.data.projectId, params.userId)
+    providerCapabilityOptions.loraPaths = projectConfig.localVideoLoras
+  }
+
   const providerRequestOptions: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(params.options || {})) {
     if (key === 'generationMode' || value === undefined) continue
@@ -793,7 +799,6 @@ export async function resolveVideoSourceFromGeneration(
   }
 
   // 控制台可视化：记录请求参数/提示词（脱敏）
-  const parsedModel = parseModelKeyStrict(params.modelId)
   await publishTaskStreamEvent({
     taskId: job.data.taskId,
     projectId: job.data.projectId,

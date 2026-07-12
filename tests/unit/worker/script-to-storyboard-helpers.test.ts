@@ -2,7 +2,31 @@ import { describe, expect, it } from 'vitest'
 import {
   buildPanelFramePersistence,
   cleanPanelDescriptionText,
+  shouldDefaultUsePreviousPanelTail,
 } from '@/lib/workers/handlers/script-to-storyboard-helpers'
+
+describe('shouldDefaultUsePreviousPanelTail', () => {
+  it('同场景且共享角色时自动承接上一尾帧', () => {
+    expect(shouldDefaultUsePreviousPanelTail(
+      { location: '书房', characters: [{ name: '林晚' }] },
+      { location: '书房', characters: [{ name: '林晚' }, { name: '周明' }] },
+    )).toBe(true)
+  })
+
+  it('同场景但人物完全无关时不自动承接', () => {
+    expect(shouldDefaultUsePreviousPanelTail(
+      { location: '书房', characters: [{ name: '林晚' }] },
+      { location: '书房', characters: [{ name: '周明' }] },
+    )).toBe(false)
+  })
+
+  it('同场景且两边都无人时允许承接环境', () => {
+    expect(shouldDefaultUsePreviousPanelTail(
+      { location: '书房', characters: [] },
+      { location: '书房', characters: [] },
+    )).toBe(true)
+  })
+})
 
 describe('buildPanelFramePersistence', () => {
   it('为旧格式分镜补一个单关键帧', () => {
@@ -22,7 +46,7 @@ describe('buildPanelFramePersistence', () => {
       frameIndex: 0,
       frameTimeSec: 0,
       frameRole: 'hero',
-      imagePrompt: '无额外输入参考图；当前画面：年轻女子坐在书桌前打开电脑',
+      imagePrompt: '年轻女子坐在书桌前打开电脑',
       generationStatus: 'pending',
     })
   })
@@ -66,7 +90,8 @@ describe('buildPanelFramePersistence', () => {
     expect(result.frames.map((frame) => frame.frameTimeSec)).toEqual([0, 12.4])
     expect(result.frames[1]?.dependencyFrameIds).toBe('[0]')
     expect(result.frames[1]?.referencePolicy).toContain('保持少年服饰一致')
-    expect(result.frames[1]?.imagePrompt).toContain('参考图F1为分镜组已生成关键帧 F1')
+    expect(result.frames[1]?.imagePrompt).toBe('少年站在窗边回头')
+    expect(result.frames[1]?.referencePolicy).toContain('分镜组第 1 关键帧')
   })
 
   it('AI 初始规划里的 FP 不落库，上一尾帧只允许用户显式链接后写入', () => {
@@ -91,11 +116,11 @@ describe('buildPanelFramePersistence', () => {
     })
 
     expect(result.frames[0]?.dependencyFrameIds).toBeNull()
-    expect(result.frames[0]?.imagePrompt).toBe('参考图F1为当前分镜场景图：办公室，参考图F2为角色图：林晚 · 初始形象；当前画面：林晚站在门口准备回应')
+    expect(result.frames[0]?.imagePrompt).toBe('林晚站在门口准备回应')
     expect(result.frames[0]?.referencePolicy).not.toContain('上一分镜尾帧')
   })
 
-  it('AI 初始规划里已经写进 image_prompt 的 FP 参考说明也会被重建', () => {
+  it('AI 初始规划里写进 image_prompt 的参考说明会被彻底移除', () => {
     const result = buildPanelFramePersistence({
       panel_number: 4,
       panel_mode: 'single',
@@ -113,7 +138,7 @@ describe('buildPanelFramePersistence', () => {
     })
 
     expect(result.frames[0]?.dependencyFrameIds).toBeNull()
-    expect(result.frames[0]?.imagePrompt).toBe('参考图F1为当前分镜场景图：办公室，参考图F2为角色图：林晚 · 初始形象；当前画面：年轻女子林晚走到办公桌旁。')
+    expect(result.frames[0]?.imagePrompt).toBe('年轻女子林晚走到办公桌旁。')
   })
 })
 

@@ -3,13 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { serializeStructuredJsonField } from '@/lib/novel-promotion/panel-ai-data-sync'
-import {
-  parsePanelFrameDependencyPlan,
-  serializePanelFrameDependencyPlan,
-} from '@/lib/novel-promotion/panel-tail-reference'
-
-const PREVIOUS_TAIL_PROMPT_MARKER = '【已链接上一分镜尾帧 FP】'
-const PREVIOUS_TAIL_PROMPT_META_KEY = 'previousTailPrompt'
+import { rebuildPanelFrameReferencePrompts } from '@/lib/novel-promotion/panel-frame-reference-prompts'
 
 function parseNullableNumberField(value: unknown): number | null {
   if (value === null || value === '') return null
@@ -44,138 +38,6 @@ function parseOptionalBooleanField(value: unknown): boolean | undefined {
   if (value === undefined) return undefined
   if (typeof value === 'boolean') return value
   throw new ApiError('INVALID_PARAMS')
-}
-
-async function clearPreviousTailDependenciesForPanel(panelId: string) {
-  const frames = await prisma.novelPromotionPanelFrame.findMany({
-    where: { panelId },
-    select: {
-      id: true,
-      dependencyFrameIds: true,
-    },
-  })
-
-  await Promise.all(frames.map(async (frame) => {
-    const plan = parsePanelFrameDependencyPlan(frame.dependencyFrameIds)
-    if (!plan.previousTail) return
-    await prisma.novelPromotionPanelFrame.update({
-      where: { id: frame.id },
-      data: {
-        dependencyFrameIds: serializePanelFrameDependencyPlan({
-          frameIndexes: plan.frameIndexes,
-          previousTail: false,
-        }),
-      },
-    })
-  }))
-}
-
-function parsePromptJsonObject(raw: string | null | undefined): Record<string, unknown> {
-  if (!raw) return {}
-  try {
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {}
-  } catch {
-    return {}
-  }
-}
-
-function stringifyPromptJsonObject(value: Record<string, unknown>): string | null {
-  return Object.keys(value).length > 0 ? JSON.stringify(value) : null
-}
-
-function stripPreviousTailVisiblePrompt(value: string | null | undefined): string {
-  const text = typeof value === 'string' ? value.trim() : ''
-  if (!text.startsWith(PREVIOUS_TAIL_PROMPT_MARKER)) return text
-  return text
-    .slice(PREVIOUS_TAIL_PROMPT_MARKER.length)
-    .replace(/^\s*本帧需要参考上一分镜尾帧[\s\S]*?当前分镜描述：\s*/u, '')
-    .trim()
-}
-
-function buildPreviousTailVisiblePrompt(basePrompt: string): string {
-  const cleanBase = stripPreviousTailVisiblePrompt(basePrompt)
-  return [
-    PREVIOUS_TAIL_PROMPT_MARKER,
-    '本帧需要参考上一分镜尾帧，作为当前分镜的开场状态；承接上一帧的人物位置、排布顺序、相对间距、场景空间、光线方向、服饰和道具状态。允许站姿和动作变化，但不能改变人物身份和环境结构。',
-    '',
-    '当前分镜描述：',
-    cleanBase || '请根据当前分镜剧情生成开场状态画面。',
-  ].join('\n')
-}
-
-async function syncFirstFramePreviousTailPrompt(panelId: string, enabled: boolean) {
-  const panel = await prisma.novelPromotionPanel.findUnique({
-    where: { id: panelId },
-    include: {
-      frames: { orderBy: { frameIndex: 'asc' } },
-    },
-  })
-  if (!panel) return
-
-  const firstFrame = panel.frames[0] || await prisma.novelPromotionPanelFrame.create({
-    data: {
-      panelId: panel.id,
-      frameIndex: 0,
-      frameTimeSec: 0,
-      frameRole: 'hero',
-      dependencyFrameIds: serializePanelFrameDependencyPlan({
-        previousTail: false,
-        frameIndexes: [],
-      }),
-      imagePrompt: panel.imagePrompt || panel.description || null,
-      videoPrompt: panel.videoPrompt || panel.groupVideoPrompt || null,
-      imageUrl: panel.imageUrl || null,
-      imageMediaId: panel.imageMediaId || null,
-      generationStatus: panel.imageUrl || panel.imageMediaId ? 'completed' : null,
-    },
-  })
-  const promptJson = parsePromptJsonObject(firstFrame.promptJson)
-  const savedPromptMeta = promptJson[PREVIOUS_TAIL_PROMPT_META_KEY]
-  const savedBasePrompt = savedPromptMeta
-    && typeof savedPromptMeta === 'object'
-    && !Array.isArray(savedPromptMeta)
-    && typeof (savedPromptMeta as { baseImagePrompt?: unknown }).baseImagePrompt === 'string'
-    ? (savedPromptMeta as { baseImagePrompt: string }).baseImagePrompt
-    : null
-  const currentBasePrompt = savedBasePrompt || stripPreviousTailVisiblePrompt(
-    firstFrame.imagePrompt || panel.imagePrompt || panel.description || '',
-  )
-  const currentDependencyPlan = parsePanelFrameDependencyPlan(firstFrame.dependencyFrameIds)
-
-  if (enabled) {
-    promptJson[PREVIOUS_TAIL_PROMPT_META_KEY] = {
-      baseImagePrompt: currentBasePrompt,
-      updatedAt: new Date().toISOString(),
-    }
-    await prisma.novelPromotionPanelFrame.update({
-      where: { id: firstFrame.id },
-      data: {
-        dependencyFrameIds: serializePanelFrameDependencyPlan({
-          previousTail: true,
-          frameIndexes: currentDependencyPlan.frameIndexes,
-        }),
-        imagePrompt: buildPreviousTailVisiblePrompt(currentBasePrompt),
-        promptJson: stringifyPromptJsonObject(promptJson),
-      },
-    })
-    return
-  }
-
-  delete promptJson[PREVIOUS_TAIL_PROMPT_META_KEY]
-  await prisma.novelPromotionPanelFrame.update({
-    where: { id: firstFrame.id },
-    data: {
-      dependencyFrameIds: serializePanelFrameDependencyPlan({
-        previousTail: false,
-        frameIndexes: currentDependencyPlan.frameIndexes,
-      }),
-      imagePrompt: currentBasePrompt || panel.imagePrompt || panel.description || null,
-      promptJson: stringifyPromptJsonObject(promptJson),
-    },
-  })
 }
 
 /**
@@ -442,10 +304,7 @@ export const PATCH = apiHandler(async (
       data: updateData
     })
     if (nextUsePreviousPanelTailAsReference !== undefined) {
-      await syncFirstFramePreviousTailPrompt(panelId, nextUsePreviousPanelTailAsReference)
-    }
-    if (nextUsePreviousPanelTailAsReference === false) {
-      await clearPreviousTailDependenciesForPanel(panelId)
+      await rebuildPanelFrameReferencePrompts(panelId)
     }
 
     return NextResponse.json({ success: true })
@@ -497,16 +356,6 @@ export const PATCH = apiHandler(async (
     },
     data: updateData
   })
-  if (updatedPanel.count > 0 && nextUsePreviousPanelTailAsReference === false) {
-    const panels = await prisma.novelPromotionPanel.findMany({
-      where: {
-        storyboardId,
-        panelIndex,
-      },
-      select: { id: true },
-    })
-    await Promise.all(panels.map((panel) => clearPreviousTailDependenciesForPanel(panel.id)))
-  }
   if (updatedPanel.count > 0 && nextUsePreviousPanelTailAsReference !== undefined) {
     const panels = await prisma.novelPromotionPanel.findMany({
       where: {
@@ -515,7 +364,7 @@ export const PATCH = apiHandler(async (
       },
       select: { id: true },
     })
-    await Promise.all(panels.map((panel) => syncFirstFramePreviousTailPrompt(panel.id, nextUsePreviousPanelTailAsReference)))
+    await Promise.all(panels.map((panel) => rebuildPanelFrameReferencePrompts(panel.id)))
   }
 
   // 如果 Panel 不存在，创建它（Panel 表是唯一数据源）
@@ -651,11 +500,13 @@ export const PUT = apiHandler(async (
       where: { id: existingPanel.id },
       data: updateData
     })
-    if (nextUsePreviousPanelTailAsReference !== undefined) {
-      await syncFirstFramePreviousTailPrompt(existingPanel.id, nextUsePreviousPanelTailAsReference)
-    }
-    if (nextUsePreviousPanelTailAsReference === false) {
-      await clearPreviousTailDependenciesForPanel(existingPanel.id)
+    if (
+      nextUsePreviousPanelTailAsReference !== undefined
+      || location !== undefined
+      || characters !== undefined
+      || props !== undefined
+    ) {
+      await rebuildPanelFrameReferencePrompts(existingPanel.id)
     }
   } else {
     // 创建新的 Panel 记录

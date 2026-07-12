@@ -1,4 +1,4 @@
-import { parseModelKeyStrict } from '@/lib/model-config-contract'
+import { shouldAllowParallelStoryboardVideo } from '@/lib/task-queue/model-policy'
 
 interface MobileTaskQueueProjectConfig {
   progressPopupEnabled?: boolean | null
@@ -7,11 +7,11 @@ interface MobileTaskQueueProjectConfig {
 }
 
 export function getMobileTaskQueueConfig(project: MobileTaskQueueProjectConfig | null | undefined) {
-  const storyboardProvider = parseModelKeyStrict(project?.storyboardModel)?.provider || null
-  const videoProvider = parseModelKeyStrict(project?.videoModel)?.provider || null
-
   return {
     enabled: project?.progressPopupEnabled === true,
-    allowParallelStoryboardVideo: !(storyboardProvider === 'local' && videoProvider === 'local'),
+    allowParallelStoryboardVideo: shouldAllowParallelStoryboardVideo({
+      storyboardModel: project?.storyboardModel,
+      videoModel: project?.videoModel,
+    }),
   }
 }

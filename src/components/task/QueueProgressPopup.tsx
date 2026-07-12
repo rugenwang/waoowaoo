@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import { useTaskQueue } from '@/lib/task-queue'
@@ -31,6 +31,12 @@ export default function QueueProgressPopup() {
     notice,
   } = useTaskQueue()
   const [dismissRecovered, setDismissRecovered] = useState(false)
+  const [floatingPosition, setFloatingPosition] = useState<{ left: number; top: number } | null>(null)
+  const dragRef = useRef<{
+    pointerId: number
+    offsetX: number
+    offsetY: number
+  } | null>(null)
 
   const cancelTask = useCancelTask(projectId)
   // 刷新页面后，前端内存队列会清空，但后端任务仍会继续执行。
@@ -66,6 +72,64 @@ export default function QueueProgressPopup() {
     if (queue.length > 0) setDismissRecovered(false)
     if (recoveredTasks.length === 0) setDismissRecovered(false)
   }, [queue.length, recoveredTasks.length])
+
+  const startDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    const target = event.target as HTMLElement | null
+    if (target?.closest('button,a,input,textarea,select,[role="button"],[data-no-drag="true"]')) return
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    dragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    }
+    setFloatingPosition({ left: rect.left, top: rect.top })
+    event.currentTarget.setPointerCapture(event.pointerId)
+    event.preventDefault()
+  }, [])
+
+  const moveDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+
+    const margin = 8
+    const width = event.currentTarget.offsetWidth
+    const height = event.currentTarget.offsetHeight
+    const maxLeft = Math.max(margin, window.innerWidth - width - margin)
+    const maxTop = Math.max(margin, window.innerHeight - height - margin)
+    const nextLeft = Math.min(maxLeft, Math.max(margin, event.clientX - drag.offsetX))
+    const nextTop = Math.min(maxTop, Math.max(margin, event.clientY - drag.offsetY))
+    setFloatingPosition({ left: nextLeft, top: nextTop })
+  }, [])
+
+  const endDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    dragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }, [])
+
+  const renderFloating = (children: ReactNode) => (
+    <div
+      className="fixed bottom-8 right-8 z-[9999] animate-slide-up cursor-grab select-none touch-none active:cursor-grabbing"
+      style={floatingPosition ? {
+        left: floatingPosition.left,
+        top: floatingPosition.top,
+        right: 'auto',
+        bottom: 'auto',
+      } : undefined}
+      onPointerDown={startDrag}
+      onPointerMove={moveDrag}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      title="拖动可移动队列浮条"
+    >
+      {children}
+    </div>
+  )
 
   if (!enabled) return null
   if (queue.length === 0 && recoveredTasks.length === 0) return null
@@ -222,18 +286,18 @@ export default function QueueProgressPopup() {
   ) : null
 
   if (showPopup || hasRecoveredActive) {
-    return (
-      <div className="fixed bottom-8 right-8 z-[9999] animate-slide-up">
+    return renderFloating(
+      <>
         {toast}
         {body}
-      </div>
+      </>,
     )
   }
 
   // 被用户关闭的恢复态：显示一个最小化入口
   if (dismissRecovered && queue.length === 0 && recoveredTasks.length > 0) {
-    return (
-      <div className="fixed bottom-8 right-8 z-[9999] animate-slide-up">
+    return renderFloating(
+      <>
         {toast}
         <button
           type="button"
@@ -242,14 +306,14 @@ export default function QueueProgressPopup() {
         >
           后台任务 {recoveredTasks.length}
         </button>
-      </div>
+      </>,
     )
   }
 
   if (!hasRunningOrPending && !hasRecoveredActive) {
     // 没有正在执行/待执行：展示一个“完成”角标（醒目）
-    return (
-      <div className="fixed bottom-8 right-8 z-[9999] animate-slide-up">
+    return renderFloating(
+      <>
         {toast}
         <div className="glass-surface-modal px-3 py-2 text-sm text-(--glass-tone-success-fg) flex items-center gap-2">
           <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-(--glass-tone-success-bg)">
@@ -265,11 +329,11 @@ export default function QueueProgressPopup() {
             清空
           </button>
         </div>
-      </div>
+      </>,
     )
   }
-  return (
-    <div className="fixed bottom-8 right-8 z-[9999] animate-slide-up">
+  return renderFloating(
+    <>
       {toast}
       <button
         type="button"
@@ -278,6 +342,6 @@ export default function QueueProgressPopup() {
       >
         队列进度 {runningIndex}/{total}
       </button>
-    </div>
+    </>,
   )
 }

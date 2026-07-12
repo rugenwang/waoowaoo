@@ -48,12 +48,26 @@ function resolveRunIdFromPayload(payload: unknown): string | null {
   return runIdFromMeta || null
 }
 
+function hasExplicitStepRetryPayload(payload: unknown): boolean {
+  const obj = toObject(payload)
+  const retryStepKey = typeof obj.retryStepKey === 'string' ? obj.retryStepKey.trim() : ''
+  if (!retryStepKey) return false
+  return Boolean(resolveRunIdFromPayload(payload))
+}
+
 export function isActiveTaskStatus(status: string | null | undefined) {
   return status === TASK_STATUS.QUEUED || status === TASK_STATUS.PROCESSING
 }
 
 export function shouldAttachNewTaskToReusableRun(reusableRunTaskStatus: string | null | undefined) {
   return !isActiveTaskStatus(reusableRunTaskStatus)
+}
+
+export function shouldDedupeReusableRunTask(
+  reusableRunTaskStatus: string | null | undefined,
+  payload: unknown,
+) {
+  return isActiveTaskStatus(reusableRunTaskStatus) && !hasExplicitStepRetryPayload(payload)
 }
 
 export function normalizeTaskPayload(type: TaskType, payload?: Record<string, unknown> | null) {
@@ -158,7 +172,7 @@ export async function submitTask(params: {
     ? await getTaskById(reusableRun.taskId)
     : null
 
-  if (runCentricTask && reusableRun && reusableRunTask && isActiveTaskStatus(reusableRunTask.status)) {
+  if (runCentricTask && reusableRun && reusableRunTask && shouldDedupeReusableRunTask(reusableRunTask.status, normalizedPayload)) {
       return {
         success: true,
         async: true,
@@ -208,7 +222,13 @@ export async function submitTask(params: {
       deduped = false
     }
   }
-  const reusableRunId = reusableRun && shouldAttachNewTaskToReusableRun(reusableRunTask?.status)
+  const payloadRunId = resolveRunIdFromPayload(normalizedPayload)
+  const shouldAttachRetryTaskToReusableRun = hasExplicitStepRetryPayload(normalizedPayload)
+    && payloadRunId === reusableRun?.id
+  const reusableRunId = reusableRun && (
+    shouldAttachNewTaskToReusableRun(reusableRunTask?.status)
+    || shouldAttachRetryTaskToReusableRun
+  )
     ? (reusableRun?.id || null)
     : null
   let runId = reusableRunId || resolveRunIdFromPayload(task.payload)

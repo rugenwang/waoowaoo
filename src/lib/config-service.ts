@@ -19,6 +19,10 @@ import {
   type WorkflowConcurrencyConfig,
   normalizeWorkflowConcurrencyConfig,
 } from '@/lib/workflow-concurrency'
+import {
+  type LtxVideoLoraConfig,
+  resolveLtxVideoLoras,
+} from '@/lib/ltx-lora-config'
 
 export type ParsedModelKey = { provider: string, modelId: string }
 
@@ -124,6 +128,7 @@ export interface ProjectModelConfig {
   localStoryboardUsePanelDescriptionEnabled: boolean
   progressPopupEnabled: boolean
   forcedStoryboardDurationSec: 8 | 10 | 15 | 20 | null
+  localVideoLoras: LtxVideoLoraConfig[]
 }
 
 export interface UserModelConfig {
@@ -218,6 +223,7 @@ export async function getProjectModelConfig(
     || forcedStoryboardDurationRaw === 20
       ? forcedStoryboardDurationRaw
       : null
+  const localVideoLoras = resolveLtxVideoLoras(rawProject?.localVideoLoras)
 
   return {
     analysisModel: extractModelKey(projectData?.analysisModel) || extractModelKey(userPref?.analysisModel) || null,
@@ -245,6 +251,7 @@ export async function getProjectModelConfig(
     localStoryboardUsePanelDescriptionEnabled,
     progressPopupEnabled,
     forcedStoryboardDurationSec,
+    localVideoLoras,
   }
 }
 

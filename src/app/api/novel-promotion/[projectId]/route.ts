@@ -5,6 +5,7 @@ import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { isArtStyleValue } from '@/lib/constants'
 import { attachMediaFieldsToProject } from '@/lib/media/attach'
+import { serializeLtxVideoLoras } from '@/lib/ltx-lora-config'
 import {
   parseModelKeyStrict,
   type CapabilitySelections,
@@ -323,6 +324,8 @@ export const PATCH = apiHandler(async (
     'progressPopupEnabled',
     // storyboard grouping duration preference
     'forcedStoryboardDurationSec',
+    // wo -> ltx local video LoRA config
+    'localVideoLoras',
   ] as const
 
   const updateData: Record<string, unknown> = {}
@@ -427,6 +430,10 @@ export const PATCH = apiHandler(async (
         throw new ApiError('INVALID_PARAMS', { code: 'INVALID_ENUM', field })
       }
       updateData.forcedStoryboardDurationSec = value
+      continue
+    }
+    if (field === 'localVideoLoras') {
+      updateData.localVideoLoras = serializeLtxVideoLoras(body[field])
       continue
     }
 

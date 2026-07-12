@@ -128,6 +128,7 @@ export default function StoryboardStage({
 
     addingStoryboardGroupState,
     transitioningState,
+    queueMode,
     runningCount,
     pendingPanelCount,
     handleGenerateAllPanels,
@@ -264,6 +265,7 @@ export default function StoryboardStage({
           runningCount={runningCount}
           pendingPanelCount={pendingPanelCount}
           isBatchSubmitting={isEpisodeBatchSubmitting}
+          queueModeEnabled={queueMode}
           addingStoryboardGroup={addingStoryboardGroup}
           addingStoryboardGroupState={addingStoryboardGroupState}
           onDownloadAllImages={downloadAllImages}

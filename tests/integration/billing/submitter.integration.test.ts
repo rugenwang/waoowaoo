@@ -323,4 +323,78 @@ describe('billing/submitter integration', () => {
       runId: run.id,
     })
   })
+
+  it('enqueues an explicit step retry even when the previous run task is still marked active', async () => {
+    process.env.BILLING_MODE = 'OFF'
+    const user = await createTestUser()
+    const staleTask = await prisma.task.create({
+      data: {
+        userId: user.id,
+        projectId: 'project-core-retry-active',
+        episodeId: 'episode-core-retry-active',
+        type: TASK_TYPE.SCRIPT_TO_STORYBOARD_RUN,
+        targetType: 'NovelPromotionEpisode',
+        targetId: 'episode-core-retry-active',
+        status: TASK_STATUS.PROCESSING,
+        payload: {
+          episodeId: 'episode-core-retry-active',
+          analysisModel: 'model-core',
+          meta: { locale: 'zh' },
+        },
+        queuedAt: new Date(),
+        startedAt: new Date(),
+      },
+    })
+    const run = await createRun({
+      userId: user.id,
+      projectId: 'project-core-retry-active',
+      episodeId: 'episode-core-retry-active',
+      workflowType: TASK_TYPE.SCRIPT_TO_STORYBOARD_RUN,
+      taskType: TASK_TYPE.SCRIPT_TO_STORYBOARD_RUN,
+      taskId: staleTask.id,
+      targetType: 'NovelPromotionEpisode',
+      targetId: 'episode-core-retry-active',
+      input: {
+        episodeId: 'episode-core-retry-active',
+        analysisModel: 'model-core',
+        meta: { locale: 'zh' },
+      },
+    })
+    await prisma.graphRun.update({
+      where: { id: run.id },
+      data: {
+        status: 'running',
+        startedAt: new Date(),
+      },
+    })
+
+    const result = await submitTask({
+      userId: user.id,
+      locale: 'zh',
+      projectId: 'project-core-retry-active',
+      episodeId: 'episode-core-retry-active',
+      type: TASK_TYPE.SCRIPT_TO_STORYBOARD_RUN,
+      targetType: 'NovelPromotionEpisode',
+      targetId: 'episode-core-retry-active',
+      payload: {
+        episodeId: 'episode-core-retry-active',
+        analysisModel: 'model-core',
+        runId: run.id,
+        retryStepKey: 'clip_clip-1_phase3_detail',
+        retryStepAttempt: 2,
+      },
+    })
+
+    expect(result.deduped).toBe(false)
+    expect(result.taskId).not.toBe(staleTask.id)
+    expect(result.runId).toBe(run.id)
+    expect(addTaskJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: result.taskId,
+      payload: expect.objectContaining({
+        runId: run.id,
+        retryStepKey: 'clip_clip-1_phase3_detail',
+        retryStepAttempt: 2,
+      }),
+    }), expect.any(Object))
+  })
 })

@@ -12,6 +12,7 @@ import { resolveProjectModelCapabilityGenerationOptions } from '@/lib/config-ser
 import { resolveModelSelection } from '@/lib/api-config'
 import { prisma } from '@/lib/prisma'
 import { loadPreviousPanelTailImageInfo } from '@/lib/novel-promotion/previous-panel-tail'
+import { rebuildPanelFrameReferencePrompts } from '@/lib/novel-promotion/panel-frame-reference-prompts'
 
 const DEFAULT_CANDIDATE_COUNT = 1
 
@@ -68,6 +69,7 @@ export const POST = apiHandler(async (
       data: { usePreviousPanelTailAsReference: requestedUsePreviousTail },
     })
     panel.usePreviousPanelTailAsReference = requestedUsePreviousTail
+    await rebuildPanelFrameReferencePrompts(panel.id)
   }
 
   let panelUsesPreviousTailAsReference = Boolean(
@@ -85,6 +87,7 @@ export const POST = apiHandler(async (
         data: { usePreviousPanelTailAsReference: false },
       })
       panelUsesPreviousTailAsReference = false
+      await rebuildPanelFrameReferencePrompts(panel.id)
     } else if (!previousTailInfo.imageUrl) {
       throw new ApiError('INVALID_PARAMS', {
         code: 'PREVIOUS_PANEL_TAIL_NOT_READY',

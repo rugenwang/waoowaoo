@@ -152,9 +152,11 @@ export default function CharacterCard({
     .map((url, idx) => ({ url, originalIndex: idx }))
     .filter((item) => !!item.url) as { url: string; originalIndex: number }[]
   const generatedImageCount = imageUrlsWithIndex.length
+  const hasSelectableImage = imageUrlsWithIndex.length > 0
 
   const hasMultipleImages = imageUrlsWithIndex.length > 1
   const selectedIndex = appearance.selectedIndex ?? null
+  const selectedImageHasUrl = selectedIndex !== null && !!rawImageUrls[selectedIndex]
 
   // 🔥 统一图片URL优先级：imageUrl > imageUrls[selectedIndex] > imageUrls[0]
   // 这样确保编辑后的新图片能正确显示
@@ -353,7 +355,7 @@ export default function CharacterCard({
           characterName={character.name}
           changeReason={appearance.changeReason}
           isPrimaryAppearance={isPrimaryAppearance}
-          selectedIndex={selectedIndex}
+          selectedIndex={selectedImageHasUrl ? selectedIndex : null}
           actions={selectionActions}
         />
 
@@ -363,7 +365,7 @@ export default function CharacterCard({
           appearanceId={appearance.id}
           characterName={character.name}
           imageUrlsWithIndex={imageUrlsWithIndex}
-          selectedIndex={selectedIndex}
+          selectedIndex={selectedImageHasUrl ? selectedIndex : null}
           isGroupTaskRunning={isGroupTaskRunning}
           isImageTaskRunning={isImageTaskRunning}
           displayTaskPresentation={displayTaskPresentation}
@@ -374,12 +376,16 @@ export default function CharacterCard({
         <CharacterCardActions
           mode="selection"
           selectedIndex={selectedIndex}
+          selectedImageHasUrl={selectedImageHasUrl}
+          hasSelectableImage={hasSelectableImage}
           isConfirmingSelection={isConfirmingSelection}
           confirmSelectionState={confirmSelectionState}
-          onConfirmSelection={() => {
-            setIsConfirmingSelection(true)
-            onConfirmSelection?.(character.id, appearance.id)
-          }}
+          onConfirmSelection={selectedImageHasUrl
+            ? () => {
+              setIsConfirmingSelection(true)
+              onConfirmSelection?.(character.id, appearance.id)
+            }
+            : undefined}
           isPrimaryAppearance={isPrimaryAppearance}
           voiceSettings={selectionVoiceSettings}
         />

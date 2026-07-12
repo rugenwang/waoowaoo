@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { AppIcon } from '@/components/ui/icons'
 import { ART_STYLES, VIDEO_RATIOS } from '@/lib/constants'
 import type { CapabilitySelections, CapabilityValue, ModelCapabilities } from '@/lib/model-config-contract'
@@ -10,6 +10,7 @@ import { useUserModels, type UserModelOption } from '@/lib/query/hooks/useUserMo
 import { getMobileProjectSettingsSnapshot } from './mobile-project-settings'
 import { MOBILE_SETTINGS_SECTIONS, type MobileSettingsSectionKey } from './mobile-workspace-layout'
 import type { MobileNovelPromotionData } from './types'
+import { DEFAULT_LTX_VIDEO_LORAS, type LtxVideoLoraConfig } from '@/lib/ltx-lora-config'
 
 interface MobileProjectSettingsProps {
   projectId: string
@@ -126,6 +127,22 @@ function ToggleField({ label, description, checked, onChange }: {
   )
 }
 
+function formatLoraLines(rows: LtxVideoLoraConfig[]): string {
+  return rows.map((item) => `${item.path} | ${item.weight}`).join('\n')
+}
+
+function parseLoraLines(value: string): LtxVideoLoraConfig[] {
+  return value
+    .split('\n')
+    .map((line) => {
+      const [pathPart, weightPart] = line.split('|')
+      const path = (pathPart || '').trim()
+      const weight = Number((weightPart || '').trim())
+      return path && Number.isFinite(weight) ? { path, weight } : null
+    })
+    .filter((item): item is LtxVideoLoraConfig => item !== null)
+}
+
 function capabilityFields(capabilities: ModelCapabilities | undefined, namespace: 'llm' | 'image' | 'video' | 'audio') {
   const value = capabilities?.[namespace]
   if (!value || typeof value !== 'object') return []
@@ -177,7 +194,11 @@ export default function MobileProjectSettings({ projectId, projectData, onClose,
   const [search, setSearch] = useState('')
   const [savingKey, setSavingKey] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [loraText, setLoraText] = useState(() => formatLoraLines(snapshot.localVideoLoras))
   const models = modelsQuery.data || { llm: [], image: [], video: [], audio: [], lipsync: [] }
+  useEffect(() => {
+    setLoraText(formatLoraLines(snapshot.localVideoLoras))
+  }, [snapshot.localVideoLoras])
   const visibleSections = useMemo(() => {
     const keyword = search.trim().toLowerCase()
     if (!keyword) return MOBILE_SETTINGS_SECTIONS
@@ -290,6 +311,26 @@ export default function MobileProjectSettings({ projectId, projectData, onClose,
               <>
                 <SelectField label="分镜组时长倾向" value={snapshot.forcedStoryboardDurationSec === null ? '' : String(snapshot.forcedStoryboardDurationSec)} options={[{ value: '', label: '由 AI 决定' }, ...[8, 10, 15, 20].map((value) => ({ value: String(value), label: `${value} 秒` }))]} onChange={(value) => void update('forcedStoryboardDurationSec', value ? Number(value) : null)} />
                 <CapabilityFields modelKey={projectData?.videoModel} models={models.video} namespace="video" selections={snapshot.capabilityOverrides} onChange={(value) => void update('capabilityOverrides', value)} />
+                <FieldShell label="本地视频 LoRA" hint="仅 Local 视频模型生效。每行格式：LoRA路径 | 权重，按行顺序加载。">
+                  <textarea
+                    value={loraText}
+                    onChange={(event) => setLoraText(event.target.value)}
+                    onBlur={() => void update('localVideoLoras', parseLoraLines(loraText))}
+                    rows={6}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-mono leading-5 text-slate-800 outline-none focus:border-blue-400"
+                  />
+                  <button
+                    type="button"
+                    className="mt-2 min-h-10 rounded-2xl bg-slate-900 px-4 text-xs font-semibold text-white"
+                    onClick={() => {
+                      const text = formatLoraLines(DEFAULT_LTX_VIDEO_LORAS)
+                      setLoraText(text)
+                      void update('localVideoLoras', DEFAULT_LTX_VIDEO_LORAS)
+                    }}
+                  >
+                    恢复默认 LoRA
+                  </button>
+                </FieldShell>
               </>
             ) : null}
 

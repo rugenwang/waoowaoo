@@ -211,6 +211,25 @@ describe('worker panel-image-task-handler behavior', () => {
     })
   })
 
+  it('reference labels stay aligned when duplicate image URLs are removed', async () => {
+    sharedMock.collectPanelReferenceImageEntries.mockResolvedValueOnce([
+      { url: 'https://signed.example/shared.png', label: '场景图：Old Town', kind: 'location' },
+      { url: 'https://signed.example/shared.png', label: '角色图：Hero', kind: 'character' },
+    ])
+    outboundMock.normalizeReferenceImagesForGeneration.mockImplementation(async (...args: unknown[]) => {
+      const refs = Array.isArray(args[0]) ? args[0] as string[] : []
+      return refs.map((ref) => `normalized:${ref}`)
+    })
+
+    await handlePanelImageTask(buildJob({ candidateCount: 1 }))
+
+    const request = utilsMock.resolveImageSourceFromGeneration.mock.calls[0]?.[1] as {
+      options?: { referenceImages?: string[]; referenceImageLabels?: string[] }
+    }
+    expect(request.options?.referenceImages).toEqual(['normalized:https://signed.example/shared.png'])
+    expect(request.options?.referenceImageLabels).toEqual(['场景图：Old Town'])
+  })
+
   it('first generation -> appends same-face constraint to storyboard image prompt', async () => {
     const job = buildJob({ candidateCount: 1 })
     await handlePanelImageTask(job)
@@ -291,23 +310,22 @@ describe('worker panel-image-task-handler behavior', () => {
 
     await handlePanelImageTask(buildJob({ candidateCount: 1 }, 'panel-2'))
 
+    const generationRequest = utilsMock.resolveImageSourceFromGeneration.mock.calls[0]?.[1] as {
+      prompt?: string
+      options?: { referenceImages?: string[]; referenceImageLabels?: string[] }
+    }
     expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         prompt: expect.stringContaining('第 1 张参考图是 FP'),
-        options: expect.objectContaining({
-          referenceImages: expect.arrayContaining([
-            'normalized:signed:cos/prev-tail.png',
-          ]),
-          referenceImageLabels: expect.arrayContaining([
-            'FP(previous-panel-tail)',
-          ]),
-        }),
       }),
     )
-    const prompt = (utilsMock.resolveImageSourceFromGeneration.mock.calls[0]?.[1] as { prompt?: string } | undefined)?.prompt || ''
-    expect(prompt).toContain('人物整体位置、排布顺序、相对间距基本保持一致')
-    expect(prompt).toContain('严禁不同人物挤占、重叠在同一位置')
+    expect(generationRequest.options?.referenceImages?.[0]).toBe('normalized:signed:cos/prev-tail.png')
+    expect(generationRequest.options?.referenceImageLabels?.[0]).toContain('FP')
+    expect(generationRequest.options?.referenceImages).toHaveLength(
+      generationRequest.options?.referenceImageLabels?.length || 0,
+    )
+    expect(generationRequest.prompt).toContain('FP 锁定场景布局')
   })
 
   it('regeneration branch -> keeps old image in previousImageUrl and stores candidates only', async () => {
@@ -396,7 +414,7 @@ describe('worker panel-image-task-handler behavior', () => {
           frameTimeSec: 4,
           frameRole: 'continuity',
           dependencyFrameIds: '[0]',
-          imagePrompt: 'frame 2 prompt',
+          imagePrompt: '参考图F1为分镜组已生成关键帧 F1，参考图F2为当前分镜场景图：Old Town，参考图F3为角色图：张三；当前画面：frame 2 prompt',
           videoPrompt: null,
           imageUrl: null,
         },
@@ -648,7 +666,6 @@ describe('worker panel-image-task-handler behavior', () => {
         options: expect.objectContaining({
           referenceImages: [
             'normalized:signed:cos/frame-1.png',
-            'normalized:https://signed.example/ref-location.png',
             'normalized:https://signed.example/ref-character.png',
             'normalized:https://signed.example/ref-prop.png',
           ],
@@ -656,8 +673,13 @@ describe('worker panel-image-task-handler behavior', () => {
       }),
     )
     const secondPrompt = (utilsMock.resolveImageSourceFromGeneration.mock.calls[1]?.[1] as { prompt?: string } | undefined)?.prompt || ''
-    expect(secondPrompt).toContain('人物整体位置、排布顺序、相对间距基本保持一致')
-    expect(secondPrompt).toContain('严禁不同人物挤占、重叠在同一位置')
+    expect(secondPrompt).toContain('继承状态（分镜组第 1 关键帧）')
+    expect(secondPrompt).toContain('当前场景：Old Town')
+    expect(secondPrompt).toContain('本帧变化：frame 2 prompt')
+    expect(secondPrompt).not.toContain('本帧变化：参考图F1')
+    expect(secondPrompt).toContain('F2-Fn 是按真实顺序传入的辅助参考图')
+    expect(secondPrompt).toContain('F2：角色图：张三')
+    expect(secondPrompt).toContain('F3：道具图：咖啡杯')
   })
 
   it('previous-tail flag without available previous tail -> throws explicit error', async () => {
@@ -856,7 +878,7 @@ describe('worker panel-image-task-handler behavior', () => {
     expect(utilsMock.resolveImageSourceFromGeneration).not.toHaveBeenCalled()
   })
 
-  it('target frame regeneration -> uses only direct linked frame references plus panel asset references', async () => {
+  it('target frame regeneration -> linked frame replaces repeated location reference', async () => {
     utilsMock.resolveImageSourceFromGeneration.mockReset()
     utilsMock.uploadImageSourceToCos.mockReset()
     utilsMock.toSignedUrlIfCos.mockClear()
@@ -936,7 +958,6 @@ describe('worker panel-image-task-handler behavior', () => {
         options: expect.objectContaining({
           referenceImages: [
             'normalized:signed:cos/frame-2-old.png',
-            'normalized:https://signed.example/ref-1.png',
           ],
         }),
       }),
@@ -962,7 +983,7 @@ describe('worker panel-image-task-handler behavior', () => {
     expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        prompt: expect.stringContaining('分镜描述：group scene'),
+        prompt: expect.stringContaining('当前场景：Old Town'),
       }),
     )
   })
@@ -1038,7 +1059,7 @@ describe('worker panel-image-task-handler behavior', () => {
     expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        prompt: expect.stringContaining('关键帧生图提示：frame 2 prompt'),
+        prompt: expect.stringContaining('本帧变化：frame 2 prompt'),
       }),
     )
     expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(

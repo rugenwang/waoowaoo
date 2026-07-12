@@ -12,6 +12,8 @@ type CharacterCardActionsProps =
   | {
     mode: 'selection'
     selectedIndex: number | null
+    selectedImageHasUrl: boolean
+    hasSelectableImage: boolean
     isConfirmingSelection: boolean
     confirmSelectionState: TaskPresentationState | null
     onConfirmSelection?: () => void
@@ -38,11 +40,13 @@ export default function CharacterCardActions(props: CharacterCardActionsProps) {
   if (props.mode === 'selection') {
     return (
       <>
-        <div className="mt-3 text-xs text-[var(--glass-text-tertiary)] text-center">
-          {t('image.selectTip')}
-        </div>
+        {props.hasSelectableImage && (
+          <div className="mt-3 text-xs text-[var(--glass-text-tertiary)] text-center">
+            {t('image.selectTip')}
+          </div>
+        )}
 
-        {props.selectedIndex !== null && (
+        {props.selectedIndex !== null && props.selectedImageHasUrl && (
           <div className="mt-4 flex justify-end">
             <button
               onClick={props.onConfirmSelection}

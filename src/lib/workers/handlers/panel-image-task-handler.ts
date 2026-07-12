@@ -20,6 +20,7 @@ import {
   parsePanelCharacterReferences,
   pickFirstString,
   resolveNovelData,
+  selectCharacterAppearance,
 } from './image-task-handler-shared'
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
@@ -31,6 +32,8 @@ import {
   withPreviousTailDependency,
 } from '@/lib/novel-promotion/panel-tail-reference'
 import { loadPreviousPanelTailImageInfo } from '@/lib/novel-promotion/previous-panel-tail'
+import { isSamePanelLocation } from '@/lib/novel-promotion/panel-character-continuity'
+import { extractPanelFramePromptBody } from '@/lib/novel-promotion/panel-frame-reference-prompts'
 
 type PromptRecord = Record<string, unknown>
 type PromptCharacter = { name?: unknown; appearance?: unknown; slot?: unknown; reference_description?: unknown }
@@ -43,6 +46,43 @@ type PanelFrameForGeneration = {
   imagePrompt: string | null
   videoPrompt: string | null
   imageUrl?: string | null
+}
+
+type OrderedReferenceImage = {
+  url: string
+  label: string
+  kind: 'previous_tail' | 'dependency_frame' | 'sketch' | 'location' | 'character' | 'prop'
+}
+
+async function normalizeOrderedReferenceImages(
+  entries: OrderedReferenceImage[],
+  context: Record<string, unknown>,
+  cache: Map<string, string | null>,
+): Promise<OrderedReferenceImage[]> {
+  const seen = new Set<string>()
+  const normalized: OrderedReferenceImage[] = []
+  let lastError: unknown = null
+
+  for (const entry of entries) {
+    const url = String(entry.url || '').trim()
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    try {
+      let normalizedUrl = cache.get(url)
+      if (normalizedUrl === undefined) {
+        const [resolved] = await normalizeReferenceImagesForGeneration([url], { context })
+        normalizedUrl = resolved || null
+        cache.set(url, normalizedUrl)
+      }
+      if (normalizedUrl) normalized.push({ ...entry, url: normalizedUrl })
+    } catch (error) {
+      cache.set(url, null)
+      lastError = error
+    }
+  }
+
+  if (entries.length > 0 && normalized.length === 0 && lastError) throw lastError
+  return normalized
 }
 
 function parseJsonUnknown(raw: string | null | undefined): unknown | null {
@@ -118,10 +158,11 @@ export function buildPanelPromptContext(params: {
   const characterContexts = panelCharacters.map((reference) => {
     const character = findCharacterByName(params.projectData.characters || [], reference.name)
     const appearances = character?.appearances || []
-    const matchedAppearance =
-      (reference.appearance
-        ? appearances.find((appearance) => (appearance.changeReason || '').toLowerCase() === reference.appearance!.toLowerCase())
-        : null) || appearances[0] || null
+    const matchedAppearance = selectCharacterAppearance(
+      reference.name,
+      appearances,
+      reference.appearance,
+    ) || null
 
     return {
       name: reference.name,
@@ -441,67 +482,35 @@ function buildPanelFramePrompt(params: {
 }) {
   const shot = (params.panelContext as { shot?: PromptRecord }).shot || {}
   const shotType = String(shot.shot_type || '').trim()
-  const cameraMove = String(shot.camera_move || '').trim()
-  const framePrompt = String(params.frame.imagePrompt || params.panelDescription || '').trim()
+  const framePrompt = extractPanelFramePromptBody(params.frame.imagePrompt || params.panelDescription)
   const referenceLabels = [
-    params.usesPreviousTail ? 'FP（上一分镜尾帧）' : '',
-    ...params.frameReferenceIndexes.map((index) => `F${index + 1}`),
+    params.usesPreviousTail ? '上一分镜尾帧' : '',
+    ...params.frameReferenceIndexes.map((index) => `分镜组第 ${index + 1} 关键帧`),
   ].filter(Boolean).join(', ')
-  const hasReferenceRule = params.frame.frameIndex > 0 || params.usesPreviousTail
   const hasLinkedFrameReference = params.frameReferenceImageCount > 0 || params.usesPreviousTail
-  const zhLinkedFrameContinuityRule = hasLinkedFrameReference
-    ? '前一帧/关联帧连续性：承接前一帧画面，人物整体位置、排布顺序、相对间距基本保持一致，允许位置出现微小偏移；严禁不同人物挤占、重叠在同一位置；站姿、动作可自由变化。'
-    : ''
-  const enLinkedFrameContinuityRule = hasLinkedFrameReference
-    ? 'Previous/dependency frame continuity: continue from the previous frame image; keep overall character positions, ordering, and relative spacing basically consistent, allowing only slight positional shifts; never let different characters crowd into or overlap the same spot; standing posture and actions may change freely.'
-    : ''
-  const zhReferenceRule = hasReferenceRule
-    ? [
-      params.frameReferenceImageCount > 0
-        ? `参考帧规则：参考图前 ${params.frameReferenceImageCount} 张是直接关联关键帧${referenceLabels ? `（${referenceLabels}）` : ''}。`
-        : '参考帧规则：必须承接直接相邻剧情的角色、服饰、场景、光线和构图逻辑。',
-      params.usesPreviousTail ? 'FP 表示本帧需要参考上一分镜的尾帧；请把上一分镜结尾状态自然承接为当前分镜开场状态，但不要原样复制上一帧构图。' : '',
-      zhLinkedFrameContinuityRule,
-      '请根据直接关联帧和本帧剧本描述，生成顺滑过渡到当前秒点的画面；保留身份和服装一致，人物位置/排布/间距需保持连续，但不要原样复制参考帧姿势、表情或构图。',
-      '本帧只表现当前秒点的关键状态，要有明确变化，例如动作进展、人物位置、手部/道具状态、视线、表情或场景转化。'
-    ].filter(Boolean).join('\n')
-    : ''
-  const enReferenceRule = hasReferenceRule
-    ? [
-      params.frameReferenceImageCount > 0
-        ? `Reference-frame rule: the first ${params.frameReferenceImageCount} reference image(s) are directly linked keyframes${referenceLabels ? ` (${referenceLabels})` : ''}.`
-        : 'Reference-frame rule: preserve continuity from the directly adjacent story beat.',
-      params.usesPreviousTail ? 'FP means this frame references the previous panel tail frame; continue naturally from the previous ending state into this panel opening state without copying the previous composition exactly.' : '',
-      enLinkedFrameContinuityRule,
-      'Use the directly linked frame(s) and this frame script description to create a smooth current-frame image. Keep identity/outfit consistent and preserve character position/order/spacing continuity, but do not copy the reference-frame pose, expression, or composition exactly.',
-      'Show only the current second state with a clear change: action progress, body position, hand/prop state, gaze, expression, or scene transition.'
-    ].filter(Boolean).join('\n')
-    : ''
   const lines = params.locale === 'en'
     ? [
       `Aspect ratio: ${params.aspectRatio}`,
-      shotType || cameraMove ? `Shot: ${[shotType, cameraMove].filter(Boolean).join(', ')}` : '',
-      params.panelDescription ? `Panel description: ${params.panelDescription}` : '',
-      framePrompt ? `Key frame image prompt: ${framePrompt}` : '',
+      shotType ? `Shot type: ${shotType}` : '',
       `Frame time: ${params.frame.frameTimeSec}s`,
       params.frame.frameRole ? `Frame role: ${params.frame.frameRole}` : '',
-      params.frame.frameIndex === 0 ? 'This is the opening keyframe: show the original state before any later action, movement, emotional change, fight result, or transition result.' : '',
-      enReferenceRule,
-      params.styleText ? `Style: ${params.styleText}` : '',
-      'Generate exactly one still image for this key frame. Keep visual continuity with reference images. Do not depict camera movement, timeline segments, dialogue text, music, or multiple action moments.',
+      hasLinkedFrameReference ? `Inherited state (${referenceLabels || 'linked frame'}): preserve identity, outfit, screen side, facing direction, spatial order, prop state, lighting, and scene layout.` : '',
+      framePrompt ? `This-frame change: ${framePrompt}` : '',
+      'Unchanged state: anything not explicitly changed above must remain consistent with the linked frame and asset references.',
+      params.frame.frameIndex === 0 ? 'Opening state only: do not show the result of a later action or transition.' : '',
+      'Generate one still frame. Show one moment only; no camera-motion trail, timeline, dialogue text, music, collage, or multiple action stages.',
       params.hardConstraints,
     ]
     : [
       `画面比例：${params.aspectRatio}`,
-      shotType || cameraMove ? `镜头：${[shotType, cameraMove].filter(Boolean).join('，')}` : '',
-      params.panelDescription ? `分镜描述：${params.panelDescription}` : '',
-      framePrompt ? `关键帧生图提示：${framePrompt}` : '',
+      shotType ? `景别：${shotType}` : '',
       `所在秒点：${params.frame.frameTimeSec}s`,
       params.frame.frameRole ? `关键帧角色：${params.frame.frameRole}` : '',
-      params.frame.frameIndex === 0 ? '这是开头关键帧：必须表现后续动作发生前的原始状态，人物尚未完成移动、转身、打斗、情绪变化或事件结果。' : '',
-      zhReferenceRule,
-      params.styleText ? `风格：${params.styleText}` : '',
-      '只生成这一秒点的一张静态关键帧图，必须与参考图保持人物、服饰、场景、光线和画风连贯。不要画运镜、时间轴、字幕、台词文字、背景音乐或多个连续动作瞬间。',
+      hasLinkedFrameReference ? `继承状态（${referenceLabels || '关联帧'}）：锁定人物身份与服装、画面左右位置、朝向、人物顺序与间距、道具状态、光线和空间布局。` : '',
+      framePrompt ? `本帧变化：${framePrompt}` : '',
+      '保持不变：本帧没有明确要求改变的内容，全部沿用关联帧和资产参考图。',
+      params.frame.frameIndex === 0 ? '只表现开场原始状态，不提前画出后续动作或转场结果。' : '',
+      '只生成一个静态瞬间；不要画运镜轨迹、时间轴、字幕、台词文字、背景音乐、拼图或多个动作阶段。',
       params.hardConstraints,
     ]
   return lines.filter(Boolean).join('\n')
@@ -512,10 +521,27 @@ export function buildStoryboardHardConstraints(params: {
   aspectRatio: string
   styleText: string
   referenceImagesCount: number
+  referenceKinds?: OrderedReferenceImage['kind'][]
 }): string {
   const ratio = String(params.aspectRatio || '').trim()
   const style = String(params.styleText || '').trim()
   const hasRefs = params.referenceImagesCount > 0
+  const kinds = new Set(params.referenceKinds || [])
+  const hasRuntimeKinds = Array.isArray(params.referenceKinds)
+  const authorityZh = [
+    kinds.has('previous_tail') || kinds.has('dependency_frame') ? '关联帧锁定画面连续性与空间关系' : '',
+    kinds.has('location') ? '场景图锁定空间结构、光线和可站位置' : '',
+    kinds.has('character') ? '角色图锁定身份、服装和发型' : '',
+    kinds.has('prop') ? '道具图锁定道具外观' : '',
+    kinds.has('sketch') ? '草图锁定主要构图意图' : '',
+  ].filter(Boolean).join('；')
+  const authorityEn = [
+    kinds.has('previous_tail') || kinds.has('dependency_frame') ? 'linked frames lock continuity and spatial relationships' : '',
+    kinds.has('location') ? 'location images lock scene structure, lighting, and placement areas' : '',
+    kinds.has('character') ? 'character images lock identity, outfit, and hair' : '',
+    kinds.has('prop') ? 'prop images lock prop appearance' : '',
+    kinds.has('sketch') ? 'the sketch locks the main composition intent' : '',
+  ].filter(Boolean).join('; ')
 
   if (params.locale === 'en') {
     return [
@@ -527,7 +553,9 @@ export function buildStoryboardHardConstraints(params: {
       '- Characters must be fully and properly clothed, exactly consistent with their reference outfit; no shirtless, semi-nude, exposed torso, revealing outfit, missing clothing, or torn-clothing exposure.',
       '- Do NOT generate tilted heads, twisted heads, strongly turned heads, strange expressions, exaggerated expressions, or distorted facial expressions. Keep head and neck posture natural and upright; keep expressions realistic, restrained, and story-appropriate.',
       ratio ? `- Aspect ratio must be EXACT: ${ratio}.` : null,
-      hasRefs ? '- Match reference images strictly: character asset images control identity/outfit/hairstyle; prior-frame references control continuity; location asset images control space/lighting/allowed positions; prop asset images control prop appearance. Do NOT copy pose/composition exactly, and do NOT draw any text from references.' : null,
+      hasRefs
+        ? `- Match only the provided reference types strictly: ${hasRuntimeKinds ? authorityEn : 'linked frames control continuity; location, character, and prop images control their corresponding visual attributes'}. Do NOT copy pose/composition exactly, and do NOT draw any text from references.`
+        : null,
       style ? `- Keep visual style consistent: ${style}.` : null,
     ].filter(Boolean).join('\n')
   }
@@ -541,64 +569,72 @@ export function buildStoryboardHardConstraints(params: {
     '- 人物必须衣着完整、服饰得体，并与角色参考图服装完全一致；禁止半裸、裸露上身、暴露服装、缺少衣服、衣物破损导致裸露。',
     '- 禁止生成歪头、扭头、头部大幅偏转、怪异表情、夸张表情或五官扭曲表情；人物头颈姿态必须自然端正，表情真实克制并符合剧情。',
     ratio ? `- 画面比例必须严格为：${ratio}` : null,
-    hasRefs ? '- 有参考图时必须严格匹配：角色资产图锁定身份/服装/发型；上一帧参考图锁定连续性；场景资产图锁定空间结构/光线/可站位置；道具资产图锁定道具外观。禁止原样复制参考图姿势/构图；参考图上的文字标签仅供识别，禁止画入图中。' : null,
+    hasRefs
+      ? `- 只严格匹配本次实际传入的参考类型：${hasRuntimeKinds ? authorityZh : '关联帧控制连续性，场景图、角色图和道具图分别控制对应视觉属性'}。禁止原样复制参考图姿势/构图；参考图文字禁止画入。`
+      : null,
     style ? `- 风格必须与参考一致：${style}` : null,
   ].filter(Boolean).join('\n')
 }
 
-function buildPreviousTailReferenceHardRule(locale: TaskJobData['locale']): string {
+function buildPreviousTailReferenceHardRule(locale: TaskJobData['locale'], sameScene: boolean): string {
   if (locale === 'en') {
     return [
       'PREVIOUS-PANEL TAIL REFERENCE (must follow):',
       '- The FIRST reference image is FP, the previous panel tail frame.',
-      '- The current image must naturally continue from FP as the opening state of this panel.',
-      '- Character appearance MUST strictly follow FP and character asset references: same identity, face, hairstyle, makeup, outfit style, clothing color, fabric layers, accessories, body silhouette, and relative position continuity.',
-      '- The scene/background MUST strictly follow FP: keep the same environment, spatial layout, architecture/background structures, furniture, furnishings, interior decor, wall/floor materials, doors/windows, tables/chairs/cabinets, lamps, key objects, light direction, color mood, weather/time-of-day, depth relationship, and overall atmosphere from the first reference image.',
-      '- Do not replace, add, remove, rearrange, or redesign furniture and set dressing from FP unless the current panel explicitly says a specific object moved.',
-      '- If the current panel location/scene text conflicts with FP, FP wins. Treat current location text only as story context, never as permission to change the FP environment.',
-      '- Do not redesign, replace, or freely reinterpret the FP scene. Only adjust the camera framing slightly when the current panel description requires it.',
-      '- Preserve FP continuity for character identity, outfit, hairstyle, prop state, spatial relationship, lighting direction, color mood, and story state.',
-      '- Continue the previous-frame image: keep overall character positions, ordering, and relative spacing basically consistent, allowing only slight positional shifts; never let different characters crowd into or overlap the same spot; standing posture and actions may change freely.',
-      '- Do not ignore FP, but also do not copy FP exactly; create the next coherent still frame based on the current panel description.',
+      sameScene
+        ? '- This is the same scene: FP controls inherited scene layout, character positions/order, screen side, facing direction, lighting, and prop state.'
+        : '- This is a scene transition: FP controls the starting state; the current location image controls the destination environment. Show only the transition state explicitly requested by the current frame.',
+      '- Character asset references control identity, face, hair, and outfit; current frame text controls only explicitly requested changes.',
+      '- Do not add, remove, rearrange, or redesign inherited scene elements unless the current frame explicitly changes them.',
+      '- Continue coherently from FP without copying its pose or composition exactly.',
     ].join('\n')
   }
   return [
     '【上一分镜尾帧 FP 参考规则 - 必须遵守】',
     '- 第 1 张参考图是 FP，即上一分镜的尾帧。',
-    '- 当前图片必须自然承接 FP，作为当前分镜的开场状态。',
-    '- 人物必须严格按照 FP 和角色资产参考图：保持同一身份、脸型五官、发型、妆容、服装款式、服装颜色、面料层次、配饰、体型轮廓和相对位置连续性。',
-    '- 场景/背景必须严格按照 FP：保持第 1 张参考图里的同一环境、空间布局、建筑/背景结构、家具、陈设、室内装饰、墙面/地面材质、门窗、桌椅柜、灯具、关键物体、光线方向、色调、天气/时间、前后景关系和整体氛围。',
-    '- 禁止替换、增删、重排或重新设计 FP 中的家具和场景陈设；除非当前分镜明确写了某个物体发生移动。',
-    '- 如果当前分镜的场景/地点文字与 FP 不一致，必须以 FP 为准；当前场景文字只能作为剧情上下文，不能作为改变 FP 环境的依据。',
-    '- 禁止重新设计、替换或自由发挥 FP 的场景；除非当前分镜描述明确要求，只允许轻微调整取景范围和构图。',
-    '- 必须延续 FP 中的人物身份、服装发型、道具状态、空间关系、光线方向、色调氛围和剧情状态。',
-    '- 承接前一帧画面：人物整体位置、排布顺序、相对间距基本保持一致，允许位置出现微小偏移；严禁不同人物挤占、重叠在同一位置；站姿、动作可自由变化。',
-    '- 不能忽略 FP，也不能原样复制 FP；要结合当前分镜描述生成顺滑衔接后的当前静态画面。',
+    sameScene
+      ? '- 当前为同场景连续镜头：FP 锁定场景布局、人物位置与顺序、画面左右侧、朝向、光线和道具状态。'
+      : '- 当前为跨场景转场：FP 控制转场起点，当前场景图控制目标环境；只表现当前帧明确要求的转场阶段。',
+    '- 角色资产图锁定身份、脸、发型和服装；当前帧文字只控制明确写出的变化。',
+    '- 当前帧未明确改变的场景元素不得增删、重排或重新设计。',
+    '- 自然承接 FP，但不要原样复制姿势和构图。',
   ].join('\n')
 }
 
 function buildReferenceImageOrderInstruction(params: {
   locale: TaskJobData['locale']
-  labels: string[]
+  references: OrderedReferenceImage[]
 }): string {
-  const labels = params.labels.map((label) => String(label || '').trim()).filter(Boolean)
-  if (labels.length === 0) return ''
+  const references = params.references.filter((reference) => reference.url && reference.label)
+  if (references.length === 0) return ''
+  const first = references[0]
+  const firstIsContinuity = first.kind === 'previous_tail' || first.kind === 'dependency_frame'
+  const referenceLinesEn = references.map((reference, index) => `- F${index + 1}: ${reference.label}.`).join('\n')
+  const supportingReferenceLinesEn = references.slice(1).map((reference, index) => `- F${index + 2}: ${reference.label}.`).join('\n')
+  const referenceLinesZh = references.map((reference, index) => `- F${index + 1}：${reference.label}。`).join('\n')
+  const supportingReferenceLinesZh = references.slice(1).map((reference, index) => `- F${index + 2}：${reference.label}。`).join('\n')
   if (params.locale === 'en') {
     return [
       'REFERENCE IMAGE ORDER (must follow):',
-      '- The following F1/F2/Fn labels mean the order of input reference images, not storyboard keyframe numbers.',
-      ...labels.map((label, index) => `- Input reference F${index + 1}: ${label}.`),
-      '- If both an FP previous-tail image and current storyboard location images exist, the FP image controls continuity from the previous storyboard, while the current storyboard location images describe the intended scene assets for this storyboard. Use the current location images as scene constraints and detail supplements without breaking FP continuity.',
-      '- Understand every input reference by this order before generating: FP/dependency frames control continuity, current storyboard location images control scene structure and lighting, character images control identity/outfit/hairstyle, and prop images control prop appearance.',
+      `- ${references.length} reference image(s) are provided in the actual input order; F numbers refer only to that order.`,
+      firstIsContinuity ? `- F1 is ${first.label}; use it as the continuity anchor.` : '',
+      firstIsContinuity && references.length > 1
+        ? '- F2-Fn are supporting references in the actual input order; apply each by its asset type and do not let it override F1 continuity unless a location image explicitly defines a transition destination.'
+        : referenceLinesEn,
+      firstIsContinuity && references.length > 1 ? supportingReferenceLinesEn : '',
+      '- Authority: FP/dependency frames control inherited or starting spatial state; a location image included after FP controls an explicit destination scene; character images control identity/outfit/hair; prop images control prop appearance; current text controls explicit changes.',
       '- In the generated still image, combine the current script/frame description with the ordered references. Do not copy any reference image exactly.',
     ].join('\n')
   }
   return [
     '【参考图顺序说明 - 必须遵守】',
-    '- 以下 F1/F2/Fn 表示传入生图接口的参考图片顺序，不是分镜组关键帧编号。',
-    ...labels.map((label, index) => `- 输入参考图 F${index + 1}：${label}。`),
-    '- 如果同时存在 FP 上一尾帧和当前分镜场景图：FP 负责承接上一个连续分镜的画面连续性；当前分镜场景图是这个分镜自己的场景资产，负责约束和补充当前分镜的空间结构、光线、可站位置与环境细节，不能破坏 FP 连续性。',
-    '- 必须先按这个顺序理解参考图：FP/依赖帧负责连续性，当前分镜场景图负责场景资产约束，角色图负责身份/服装/发型，道具图负责道具外观。',
+    `- 实际共传入 ${references.length} 张参考图，F 编号只表示本次接口的真实传入顺序。`,
+    firstIsContinuity ? `- F1 是${first.label}，作为画面连续性锚点。` : '',
+    firstIsContinuity && references.length > 1
+      ? '- F2-Fn 是按真实顺序传入的辅助参考图，按各自资产类型生效；除非场景图明确表示转场目标，否则不得覆盖 F1 的连续性。'
+      : referenceLinesZh,
+    firstIsContinuity && references.length > 1 ? supportingReferenceLinesZh : '',
+    '- 权限顺序：FP/依赖帧控制继承状态或转场起点；若 FP 后仍传入场景图，该场景图控制明确的目标环境；角色图控制身份/服装/发型；道具图控制道具外观；当前文字只控制明确变化。',
     '- 生成当前静态图时，把当前剧本/关键帧描述与这些参考图融合；禁止原样复制任意参考图构图或姿势。',
   ].join('\n')
 }
@@ -634,24 +670,45 @@ function sanitizeStillImagePrompt(raw: string): string {
   return joined || text
 }
 
-function buildShotPromptPrefix(params: {
+export function buildShotPromptPrefix(params: {
   locale: TaskJobData['locale']
   context: ReturnType<typeof buildPanelPromptContext>
 }): string {
   const shot = (params.context as { shot?: PromptRecord }).shot || {}
   const shotType = String(shot.shot_type || '').trim()
   const cameraMove = String(shot.camera_move || '').trim()
-  if (!shotType && !cameraMove) return ''
+  const location = String(shot.location || '').trim()
+  if (!shotType && !cameraMove && !location) return ''
   if (params.locale === 'en') {
+    const framing = cameraMove ? describeStaticFramingResult(cameraMove, 'en') : ''
     return [
+      location ? `Current scene: ${location}` : '',
       shotType ? `Shot type: ${shotType}` : '',
-      cameraMove ? `camera framing/movement hint: ${cameraMove}` : '',
+      framing ? `Static framing result: ${framing}` : '',
     ].filter(Boolean).join('; ')
   }
+  const framing = cameraMove ? describeStaticFramingResult(cameraMove, 'zh') : ''
   return [
+    location ? `当前场景：${location}` : '',
     shotType ? `镜头类型：${shotType}` : '',
-    cameraMove ? `镜头方式：${cameraMove}` : '',
+    framing ? `静态构图结果：${framing}` : '',
   ].filter(Boolean).join('；')
+}
+
+function describeStaticFramingResult(cameraMove: string, locale: 'zh' | 'en'): string {
+  const value = cameraMove.trim().toLowerCase()
+  const is = (pattern: RegExp) => pattern.test(value)
+  if (is(/push|dolly.?in|推进|推镜/)) return locale === 'en' ? 'closer framing with the subject occupying more of the frame' : '更近景别，主体占画面比例增大'
+  if (is(/pull|dolly.?out|拉远|拉镜/)) return locale === 'en' ? 'wider framing revealing more of the environment' : '更宽景别，展示更多环境关系'
+  if (is(/pan|摇镜|横摇/)) return locale === 'en' ? 'the composed endpoint after revealing the target subject' : '呈现揭示目标主体后的终点构图'
+  if (is(/track|follow|truck|跟拍|跟随|横移/)) return locale === 'en' ? 'a stable current moment that preserves movement direction and screen side' : '稳定呈现当前瞬间，保持移动方向与画面左右关系'
+  if (is(/jib|crane|升降|上升|下降/)) return locale === 'en' ? 'the final high or low spatial relationship implied by the shot' : '呈现升降结束后的高低空间关系'
+  if (is(/orbit|环绕/)) return locale === 'en' ? 'the final angle around the subject while preserving spatial continuity' : '呈现环绕结束后的观察角度并保持空间连续'
+  if (is(/zoom|变焦/)) return locale === 'en' ? 'the final field of view implied by the zoom' : '呈现变焦结束后的最终视野范围'
+  if (is(/static|固定|静止/)) return locale === 'en' ? 'locked-off composition' : '固定机位构图'
+  return locale === 'en'
+    ? `the single still-frame endpoint implied by ${cameraMove}, with no motion trail`
+    : `${cameraMove}对应的单一终点构图，不表现运动轨迹`
 }
 
 export async function handlePanelImageTask(job: Job<TaskJobData>) {
@@ -659,6 +716,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   const panelId = pickFirstString(payload.panelId, job.data.targetId)
   const targetFrameId = pickFirstString(payload.targetFrameId, payload.frameId)
   if (!panelId) throw new Error('panelId missing')
+  const referenceNormalizationCache = new Map<string, string | null>()
 
   const panel = await prisma.novelPromotionPanel.findUnique({
     where: { id: panelId },
@@ -703,8 +761,6 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       : panelUsesPreviousTailAsReference
 
   const candidateCount = clampCount(payload.candidateCount ?? payload.count, 1, 4, 1)
-  const panelReferenceEntries = await collectPanelReferenceImageEntries(projectData, panel)
-  const panelReferenceImages = panelReferenceEntries.map((entry) => entry.url)
   const previousTailInfo = needsPreviousTailReference
     ? await loadPreviousPanelTailImageInfo({
       storyboardId: panel.storyboardId,
@@ -726,22 +782,36 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     await markPanelFrameGenerationFailed(targetFrame?.id, message)
     throw new Error(message)
   }
-  const panelReferenceImagesForSinglePanel = panelReferenceImages
-  const panelReferenceEntriesForSinglePanel = panelReferenceEntries
-  const singlePanelReferenceLabels = [
-    ...(!isMultiFrameGroup && previousTailImageUrl ? ['FP：上一个连续分镜的尾帧，作为当前分镜的参考图'] : []),
-    ...panelReferenceEntriesForSinglePanel.map((entry) => entry.label),
-  ]
-  const singlePanelRefs = uniqueStrings([
+  const previousTailIsSameScene = Boolean(
+    previousTailImageUrl &&
+    previousTailInfo &&
+    (previousTailInfo.previousPanelLocation === undefined
+      ? true
+      : isSamePanelLocation(previousTailInfo.previousPanelLocation, panel.location)),
+  )
+  const panelReferenceEntries = await collectPanelReferenceImageEntries(
+    projectData,
+    panel,
+    { includeLocationReference: !previousTailIsSameScene },
+  )
+  const panelOrderedReferences: OrderedReferenceImage[] = panelReferenceEntries.map((entry) => ({
+    url: entry.url,
+    label: entry.label,
+    kind: entry.kind,
+  }))
+  const singlePanelOrderedReferences = await normalizeOrderedReferenceImages([
     ...(!isMultiFrameGroup && previousTailImageUrl
-      ? [toSignedUrlIfCos(previousTailImageUrl, 3600) || previousTailImageUrl]
+      ? [{
+        url: toSignedUrlIfCos(previousTailImageUrl, 3600) || previousTailImageUrl,
+        label: 'FP：上一个连续分镜的尾帧，作为当前分镜的参考图',
+        kind: 'previous_tail' as const,
+      }]
       : []),
-    ...panelReferenceImagesForSinglePanel,
-  ])
-  const normalizedRefs = await normalizeReferenceImagesForGeneration(singlePanelRefs)
-  const normalizedPanelRefs = isMultiFrameGroup
-    ? await normalizeReferenceImagesForGeneration(uniqueStrings(panelReferenceImages))
-    : normalizedRefs
+    ...panelOrderedReferences,
+  ], { panelId, scope: 'single_panel' }, referenceNormalizationCache)
+  const normalizedRefs = singlePanelOrderedReferences.map((entry) => entry.url)
+  const singlePanelReferenceLabels = singlePanelOrderedReferences.map((entry) => entry.label)
+  const panelReferenceEntriesWithoutLocation = panelReferenceEntries.filter((entry) => entry.kind !== 'location')
 
   const logger = createScopedLogger({
     module: 'worker.panel-image',
@@ -757,19 +827,20 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       panelId,
       modelKey,
       candidateCount,
-      referenceImagesRawCount: panelReferenceImages.length,
-      referenceImagesEffectiveRawCount: singlePanelRefs.length,
+      referenceImagesRawCount: panelReferenceEntries.length,
+      referenceImagesEffectiveRawCount: singlePanelOrderedReferences.length,
       referenceImagesNormalizedCount: normalizedRefs.length,
-      referenceImageLabels: [
-        ...(!isMultiFrameGroup && previousTailImageUrl ? ['FP(previous panel tail for current storyboard continuity)'] : []),
-        ...panelReferenceEntriesForSinglePanel.map((entry) => entry.label),
-      ],
-      rawUrls: singlePanelRefs.map((u) => u.substring(0, 100)),
-      normalizedUrls: normalizedRefs.map((u) => u.substring(0, 100)),
+      orderedReferences: singlePanelOrderedReferences.map((entry, index) => ({
+        frameLabel: `F${index + 1}`,
+        kind: entry.kind,
+        label: entry.label,
+        normalizedUrl: entry.url.substring(0, 100),
+      })),
       panelCharacters: panel.characters,
       panelLocation: panel.location,
       artStyle: modelConfig.artStyle,
       usePreviousPanelTailAsReference: panelUsesPreviousTailAsReference,
+      previousTailIsSameScene,
     },
   })
 
@@ -854,6 +925,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     aspectRatio,
     styleText: artStyle || '',
     referenceImagesCount: normalizedRefs.length,
+    referenceKinds: singlePanelOrderedReferences.map((entry) => entry.kind),
   })
 
   if (isMultiFrameGroup) {
@@ -866,7 +938,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       sortedFrames[0]?.frameIndex === 0
     const existingGeneratedFrames = sortedFrames.filter((frame) => {
       if (targetFrameId && frame.id === targetFrameId) return false
-      if (shouldRegenerateFirstFrameForPreviousTail && frame.frameIndex === 0) return false
+      if (shouldRegenerateFirstFrameForPreviousTail) return false
       return typeof frame.imageUrl === 'string' && frame.imageUrl.trim()
     })
     const shouldResumePartialGroup =
@@ -895,7 +967,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     const framesToGenerate = targetFrame
       ? [targetFrame]
       : sortedFrames.filter((frame) => {
-        if (shouldRegenerateFirstFrameForPreviousTail && frame.frameIndex === 0) return true
+        if (shouldRegenerateFirstFrameForPreviousTail) return true
         return !(shouldResumePartialGroup && frame.imageUrl)
       })
     logger.info({
@@ -958,34 +1030,55 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
         previousTailImageUrl,
         dependencyFrameIds: runtimeDependencyFrameIds,
       })
-      const dependencyUrls = frameReferencePlan.urls
-        .map((value) => toSignedUrlIfCos(value, 3600))
-        .filter((value): value is string => Boolean(value))
-      const normalizedFrameReferenceRefs = dependencyUrls.length > 0
-        ? await normalizeReferenceImagesForGeneration(dependencyUrls)
-        : []
-      const panelAssetRefs = normalizedPanelRefs
-      const panelAssetReferenceLabels = panelReferenceEntries.map((entry) => entry.label)
-      const normalizedFrameRefs = uniqueStrings([
-        ...normalizedFrameReferenceRefs,
-        ...panelAssetRefs,
-      ])
-      const frameReferenceLabels = [
+      const dependencyLabels = [
         ...(frameReferencePlan.usesPreviousTail ? ['FP：上一个连续分镜的尾帧，作为当前分镜的参考图'] : []),
-        ...frameReferencePlan.frameReferenceIndexes.map((index) => `分镜组已生成关键帧 F${index + 1}`),
-        ...panelAssetReferenceLabels,
+        ...frameReferencePlan.frameReferenceIndexes.map((index) => `分镜组第 ${index + 1} 关键帧`),
       ]
+      const dependencyOrderedReferences = frameReferencePlan.urls
+        .reduce<OrderedReferenceImage[]>((entries, value, index) => {
+          const url = toSignedUrlIfCos(value, 3600)
+          if (!url) return entries
+          entries.push({
+            url,
+            label: dependencyLabels[index] || `关联关键帧 ${index + 1}`,
+            kind: index === 0 && frameReferencePlan.usesPreviousTail
+              ? 'previous_tail' as const
+              : 'dependency_frame' as const,
+          })
+          return entries
+        }, [])
+      const hasDependencyFrameReference = dependencyOrderedReferences.length > 0
+      const panelAssetEntries = (hasDependencyFrameReference
+        ? panelReferenceEntriesWithoutLocation
+        : panelReferenceEntries).map((entry): OrderedReferenceImage => ({
+          url: entry.url,
+          label: entry.label,
+          kind: entry.kind,
+        }))
+      const normalizedOrderedFrameReferences = await normalizeOrderedReferenceImages(
+        [...dependencyOrderedReferences, ...panelAssetEntries],
+        { panelId, frameId: frame.id, frameIndex: frame.frameIndex },
+        referenceNormalizationCache,
+      )
+      const normalizedFrameRefs = normalizedOrderedFrameReferences.map((entry) => entry.url)
+      const frameReferenceLabels = normalizedOrderedFrameReferences.map((entry) => entry.label)
+      const normalizedDependencyReferenceCount = normalizedOrderedFrameReferences.filter(
+        (entry) => entry.kind === 'previous_tail' || entry.kind === 'dependency_frame',
+      ).length
       const frameHardConstraints = [
         buildReferenceImageOrderInstruction({
           locale: job.data.locale,
-          labels: frameReferenceLabels,
+          references: normalizedOrderedFrameReferences,
         }),
-        frameReferencePlan.usesPreviousTail ? buildPreviousTailReferenceHardRule(job.data.locale) : '',
+        frameReferencePlan.usesPreviousTail
+          ? buildPreviousTailReferenceHardRule(job.data.locale, previousTailIsSameScene)
+          : '',
         buildStoryboardHardConstraints({
           locale: job.data.locale,
           aspectRatio,
           styleText: artStyle || '',
           referenceImagesCount: normalizedFrameRefs.length,
+          referenceKinds: normalizedOrderedFrameReferences.map((entry) => entry.kind),
         }),
       ].filter(Boolean).join('\n\n')
       const frameBasePrompt = buildPanelFramePrompt({
@@ -997,7 +1090,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
         panelContext: promptContext,
         frameReferenceIndexes: frameReferencePlan.frameReferenceIndexes,
         usesPreviousTail: frameReferencePlan.usesPreviousTail,
-        frameReferenceImageCount: normalizedFrameReferenceRefs.length,
+        frameReferenceImageCount: normalizedDependencyReferenceCount,
         hardConstraints: frameHardConstraints,
       })
       const frameResolvedPrompt = frameBasePrompt
@@ -1031,11 +1124,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
           prompt: framePrompt,
           options: {
             referenceImages: normalizedFrameRefs,
-            referenceImageLabels: [
-              ...(frameReferencePlan.usesPreviousTail ? ['FP(previous panel tail for current storyboard continuity)'] : []),
-              ...frameReferencePlan.frameReferenceIndexes.map((index) => `F${index + 1}`),
-              ...panelAssetReferenceLabels,
-            ],
+            referenceImageLabels: frameReferenceLabels,
             aspectRatio,
           },
           allowTaskExternalIdResume: false,
@@ -1111,9 +1200,11 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   const finalConstraints = [
     buildReferenceImageOrderInstruction({
       locale: job.data.locale,
-      labels: singlePanelReferenceLabels,
+      references: singlePanelOrderedReferences,
     }),
-    !isMultiFrameGroup && previousTailImageUrl ? buildPreviousTailReferenceHardRule(job.data.locale) : '',
+    !isMultiFrameGroup && previousTailImageUrl
+      ? buildPreviousTailReferenceHardRule(job.data.locale, previousTailIsSameScene)
+      : '',
     hardConstraints,
   ].filter(Boolean).join('\n\n')
   const finalPrompt = finalConstraints
@@ -1143,10 +1234,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       prompt: finalPrompt,
       options: {
         referenceImages: normalizedRefs,
-        referenceImageLabels: [
-          ...(!isMultiFrameGroup && previousTailImageUrl ? ['FP(previous panel tail for current storyboard continuity)'] : []),
-          ...panelReferenceEntriesForSinglePanel.map((entry) => entry.label),
-        ],
+        referenceImageLabels: singlePanelReferenceLabels,
         aspectRatio,
       },
       // 单个任务内会串行生成多候选，若允许按 task.externalId 续接会复用上一候选外部任务结果。

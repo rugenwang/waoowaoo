@@ -15,6 +15,11 @@ import { filterNormalVideoModelOptions } from '@/lib/model-capabilities/video-mo
 import { RatioSelector, StyleSelector } from './config-modal-selectors'
 import { ModelCapabilityDropdown } from './ModelCapabilityDropdown'
 import { AppIcon } from '@/components/ui/icons'
+import {
+    DEFAULT_LTX_VIDEO_LORAS,
+    normalizeLtxVideoLoras,
+    type LtxVideoLoraConfig,
+} from '@/lib/ltx-lora-config'
 
 interface ModelOption {
     value: string
@@ -69,6 +74,7 @@ interface SettingsModalProps {
     localStoryboardUsePanelDescriptionEnabled?: boolean
     progressPopupEnabled?: boolean
     forcedStoryboardDurationSec?: 8 | 10 | 15 | 20 | null
+    localVideoLoras?: string | null
     onArtStyleChange?: (value: string) => void
     onAnalysisModelChange?: (value: string) => void
     onCharacterModelChange?: (value: string) => void
@@ -95,6 +101,7 @@ interface SettingsModalProps {
     onLocalStoryboardUsePanelDescriptionEnabledChange?: (value: boolean) => void
     onProgressPopupEnabledChange?: (value: boolean) => void
     onForcedStoryboardDurationSecChange?: (value: 8 | 10 | 15 | 20 | null) => void
+    onLocalVideoLorasChange?: (value: LtxVideoLoraConfig[]) => void
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -181,6 +188,7 @@ export function SettingsModal({
     localStoryboardUsePanelDescriptionEnabled,
     progressPopupEnabled,
     forcedStoryboardDurationSec,
+    localVideoLoras,
     onArtStyleChange,
     onAnalysisModelChange,
     onCharacterModelChange,
@@ -206,6 +214,7 @@ export function SettingsModal({
     onLocalStoryboardUsePanelDescriptionEnabledChange,
     onProgressPopupEnabledChange,
     onForcedStoryboardDurationSecChange,
+    onLocalVideoLorasChange,
 }: SettingsModalProps) {
     const t = useTranslations('configModal')
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle')
@@ -224,6 +233,7 @@ export function SettingsModal({
         () => normalVideoModels.find((model) => model.value === videoModel) || null,
         [normalVideoModels, videoModel],
     )
+    const isLocalVideoModel = selectedVideoModelOption?.provider === 'local'
     const selectedAnalysisModelOption = useMemo(
         () => userModels.llm.find((model) => model.value === analysisModel) || null,
         [userModels.llm, analysisModel],
@@ -294,6 +304,10 @@ export function SettingsModal({
         || forcedStoryboardDurationSec === 20
             ? forcedStoryboardDurationSec
             : null
+    const videoLorasValue = useMemo(() => {
+        const custom = normalizeLtxVideoLoras(localVideoLoras)
+        return custom.length > 0 ? custom : DEFAULT_LTX_VIDEO_LORAS
+    }, [localVideoLoras])
     const promptRefineLevel: 'conservative' | 'medium' | 'simple' =
         localStoryboardPromptRefineLevel === 'conservative'
         || localStoryboardPromptRefineLevel === 'simple'
@@ -318,6 +332,9 @@ export function SettingsModal({
     const [forcedStoryboardDurationDraft, setForcedStoryboardDurationDraft] = useState<'' | '8' | '10' | '15' | '20'>(
         forcedStoryboardDurationValue === null ? '' : String(forcedStoryboardDurationValue) as '8' | '10' | '15' | '20',
     )
+    const [videoLoraDrafts, setVideoLoraDrafts] = useState<Array<{ path: string; weight: string }>>(
+        videoLorasValue.map((item) => ({ path: item.path, weight: String(item.weight) })),
+    )
 
     useEffect(() => {
         if (!isOpen) return
@@ -333,6 +350,7 @@ export function SettingsModal({
         setPromptUseDescriptionEnabledDraft(promptUseDescriptionEnabled)
         setProgressPopupEnabledDraft(progressPopupEnabledValue)
         setForcedStoryboardDurationDraft(forcedStoryboardDurationValue === null ? '' : String(forcedStoryboardDurationValue) as '8' | '10' | '15' | '20')
+        setVideoLoraDrafts(videoLorasValue.map((item) => ({ path: item.path, weight: String(item.weight) })))
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen])
 
@@ -373,6 +391,22 @@ export function SettingsModal({
     }
     const commitPromptRefineLevel = () => {
         onLocalStoryboardPromptRefineLevelChange?.(promptRefineLevelDraft)
+    }
+    const normalizeVideoLoraDrafts = (rows: Array<{ path: string; weight: string }>) => rows
+        .map((item) => ({
+            path: item.path.trim(),
+            weight: Number(item.weight),
+        }))
+        .filter((item) => item.path && Number.isFinite(item.weight))
+
+    const commitVideoLoras = (rows = videoLoraDrafts) => {
+        const normalized = normalizeVideoLoraDrafts(rows)
+        onLocalVideoLorasChange?.(normalized)
+        showSaved()
+    }
+
+    const updateVideoLoraDraft = (index: number, patch: Partial<{ path: string; weight: string }>) => {
+        setVideoLoraDrafts((prev) => prev.map((item, i) => i === index ? { ...item, ...patch } : item))
     }
     const editCapabilityFields = useMemo(
         () => extractCapabilityFields(selectedEditModelOption?.capabilities, 'image'),
@@ -882,6 +916,82 @@ export function SettingsModal({
                                     }}
                                 />
                             </div>
+
+                            {isLocalVideoModel ? (
+                                <div className="space-y-3 md:col-span-2 rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-4">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <div>
+                                            <div className="text-sm font-medium text-[var(--glass-text-secondary)]">{t('localVideoLoraTitle')}</div>
+                                            <div className="mt-1 text-xs text-[var(--glass-text-tertiary)]">{t('localVideoLoraHint')}</div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                className="glass-btn-base glass-btn-soft rounded-lg px-3 py-1.5 text-xs"
+                                                onClick={() => {
+                                                    const rows = DEFAULT_LTX_VIDEO_LORAS.map((item) => ({ path: item.path, weight: String(item.weight) }))
+                                                    setVideoLoraDrafts(rows)
+                                                    commitVideoLoras(rows)
+                                                }}
+                                            >
+                                                {t('localVideoLoraReset')}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="glass-btn-base glass-btn-soft rounded-lg px-3 py-1.5 text-xs"
+                                                onClick={() => {
+                                                    setVideoLoraDrafts((prev) => [...prev, { path: '', weight: '0.4' }])
+                                                }}
+                                            >
+                                                {t('localVideoLoraAdd')}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="glass-btn-base glass-btn-primary rounded-lg px-3 py-1.5 text-xs"
+                                                onClick={() => commitVideoLoras()}
+                                            >
+                                                {t('localVideoLoraSave')}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {videoLoraDrafts.map((item, index) => (
+                                            <div key={index} className="grid grid-cols-[minmax(0,1fr)_96px_36px] gap-2 items-center">
+                                                <input
+                                                    className="w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-xs font-mono"
+                                                    value={item.path}
+                                                    placeholder={t('localVideoLoraPath')}
+                                                    onChange={(e) => updateVideoLoraDraft(index, { path: e.target.value })}
+                                                    onBlur={() => commitVideoLoras()}
+                                                />
+                                                <input
+                                                    type="number"
+                                                    className="w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-xs"
+                                                    value={item.weight}
+                                                    min={-10}
+                                                    max={10}
+                                                    step={0.05}
+                                                    placeholder={t('localVideoLoraWeight')}
+                                                    onChange={(e) => updateVideoLoraDraft(index, { weight: e.target.value })}
+                                                    onBlur={() => commitVideoLoras()}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    className="glass-btn-base glass-btn-soft rounded-lg p-2 text-[var(--glass-text-tertiary)]"
+                                                    title={t('delete')}
+                                                    onClick={() => {
+                                                        const rows = videoLoraDrafts.filter((_, i) => i !== index)
+                                                        setVideoLoraDrafts(rows)
+                                                        commitVideoLoras(rows)
+                                                    }}
+                                                >
+                                                    <AppIcon name="trash" className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : null}
 
                             <div className="space-y-2">
                                 <label className="text-sm font-medium text-[var(--glass-text-secondary)]">{t('audioModel')}</label>

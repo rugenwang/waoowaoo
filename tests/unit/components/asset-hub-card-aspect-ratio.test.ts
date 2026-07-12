@@ -23,6 +23,7 @@ vi.mock('@/lib/query/mutations', () => ({
   useUndoLocationImage: () => idleMutation,
   useUploadLocationImage: () => idleMutation,
   useDeleteLocation: () => idleMutation,
+  useCancelTask: () => idleMutation,
 }))
 
 vi.mock('@/components/ui/icons', () => ({
@@ -51,6 +52,20 @@ vi.mock('@/components/image-generation/ImageGenerationInlineCountButton', () => 
 
 vi.mock('@/lib/task/presentation', () => ({
   resolveTaskPresentationState: () => null,
+}))
+
+vi.mock('@/lib/task-queue', () => ({
+  useTaskQueue: () => ({
+    enabled: false,
+    queue: [],
+    enqueue: vi.fn(),
+  }),
+}))
+
+vi.mock('@/lib/query/hooks/useTaskTargetStateMap', () => ({
+  useTaskTargetStateMap: () => ({
+    getState: () => null,
+  }),
 }))
 
 vi.mock('@/lib/image-generation/use-image-generation-count', () => ({
@@ -96,6 +111,9 @@ const messages = {
       selectCount: '选择数量',
       confirmOption: '确认选择',
       optionNumber: '方案 {number}',
+      generatedProgress: '已生成 {generated}/{total}',
+      optionSelected: '已选择方案 {number}',
+      selectFirst: '请选择方案',
     },
     common: {
       generateFailed: '生成失败',
@@ -239,5 +257,79 @@ describe('asset hub card aspect ratio', () => {
 
     expect(html).toContain('aspect-[3/2]')
     expect(html).not.toContain('min-h-[100px]')
+  })
+
+  it('does not offer to confirm a failed location option without an image and still exposes upload', async () => {
+    Reflect.set(globalThis, 'React', React)
+    const { default: LocationCard } = await import('@/app/[locale]/workspace/asset-hub/components/LocationCard')
+    const html = renderWithIntl(
+      createElement(LocationCard, {
+        location: {
+          id: 'location-failed',
+          name: '鬼门',
+          summary: '失败场景',
+          folderId: null,
+          images: [
+            {
+              id: 'location-image-1',
+              imageIndex: 0,
+              description: null,
+              imageUrl: null,
+              previousImageUrl: null,
+              isSelected: true,
+              imageTaskRunning: false,
+              lastError: { code: 'IMAGE_FAILED', message: '生成失败' },
+            },
+            {
+              id: 'location-image-2',
+              imageIndex: 1,
+              description: null,
+              imageUrl: null,
+              previousImageUrl: null,
+              isSelected: false,
+              imageTaskRunning: false,
+              lastError: { code: 'IMAGE_FAILED', message: '生成失败' },
+            },
+          ],
+        },
+        assetType: 'location',
+      }),
+    )
+
+    expect(html).not.toContain('确认选择')
+    expect(html).toContain('data-icon="upload"')
+  })
+
+  it('exposes upload when a character image generation failed without producing an image', async () => {
+    Reflect.set(globalThis, 'React', React)
+    const { CharacterCard } = await import('@/app/[locale]/workspace/asset-hub/components/CharacterCard')
+    const html = renderWithIntl(
+      createElement(CharacterCard, {
+        character: {
+          id: 'character-failed',
+          name: '谢无妄',
+          folderId: null,
+          customVoiceUrl: null,
+          appearances: [
+            {
+              id: 'appearance-failed',
+              appearanceIndex: 0,
+              changeReason: '默认形象',
+              description: null,
+              imageUrl: null,
+              imageUrls: [],
+              selectedIndex: null,
+              previousImageUrl: null,
+              previousImageUrls: [],
+              imageTaskRunning: false,
+              lastError: { code: 'IMAGE_FAILED', message: '生成失败' },
+            },
+          ],
+        },
+      }),
+    )
+
+    expect(html).toContain('生成失败')
+    expect(html).toContain('data-icon="upload"')
   })
 })

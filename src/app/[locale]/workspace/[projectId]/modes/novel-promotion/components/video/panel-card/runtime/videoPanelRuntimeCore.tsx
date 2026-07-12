@@ -10,6 +10,16 @@ import { usePanelPromptEditor } from './hooks/usePanelPromptEditor'
 import { usePanelVoiceManager } from './hooks/usePanelVoiceManager'
 import { usePanelLipSync } from './hooks/usePanelLipSync'
 
+export function resolveVisibleBaseVideoUrl({
+  videoUrl,
+}: {
+  isLinked: boolean
+  videoUrl?: string | null
+  videoGenerationMode?: string | null
+}) {
+  return videoUrl || undefined
+}
+
 export function useVideoPanelActions({
   panel,
   panelIndex,
@@ -56,12 +66,11 @@ export function useVideoPanelActions({
   const t = useTranslations('video')
   const tCommon = useTranslations('common')
   const panelKey = `${panel.storyboardId}-${panel.panelIndex}`
-  const isFirstLastFrameOutput = panel.videoGenerationMode === 'firstlastframe' && !!panel.videoUrl
-  const visibleBaseVideoUrl = (() => {
-    if (isLinked) return isFirstLastFrameOutput ? panel.videoUrl : undefined
-    if (isLastFrame) return undefined
-    return panel.videoUrl
-  })()
+  const visibleBaseVideoUrl = resolveVisibleBaseVideoUrl({
+    isLinked,
+    videoUrl: panel.videoUrl,
+    videoGenerationMode: panel.videoGenerationMode,
+  })
   const hasVisibleBaseVideo = !!visibleBaseVideoUrl
 
   const taskStatus = usePanelTaskStatus({

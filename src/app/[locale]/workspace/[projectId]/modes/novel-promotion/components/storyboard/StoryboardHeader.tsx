@@ -12,6 +12,7 @@ interface StoryboardHeaderProps {
   runningCount: number
   pendingPanelCount: number
   isBatchSubmitting: boolean
+  queueModeEnabled: boolean
   onDownloadAllImages: () => void
   onGenerateAllPanels: () => void
   onBack: () => void
@@ -24,6 +25,7 @@ export default function StoryboardHeader({
   runningCount,
   pendingPanelCount,
   isBatchSubmitting,
+  queueModeEnabled,
   onDownloadAllImages,
   onGenerateAllPanels,
   onBack
@@ -68,7 +70,7 @@ export default function StoryboardHeader({
             variant="primary"
             loading={isBatchSubmitting}
             onClick={onGenerateAllPanels}
-            disabled={runningCount > 0}
+            disabled={runningCount > 0 && !queueModeEnabled}
           >
             {t('header.generateAllPanels')} ({pendingPanelCount})
           </GlassButton>

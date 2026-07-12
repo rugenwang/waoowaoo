@@ -39,6 +39,7 @@ import { useVideoTaskStates } from './video-stage-runtime/useVideoTaskStates'
 import { useVideoPanelsProjection } from './video-stage-runtime/useVideoPanelsProjection'
 import { useVideoPromptState } from './video-stage-runtime/useVideoPromptState'
 import { useVideoPanelLinking } from './video-stage-runtime/useVideoPanelLinking'
+import { shouldBatchLinkAdjacentPanels } from './video-stage-runtime/first-last-frame-link-candidates'
 import { useVideoVoiceLines } from './video-stage-runtime/useVideoVoiceLines'
 import { useVideoDownloadAll } from './video-stage-runtime/useVideoDownloadAll'
 import { useVideoStageUiState } from './video-stage-runtime/useVideoStageUiState'
@@ -245,10 +246,107 @@ export function useVideoStageRuntime({
     onUpdateVideoPrompt,
   })
 
-  const { linkedPanels, handleToggleLink } = useVideoPanelLinking({
+  const { linkedPanels, handleToggleLink, handleSetLinks } = useVideoPanelLinking({
     allPanels,
     updatePanelLinkMutation,
   })
+  const [isBatchUpdatingFirstLastFrames, setIsBatchUpdatingFirstLastFrames] = useState(false)
+
+  const firstLastFrameLinkCandidates = useMemo(() => {
+    const candidates: Array<{
+      panelKey: string
+      storyboardId: string
+      panelIndex: number
+      alreadyLinked: boolean
+    }> = []
+    for (let index = 0; index < allPanels.length - 1; index += 1) {
+      const panel = allPanels[index]
+      const nextPanel = allPanels[index + 1]
+      if (!shouldBatchLinkAdjacentPanels(
+        panel.textPanel?.characters,
+        nextPanel.textPanel?.characters,
+      )) {
+        continue
+      }
+      const panelKey = `${panel.storyboardId}-${panel.panelIndex}`
+      candidates.push({
+        panelKey,
+        storyboardId: panel.storyboardId,
+        panelIndex: panel.panelIndex,
+        alreadyLinked: linkedPanels.get(panelKey) === true,
+      })
+    }
+    return candidates
+  }, [allPanels, linkedPanels])
+
+  const firstLastFrameUnlinkedCount = useMemo(
+    () => firstLastFrameLinkCandidates.filter((candidate) => !candidate.alreadyLinked).length,
+    [firstLastFrameLinkCandidates],
+  )
+  const firstLastFrameLinkedCount = useMemo(
+    () => firstLastFrameLinkCandidates.filter((candidate) => candidate.alreadyLinked).length,
+    [firstLastFrameLinkCandidates],
+  )
+
+  const invalidateFirstLastFrameLinks = useCallback(() => {
+    if (!episodeId || !projectId) return
+    queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) })
+    queryClient.invalidateQueries({ queryKey: queryKeys.storyboards.all(episodeId) })
+  }, [episodeId, projectId, queryClient])
+
+  const handleLinkAllFirstLastFrames = useCallback(async () => {
+    const updates = firstLastFrameLinkCandidates
+      .filter((candidate) => !candidate.alreadyLinked)
+      .map((candidate) => ({
+        panelKey: candidate.panelKey,
+        storyboardId: candidate.storyboardId,
+        panelIndex: candidate.panelIndex,
+        linked: true,
+      }))
+    if (updates.length === 0) return
+    setIsBatchUpdatingFirstLastFrames(true)
+    try {
+      await handleSetLinks(updates)
+      invalidateFirstLastFrameLinks()
+    } catch (error) {
+      _ulogError('batch link first/last frames failed:', error)
+      alert(t('firstLastFrame.batchLinkFailed'))
+    } finally {
+      setIsBatchUpdatingFirstLastFrames(false)
+    }
+  }, [
+    firstLastFrameLinkCandidates,
+    handleSetLinks,
+    invalidateFirstLastFrameLinks,
+    t,
+  ])
+
+  const handleUnlinkAllFirstLastFrames = useCallback(async () => {
+    const updates = firstLastFrameLinkCandidates
+      .filter((candidate) => candidate.alreadyLinked)
+      .map((candidate) => ({
+        panelKey: candidate.panelKey,
+        storyboardId: candidate.storyboardId,
+        panelIndex: candidate.panelIndex,
+        linked: false,
+      }))
+    if (updates.length === 0) return
+    setIsBatchUpdatingFirstLastFrames(true)
+    try {
+      await handleSetLinks(updates)
+      invalidateFirstLastFrameLinks()
+    } catch (error) {
+      _ulogError('batch unlink first/last frames failed:', error)
+      alert(t('firstLastFrame.batchUnlinkFailed'))
+    } finally {
+      setIsBatchUpdatingFirstLastFrames(false)
+    }
+  }, [
+    firstLastFrameLinkCandidates,
+    handleSetLinks,
+    invalidateFirstLastFrameLinks,
+    t,
+  ])
 
   const {
     panelVoiceLines,
@@ -774,6 +872,12 @@ export function useVideoStageRuntime({
         queueModeEnabled={queueMode}
         isDownloading={isDownloading}
         onGenerateAll={handleOpenBatchGenerateModal}
+        onLinkAllFirstLastFrames={handleLinkAllFirstLastFrames}
+        onUnlinkAllFirstLastFrames={handleUnlinkAllFirstLastFrames}
+        firstLastFrameLinkableCount={firstLastFrameLinkCandidates.length}
+        firstLastFrameUnlinkedCount={firstLastFrameUnlinkedCount}
+        firstLastFrameLinkedCount={firstLastFrameLinkedCount}
+        isBatchUpdatingFirstLastFrames={isBatchUpdatingFirstLastFrames}
         onDownloadAll={handleDownloadAllVideos}
         onBack={onBack}
         onEnterEditor={onEnterEditor}

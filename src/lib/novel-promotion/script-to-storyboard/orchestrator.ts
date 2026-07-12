@@ -24,6 +24,7 @@ import {
   DEFAULT_ANALYSIS_WORKFLOW_CONCURRENCY,
   normalizeWorkflowConcurrencyValue,
 } from '@/lib/workflow-concurrency'
+import { normalizeStoryboardVideoPrompts } from '@/lib/novel-promotion/storyboard-video-prompt-normalizer'
 
 type JsonRecord = Record<string, unknown>
 const orchestratorLogger = createScopedLogger({ module: 'worker.orchestrator.script_to_storyboard' })
@@ -495,15 +496,20 @@ export async function runScriptToStoryboardOrchestrator(
         },
       )
 
+      const normalizedPhase3Panels = normalizeStoryboardVideoPrompts(
+        filteredPhase3Panels,
+        novelPromotionData.characters || [],
+      )
+
       phase2CinematographyByClipId.set(clip.id, photographyRules)
       phase2ActingByClipId.set(clip.id, actingDirections)
-      phase3PanelsByClipId.set(clip.id, filteredPhase3Panels)
+      phase3PanelsByClipId.set(clip.id, normalizedPhase3Panels)
 
       return {
         clipId: clip.id,
         clipIndex,
         finalPanels: mergePanelsWithRules({
-          finalPanels: filteredPhase3Panels,
+          finalPanels: normalizedPhase3Panels,
           photographyRules,
           actingDirections,
         }),

@@ -73,6 +73,5 @@ export function shouldShowImageSlotGrid(input: ShowSlotGridInput): boolean {
   if (input.totalSlotCount <= 1) return false
   if (input.hasRunningTask) return true
   if (input.generatedCount > 0) return true
-  if (input.hasAnyError) return true
   return false
 }

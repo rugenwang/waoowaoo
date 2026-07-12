@@ -83,6 +83,7 @@ export function useWorkspaceProjectSnapshot({
         || projectData?.forcedStoryboardDurationSec === 20
           ? projectData.forcedStoryboardDurationSec
           : null,
+      localVideoLoras: typeof projectData?.localVideoLoras === 'string' ? projectData.localVideoLoras : null,
     }
   }, [episode?.novelText, episode?.storyboards, project.novelPromotionData, urlStage])
 }
