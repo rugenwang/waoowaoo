@@ -1,0 +1,270 @@
+import { z } from 'zod'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const loggerMock = vi.hoisted(() => ({
+  error: vi.fn(),
+}))
+
+vi.mock('@/lib/logging/core', () => ({
+  createScopedLogger: () => loggerMock,
+}))
+
+import {
+  AGENT_ERROR_SPECS,
+  AgentApiError,
+} from '@/lib/agent-api/errors'
+import {
+  agentRoute,
+  agentSuccess,
+  parseAgentJson,
+  toAgentFailure,
+} from '@/lib/agent-api/http'
+
+async function json(response: Response) {
+  return await response.json() as Record<string, unknown>
+}
+
+describe('Agent API errors', () => {
+  it('defines every normative error code with its exact HTTP status and default retryability', () => {
+    expect(AGENT_ERROR_SPECS).toEqual({
+      CONTRACT_INVALID: { status: 400, retryable: false, message: expect.any(String) },
+      REFERENCE_INVALID: { status: 400, retryable: false, message: expect.any(String) },
+      ARTIFACT_HASH_MISMATCH: { status: 400, retryable: false, message: expect.any(String) },
+      AGENT_UNAUTHORIZED: { status: 401, retryable: false, message: expect.any(String) },
+      AGENT_FORBIDDEN: { status: 403, retryable: false, message: expect.any(String) },
+      AGENT_RESOURCE_NOT_FOUND: { status: 404, retryable: false, message: expect.any(String) },
+      PROJECT_NAME_AMBIGUOUS: { status: 409, retryable: false, message: expect.any(String) },
+      RUN_DEFINITION_CONFLICT: { status: 409, retryable: false, message: expect.any(String) },
+      EPISODE_NUMBER_CONFLICT: { status: 409, retryable: false, message: expect.any(String) },
+      ASSET_IDENTITY_CONFLICT: { status: 409, retryable: false, message: expect.any(String) },
+      RULESET_MISMATCH: { status: 409, retryable: false, message: expect.any(String) },
+      UPLOAD_TOO_LARGE: { status: 413, retryable: false, message: expect.any(String) },
+      UPLOAD_TYPE_UNSUPPORTED: { status: 415, retryable: false, message: expect.any(String) },
+      RUN_INCOMPLETE: { status: 422, retryable: false, message: expect.any(String) },
+      AGENT_INTERNAL_ERROR: { status: 500, retryable: true, message: expect.any(String) },
+    })
+  })
+
+  it('permits an explicit retry override and retains only safe scalar details', () => {
+    const error = new AgentApiError('EPISODE_NUMBER_CONFLICT', {
+      retryable: true,
+      details: {
+        attempt: 2,
+        temporary: true,
+        reason: 'concurrent allocation',
+        empty: null,
+        nested: { secret: 'db-password' },
+        list: ['db-password'],
+        missing: undefined,
+        infinite: Number.POSITIVE_INFINITY,
+        notANumber: Number.NaN,
+      },
+    })
+
+    expect(error.retryable).toBe(true)
+    expect(error.details).toEqual({
+      attempt: 2,
+      temporary: true,
+      reason: 'concurrent allocation',
+      empty: null,
+    })
+    expect(JSON.stringify(error)).not.toContain('db-password')
+  })
+})
+
+describe('Agent API HTTP envelopes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('builds a success envelope and mirrors the request id in the response header', async () => {
+    const response = agentSuccess('req_success', { projectId: 'project-1' }, { status: 201 })
+
+    expect(response.status).toBe(201)
+    expect(response.headers.get('x-request-id')).toBe('req_success')
+    expect(await json(response)).toEqual({
+      success: true,
+      requestId: 'req_success',
+      data: { projectId: 'project-1' },
+    })
+  })
+
+  it('normalizes a known Agent API error without unsafe detail values', async () => {
+    const response = toAgentFailure(
+      new AgentApiError('CONTRACT_INVALID', {
+        field: 'episodes[0].ordinal',
+        details: {
+          expected: 1,
+          unsafe: { database: 'mysql://root:secret@host/db' },
+        },
+      }),
+      'req_failure',
+    )
+
+    expect(response.status).toBe(400)
+    expect(response.headers.get('x-request-id')).toBe('req_failure')
+    expect(await json(response)).toEqual({
+      success: false,
+      requestId: 'req_failure',
+      error: {
+        code: 'CONTRACT_INVALID',
+        message: AGENT_ERROR_SPECS.CONTRACT_INVALID.message,
+        field: 'episodes[0].ordinal',
+        retryable: false,
+        details: { expected: 1 },
+      },
+    })
+  })
+
+  it('turns an unknown exception into a generic 500 without leaking sensitive text', async () => {
+    const secret = 'Bearer env-token-value mysql://root:db-password@host/db'
+    const error = new Error(secret)
+    error.stack = `Error: ${secret}\n at secret-stack.ts:1`
+
+    const response = toAgentFailure(error, 'req_internal')
+    const serialized = JSON.stringify(await json(response))
+
+    expect(response.status).toBe(500)
+    expect(serialized).toContain('AGENT_INTERNAL_ERROR')
+    expect(serialized).not.toContain('env-token-value')
+    expect(serialized).not.toContain('db-password')
+    expect(serialized).not.toContain('secret-stack')
+  })
+})
+
+describe('parseAgentJson', () => {
+  const schema = z.object({
+    storyboards: z.array(z.object({
+      panels: z.array(z.object({
+        frames: z.array(z.object({
+          frameTimeSec: z.number().positive(),
+        }).strict()),
+      }).strict()),
+    }).strict()),
+  }).strict()
+
+  it('strictly parses valid JSON into the schema output', async () => {
+    const body = {
+      storyboards: [{
+        panels: [{
+          frames: [{ frameTimeSec: 1.5 }],
+        }],
+      }],
+    }
+    const request = new Request('http://localhost/api/agent/v1/test', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+
+    await expect(parseAgentJson(request, schema)).resolves.toEqual(body)
+  })
+
+  it('reports the first Zod issue using dotted object and bracketed array segments', async () => {
+    const request = new Request('http://localhost/api/agent/v1/test', {
+      method: 'POST',
+      body: JSON.stringify({
+        storyboards: [{
+          panels: [
+            { frames: [{ frameTimeSec: 1 }] },
+            { frames: [{ frameTimeSec: -1 }] },
+          ],
+        }],
+      }),
+    })
+
+    await expect(parseAgentJson(request, schema)).rejects.toMatchObject({
+      code: 'CONTRACT_INVALID',
+      field: 'storyboards[0].panels[1].frames[0].frameTimeSec',
+    })
+  })
+
+  it('rejects malformed JSON and unknown properties as CONTRACT_INVALID', async () => {
+    const malformed = new Request('http://localhost/api/agent/v1/test', {
+      method: 'POST',
+      body: '{"storyboards":',
+    })
+    await expect(parseAgentJson(malformed, schema)).rejects.toMatchObject({
+      code: 'CONTRACT_INVALID',
+    })
+
+    const extra = new Request('http://localhost/api/agent/v1/test', {
+      method: 'POST',
+      body: JSON.stringify({
+        storyboards: [],
+        dryRun: true,
+      }),
+    })
+    await expect(parseAgentJson(extra, schema)).rejects.toMatchObject({
+      code: 'CONTRACT_INVALID',
+      field: 'dryRun',
+    })
+  })
+})
+
+describe('agentRoute', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('assigns one request id, passes it to the handler, and wraps plain success data', async () => {
+    const handler = vi.fn(async (
+      _request: Request,
+      _context: { params: Promise<Record<string, string>> },
+      requestId: string,
+    ) => ({ echoedRequestId: requestId }))
+    const route = agentRoute(handler)
+
+    const response = await route(
+      new Request('http://localhost/api/agent/v1/projects/resolve', {
+        headers: { 'x-request-id': 'req_from_client' },
+      }),
+      { params: Promise.resolve({}) },
+    )
+
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(response.headers.get('x-request-id')).toBe('req_from_client')
+    expect(await json(response)).toEqual({
+      success: true,
+      requestId: 'req_from_client',
+      data: { echoedRequestId: 'req_from_client' },
+    })
+  })
+
+  it('preserves an agentSuccess response while enforcing the wrapper request id header', async () => {
+    const route = agentRoute(async (_request, _context, requestId) => (
+      agentSuccess(requestId, { accepted: true }, { status: 202 })
+    ))
+
+    const response = await route(
+      new Request('http://localhost/api/agent/v1/runs', { method: 'POST' }),
+      { params: Promise.resolve({}) },
+    )
+    const body = await json(response)
+
+    expect(response.status).toBe(202)
+    expect(body).toMatchObject({
+      success: true,
+      requestId: expect.stringMatching(/^req_/),
+    })
+    expect(response.headers.get('x-request-id')).toBe(body.requestId)
+  })
+
+  it('normalizes thrown errors and logs only safe metadata', async () => {
+    const secret = 'Bearer super-secret-token DB query password=hidden'
+    const route = agentRoute(async () => {
+      throw new Error(secret)
+    })
+
+    const response = await route(
+      new Request('http://localhost/api/agent/v1/runs/run-1'),
+      { params: Promise.resolve({ runId: 'run-1' }) },
+    )
+    const serializedResponse = JSON.stringify(await json(response))
+    const serializedLogs = JSON.stringify(loggerMock.error.mock.calls)
+
+    expect(response.status).toBe(500)
+    expect(serializedResponse).not.toContain(secret)
+    expect(serializedLogs).not.toContain('super-secret-token')
+    expect(serializedLogs).not.toContain('password=hidden')
+  })
+})

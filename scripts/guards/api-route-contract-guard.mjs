@@ -29,6 +29,12 @@ const AUTH_CALL_PATTERNS = [
   /\brequireProjectAuthLight\s*\(/,
 ]
 
+const AGENT_AUTH_CALL_PATTERNS = [
+  /\brequireAgentAuth\s*\(/,
+  /\brequireAgentProject\s*\(/,
+  /\brequireAgentRun\s*\(/,
+]
+
 function fail(title, details = []) {
   process.stderr.write(`\n[api-route-contract-guard] ${title}\n`)
   for (const detail of details) {
@@ -60,19 +66,38 @@ function hasApiHandlerWrapper(content) {
   return /\bapiHandler\s*\(/.test(content)
 }
 
+function hasAgentRouteWrapper(content) {
+  return /\bagentRoute\s*\(/.test(content)
+}
+
 function hasRequiredAuth(content) {
   return AUTH_CALL_PATTERNS.some((pattern) => pattern.test(content))
 }
 
+function hasRequiredAgentAuth(content) {
+  return AGENT_AUTH_CALL_PATTERNS.some((pattern) => pattern.test(content))
+}
+
 export function inspectRouteContract(relPath, content) {
   const violations = []
+  const isAgentRoute = relPath.startsWith('src/app/api/agent/')
 
-  if (!API_HANDLER_ALLOWLIST.has(relPath) && !hasApiHandlerWrapper(content)) {
-    violations.push(`${relPath} missing apiHandler wrapper`)
-  }
+  if (isAgentRoute) {
+    if (!hasApiHandlerWrapper(content) && !hasAgentRouteWrapper(content)) {
+      violations.push(`${relPath} missing apiHandler/agentRoute wrapper`)
+    }
 
-  if (!PUBLIC_ROUTE_ALLOWLIST.has(relPath) && !hasRequiredAuth(content)) {
-    violations.push(`${relPath} missing requireUserAuth/requireProjectAuth/requireProjectAuthLight`)
+    if (!hasRequiredAgentAuth(content)) {
+      violations.push(`${relPath} missing requireAgentAuth/requireAgentProject/requireAgentRun`)
+    }
+  } else {
+    if (!API_HANDLER_ALLOWLIST.has(relPath) && !hasApiHandlerWrapper(content)) {
+      violations.push(`${relPath} missing apiHandler wrapper`)
+    }
+
+    if (!PUBLIC_ROUTE_ALLOWLIST.has(relPath) && !hasRequiredAuth(content)) {
+      violations.push(`${relPath} missing requireUserAuth/requireProjectAuth/requireProjectAuthLight`)
+    }
   }
 
   return violations
