@@ -1,0 +1,62 @@
+{
+  "canonical": [
+    {
+      "name": "recursively sorts object keys and preserves array order",
+      "input": {
+        "z": [
+          3,
+          {
+            "d": null,
+            "c": true
+          }
+        ],
+        "nested": {
+          "b": 2,
+          "a": 1
+        },
+        "a": 1
+      },
+      "canonical": "{\"a\":1,\"nested\":{\"a\":1,\"b\":2},\"z\":[3,{\"c\":true,\"d\":null}]}",
+      "hash": "sha256:dfa58044c53ad81fc4abfc0bc6434236667958b2112c667b8a0d19b3c917e59b"
+    },
+    {
+      "name": "sorts supplementary and BMP keys by Unicode code point",
+      "input": {
+        "𐀀": "supplementary",
+        "": "bmp"
+      },
+      "canonical": "{\"\":\"bmp\",\"𐀀\":\"supplementary\"}"
+    }
+  ],
+  "source": {
+    "input": "  line1\r\nline2\r  ",
+    "normalized": "line1\nline2",
+    "hash": "sha256:683376e290829b482c2655745caffa7a1dccfa10afaa62dac2b42dd6c68d0f83"
+  },
+  "definition": {
+    "episodes": [
+      {
+        "name": "第一集",
+        "sourceHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "episodeKey": "episode-001",
+        "ordinal": 1
+      }
+    ],
+    "hash": "sha256:cdfff8c854fa475c663e4cfa2e955b3304ab692c10aaa9424b3425b9824983c5"
+  },
+  "runFingerprint": {
+    "input": {
+      "projectId": "project-123",
+      "sourceHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "inputKindHint": "auto",
+      "locale": "zh",
+      "effectiveOptions": {
+        "artStyle": "realistic",
+        "videoRatio": "9:16",
+        "episodeSplitHint": "auto"
+      },
+      "ruleSetHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "hash": "sha256:df77c8d34cb42d24497a9a7e3220cdc864f8ea6f288f92bab3584d5bb16ee11c"
+  }
+}
