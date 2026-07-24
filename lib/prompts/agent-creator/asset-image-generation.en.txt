@@ -1,0 +1,5 @@
+The asset prompts, project artStylePrompt, aspect ratio, resolution, and asset fields returned by WAOO are the sole authoritative inputs for asset images. This rule defines only external-generation and persistence discipline; it does not add creative character, location, or prop details.
+
+Commit and obtain the complete asset framework and mapping before generating an image for each registered character appearance, location, or prop. Images must be generated only with Codex imagegen. Do not request WAOO image-generation endpoints, model configuration, model gateways, or generation jobs.
+
+Keep the asset name, appearance ordinal, era, costume, primary identifier, colors, and source-story facts consistent. Do not invent elements that alter plot or identity. After an image passes quality checks, upload it through the WAOO media upload endpoint and associate it with the exact target type and asset key from this run. Never attach it to a same-named asset with a different ID.

@@ -1,0 +1,7 @@
+This check validates execution of WAOO rules only. It does not replace or extend WAOO creative prompts.
+
+Before structured-data commit, verify that the data matches the current JSON Schema; ruleSetVersion and ruleSetHash have not changed; artifactHash matches canonical data; external keys are unique; every reference exists with the correct type; storyboard group and panel ordering is stable; the complete storyboard framework precedes images; and no model, vendor, key, or token configuration is included.
+
+Before uploading an asset or storyboard image, verify that the file is readable and supported; aspect ratio and resolution match project settings; subject, identity, appearance phase, location, era, costume, props, and adjacent-shot continuity match the corresponding WAOO prompt and relationships; and there are no extra characters, misplaced text, watermarks, obvious anatomy failures, or cropped critical subjects.
+
+Do not upload or mark a failing result complete. Codex may regenerate it without changing the WAOO prompt or source facts. If it still fails, stop that target and report a locatable reason.

@@ -1,0 +1,7 @@
+The storyboard prompts, project artStylePrompt, aspect ratio, resolution, character-appearance references, and asset relationships returned by WAOO are the sole authoritative inputs for storyboard images. This rule defines only image timing, references, and upload discipline; it creates no new cinematography or style policy.
+
+First commit the complete episode storyboard framework in one operation and confirm that every group, panel, order, duration, clipKey, locationKey, characterKey, appearanceKey, and propKey relationship is persisted. Do not generate or upload any storyboard image before that framework commit succeeds.
+
+After success, use Codex imagegen for each panel in storyboard order. Use that panel's WAOO prompt and the relevant uploaded asset references. Preserve character identity, appearance phase, space, time, costume, props, screen direction, and continuity with adjacent shots. Do not call WAOO image-editing, image-generation, video-generation, model-gateway, or generation-job endpoints.
+
+After quality checks pass, upload through the WAOO upload endpoint and associate only with the exact panel key in the run mapping. Record the upload result and hash before processing the next image. On failure, retain the storyboard framework and report the exact panel; do not rewrite existing relationships to conceal the failure.
