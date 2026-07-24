@@ -21,6 +21,7 @@ export type AgentRouteHandler<TParams extends RouteParams = RouteParams> = (
 
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 const logger = createScopedLogger({ module: 'agent-api' })
+const managedResponseRequestIds = new WeakMap<Response, string>()
 
 function createRequestId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -36,14 +37,9 @@ function requestIdFor(request: Request): string {
     : createRequestId()
 }
 
-function withRequestId(response: Response, requestId: string): Response {
-  const headers = new Headers(response.headers)
-  headers.set('x-request-id', requestId)
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  })
+function manageResponse(response: Response, requestId: string): Response {
+  managedResponseRequestIds.set(response, requestId)
+  return response
 }
 
 function issuePath(path: Array<string | number>): string {
@@ -72,14 +68,14 @@ export function agentSuccess<T>(
   headers.set('content-type', 'application/json')
   headers.set('x-request-id', requestId)
 
-  return new Response(JSON.stringify({
+  return manageResponse(new Response(JSON.stringify({
     success: true,
     requestId,
     data,
   }), {
     ...init,
     headers,
-  })
+  }), requestId)
 }
 
 export async function parseAgentJson<T>(
@@ -124,10 +120,10 @@ export function toAgentFailure(error: unknown, requestId: string): Response {
     },
   }
 
-  return new Response(JSON.stringify(body), {
+  return manageResponse(new Response(JSON.stringify(body), {
     status: normalized.status,
     headers,
-  })
+  }), requestId)
 }
 
 export function agentRoute<TParams extends RouteParams = RouteParams>(
@@ -141,9 +137,13 @@ export function agentRoute<TParams extends RouteParams = RouteParams>(
 
     try {
       const result = await handler(request, context, requestId)
-      return result instanceof Response
-        ? withRequestId(result, requestId)
-        : agentSuccess(requestId, result)
+      if (
+        !(result instanceof Response)
+        || managedResponseRequestIds.get(result) !== requestId
+      ) {
+        throw new AgentApiError('AGENT_INTERNAL_ERROR')
+      }
+      return result
     } catch (error) {
       const normalized = isAgentApiError(error)
         ? error

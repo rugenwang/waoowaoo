@@ -206,7 +206,7 @@ describe('agentRoute', () => {
     vi.clearAllMocks()
   })
 
-  it('assigns one request id, passes it to the handler, and wraps plain success data', async () => {
+  it('rejects a non-Response handler result instead of guessing a success envelope', async () => {
     const handler = vi.fn(async (
       _request: Request,
       _context: { params: Promise<Record<string, string>> },
@@ -224,13 +224,69 @@ describe('agentRoute', () => {
     expect(handler).toHaveBeenCalledTimes(1)
     expect(response.headers.get('x-request-id')).toBe('req_from_client')
     expect(await json(response)).toEqual({
-      success: true,
+      success: false,
       requestId: 'req_from_client',
-      data: { echoedRequestId: 'req_from_client' },
+      error: {
+        code: 'AGENT_INTERNAL_ERROR',
+        message: AGENT_ERROR_SPECS.AGENT_INTERNAL_ERROR.message,
+        retryable: true,
+      },
     })
   })
 
-  it('preserves an agentSuccess response while enforcing the wrapper request id header', async () => {
+  it('rejects a raw 200 Response without leaking its body', async () => {
+    const rawBody = 'Bearer raw-secret-token mysql://root:password@host/db'
+    const route = agentRoute(async () => new Response(
+      JSON.stringify({ ok: true, rawBody }),
+      { status: 200 },
+    ))
+
+    const response = await route(
+      new Request('http://localhost/api/agent/v1/runs', {
+        headers: { 'x-request-id': 'req_raw_200' },
+      }),
+      { params: Promise.resolve({}) },
+    )
+    const serialized = JSON.stringify(await json(response))
+
+    expect(response.status).toBe(500)
+    expect(response.headers.get('x-request-id')).toBe('req_raw_200')
+    expect(serialized).toContain('AGENT_INTERNAL_ERROR')
+    expect(serialized).toContain('req_raw_200')
+    expect(serialized).not.toContain('raw-secret-token')
+    expect(serialized).not.toContain('mysql://')
+  })
+
+  it.each([400, 404, 500, 503])(
+    'rejects a raw %s Response instead of passing through a nonstandard failure',
+    async (rawStatus) => {
+      const rawBody = `unsafe-raw-body-${rawStatus}`
+      const route = agentRoute(async () => new Response(rawBody, { status: rawStatus }))
+
+      const response = await route(
+        new Request('http://localhost/api/agent/v1/runs', {
+          headers: { 'x-request-id': `req_raw_${rawStatus}` },
+        }),
+        { params: Promise.resolve({}) },
+      )
+      const body = await json(response)
+
+      expect(response.status).toBe(500)
+      expect(response.headers.get('x-request-id')).toBe(`req_raw_${rawStatus}`)
+      expect(body).toEqual({
+        success: false,
+        requestId: `req_raw_${rawStatus}`,
+        error: {
+          code: 'AGENT_INTERNAL_ERROR',
+          message: AGENT_ERROR_SPECS.AGENT_INTERNAL_ERROR.message,
+          retryable: true,
+        },
+      })
+      expect(JSON.stringify(body)).not.toContain(rawBody)
+    },
+  )
+
+  it('preserves a branded agentSuccess response with its status, body, and request id', async () => {
     const route = agentRoute(async (_request, _context, requestId) => (
       agentSuccess(requestId, { accepted: true }, { status: 202 })
     ))
@@ -242,9 +298,10 @@ describe('agentRoute', () => {
     const body = await json(response)
 
     expect(response.status).toBe(202)
-    expect(body).toMatchObject({
+    expect(body).toEqual({
       success: true,
       requestId: expect.stringMatching(/^req_/),
+      data: { accepted: true },
     })
     expect(response.headers.get('x-request-id')).toBe(body.requestId)
   })
