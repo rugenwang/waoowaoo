@@ -25,6 +25,28 @@ export async function createFixtureProject(userId: string) {
   })
 }
 
+export async function createFixtureAgentRun(
+  userId: string,
+  projectId: string,
+  runFingerprint = `fixture_${suffix()}`,
+) {
+  return await prisma.agentCreationRun.create({
+    data: {
+      userId,
+      projectId,
+      sourceHash: `source_${suffix()}`,
+      runFingerprint,
+      inputKindHint: 'story',
+      locale: 'zh',
+      effectiveOptionsJson: '{}',
+      ruleSetVersion: 'fixture-v1',
+      ruleSetHash: `rules_${suffix()}`,
+      definitionHash: `definition_${suffix()}`,
+      episodeMapJson: '{}',
+    },
+  })
+}
+
 export async function createFixtureNovelProject(projectId: string) {
   return await prisma.novelPromotionProject.create({
     data: {

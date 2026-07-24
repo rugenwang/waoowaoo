@@ -423,9 +423,43 @@ model Project {
   novelPromotionData NovelPromotionProject?
   user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   usageCosts         UsageCost[]
+  agentCreationRuns  AgentCreationRun[]
 
   @@index([userId])
   @@map("projects")
+}
+
+model AgentCreationRun {
+  id                   String    @id @default(uuid())
+  userId               String
+  projectId            String
+  sourceHash           String    @db.VarChar(71)
+  runFingerprint       String    @db.VarChar(71)
+  inputKindHint        String    @db.VarChar(16)
+  locale               String    @db.VarChar(8)
+  effectiveOptionsJson String    @db.Text
+  ruleSetVersion       String    @db.VarChar(64)
+  ruleSetHash          String    @db.VarChar(71)
+  definitionHash       String    @db.VarChar(71)
+  status               String    @default("created") @db.VarChar(32)
+  currentStage         String    @default("created") @db.VarChar(64)
+  episodeMapJson       String    @db.LongText
+  assetMapJson         String?   @db.LongText
+  clipMapJson          String?   @db.LongText
+  storyboardMapJson    String?   @db.LongText
+  artifactHashesJson   String?   @db.LongText
+  receiptJson          String?   @db.LongText
+  lastErrorJson        String?   @db.LongText
+  completedAt          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project              Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, projectId, runFingerprint])
+  @@index([projectId, status])
+  @@index([userId, createdAt])
+  @@map("agent_creation_runs")
 }
 
 model Session {
@@ -486,6 +520,7 @@ model User {
   taskEvents         TaskEvent[]
   graphRuns          GraphRun[]
   graphEvents        GraphEvent[]
+  agentCreationRuns  AgentCreationRun[]
 
   @@map("user")
 }
