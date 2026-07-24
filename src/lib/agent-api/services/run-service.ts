@@ -12,6 +12,7 @@ import {
   RuleSetVersionSchema,
   RunStatusSchema,
   Sha256Schema,
+  trimmedTextSchema,
   type RunStatus,
 } from '@/lib/agent-api/contracts/common'
 import type { CreateRunRequest } from '@/lib/agent-api/contracts/run'
@@ -154,7 +155,7 @@ function decodeRun(run: StoredRun) {
     ),
     status: parsePersisted(RunStatusSchema, run.status, 'status'),
     currentStage: parsePersisted(
-      z.string().min(1).max(100),
+      trimmedTextSchema(100),
       run.currentStage,
       'currentStage',
     ),

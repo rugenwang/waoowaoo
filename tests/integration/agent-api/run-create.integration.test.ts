@@ -289,6 +289,10 @@ describe('Agent run creation with MySQL', () => {
   it('GET enforces ownership and rejects corrupted persisted JSON', async () => {
     const created = await create(await body())
     const runId = created.body.data.runId
+    const persisted = await prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: runId },
+      select: { episodeMapJson: true },
+    })
     const other = await createFixtureUser()
     process.env.WAOO_AGENT_USER_ID = other.id
 
@@ -307,5 +311,18 @@ describe('Agent run creation with MySQL', () => {
     })
     expect(corrupted.status).toBe(500)
     expect((await corrupted.json()).error.code).toBe('AGENT_INTERNAL_ERROR')
+
+    await prisma.agentCreationRun.update({
+      where: { id: runId },
+      data: {
+        episodeMapJson: persisted.episodeMapJson,
+        currentStage: '   ',
+      },
+    })
+    const blankStage = await GET(getRequest(runId), {
+      params: Promise.resolve({ runId }),
+    })
+    expect(blankStage.status).toBe(500)
+    expect((await blankStage.json()).error.code).toBe('AGENT_INTERNAL_ERROR')
   })
 })

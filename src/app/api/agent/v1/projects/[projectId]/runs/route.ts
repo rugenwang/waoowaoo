@@ -1,5 +1,8 @@
 import { requireAgentProject } from '@/lib/agent-api/auth'
-import { CreateRunRequestSchema } from '@/lib/agent-api/contracts/run'
+import {
+  CreateRunRequestSchema,
+  CreateRunResponseSchema,
+} from '@/lib/agent-api/contracts/run'
 import {
   agentRoute,
   agentSuccess,
@@ -19,10 +22,11 @@ export const POST = agentRoute(async (
   const body = await parseAgentJson(request, CreateRunRequestSchema)
   requireIdempotencyKey(request, body.runFingerprint)
 
-  const data = await createOrResumeRun({
+  const serviceData = await createOrResumeRun({
     userId: auth.userId,
     projectId,
     request: body,
   })
+  const data = CreateRunResponseSchema.shape.data.parse(serviceData)
   return agentSuccess(requestId, data)
 })

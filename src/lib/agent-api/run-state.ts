@@ -6,6 +6,7 @@ import {
   NameSchema,
   RunStatusSchema,
   Sha256Schema,
+  trimmedTextSchema,
   UrlSchema,
   type RunStatus,
 } from './contracts/common'
@@ -22,7 +23,7 @@ const EpisodeMapEntrySchema = z.object({
   ordinal: z.number().int().positive(),
   sourceHash: Sha256Schema,
   name: NameSchema,
-  description: z.string().max(2_000).optional(),
+  description: trimmedTextSchema(2_000).optional(),
   status: RunStatusSchema,
 }).strict()
 

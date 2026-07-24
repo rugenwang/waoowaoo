@@ -1,4 +1,5 @@
 import { requireAgentRun } from '@/lib/agent-api/auth'
+import { RunResponseSchema } from '@/lib/agent-api/contracts/run'
 import {
   agentRoute,
   agentSuccess,
@@ -13,9 +14,10 @@ export const GET = agentRoute(async (
 ) => {
   const { runId } = await context.params
   const auth = await requireAgentRun(request, runId)
-  const data = await getCreatorRun({
+  const serviceData = await getCreatorRun({
     userId: auth.userId,
     runId,
   })
+  const data = RunResponseSchema.shape.data.parse(serviceData)
   return agentSuccess(requestId, data)
 })

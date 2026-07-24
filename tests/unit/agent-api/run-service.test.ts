@@ -1,4 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  afterAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 
 const txMock = vi.hoisted(() => ({
   $queryRaw: vi.fn(),
@@ -187,6 +194,21 @@ describe('typed Agent run state', () => {
     expect(() => parseEpisodeMap(json)).toThrowError(
       expect.objectContaining({ code: 'AGENT_INTERNAL_ERROR' }),
     )
+  })
+
+  it('rejects a purely blank persisted episode description', () => {
+    expect(() => parseEpisodeMap(JSON.stringify({
+      'episode-001': {
+        ...parseEpisodeMap(episodeMapJson())['episode-001'],
+        description: '   ',
+      },
+    }))).toThrowError(expect.objectContaining({ code: 'AGENT_INTERNAL_ERROR' }))
+    expect(() => parseEpisodeMap(JSON.stringify({
+      'episode-001': {
+        ...parseEpisodeMap(episodeMapJson())['episode-001'],
+        description: 'x'.repeat(2_001),
+      },
+    }))).toThrowError(expect.objectContaining({ code: 'AGENT_INTERNAL_ERROR' }))
   })
 
   it('round-trips strict artifact hashes and upload receipts', () => {
@@ -670,6 +692,14 @@ describe('getCreatorRun', () => {
       userId: 'user-1',
       runId: 'run-1',
     })).rejects.toMatchObject({ code: 'AGENT_INTERNAL_ERROR' })
+
+    prismaMock.agentCreationRun.findUnique.mockResolvedValue(storedRun({
+      currentStage: '   ',
+    }))
+    await expect(getCreatorRun({
+      userId: 'user-1',
+      runId: 'run-1',
+    })).rejects.toMatchObject({ code: 'AGENT_INTERNAL_ERROR' })
   })
 
   it('forbids a different user without mutating the run', async () => {
@@ -677,5 +707,104 @@ describe('getCreatorRun', () => {
       userId: 'other-user',
       runId: 'run-1',
     })).rejects.toMatchObject({ code: 'AGENT_FORBIDDEN' })
+  })
+})
+
+describe('run route output validation', () => {
+  const originalEnv = {
+    WAOO_AGENT_API_ENABLED: process.env.WAOO_AGENT_API_ENABLED,
+    WAOO_AGENT_TOKEN: process.env.WAOO_AGENT_TOKEN,
+    WAOO_AGENT_USER_ID: process.env.WAOO_AGENT_USER_ID,
+  }
+
+  afterAll(() => {
+    vi.doUnmock('@/lib/agent-api/auth')
+    vi.doUnmock('@/lib/agent-api/services/run-service')
+    vi.resetModules()
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+
+  it('turns invalid or extra service response fields into unified 500 envelopes', async () => {
+    vi.resetModules()
+    vi.doMock('@/lib/agent-api/auth', () => ({
+      requireAgentProject: vi.fn().mockResolvedValue({
+        userId: 'user-1',
+        projectId: 'project-1',
+      }),
+      requireAgentRun: vi.fn().mockResolvedValue({
+        userId: 'user-1',
+        projectId: 'project-1',
+        runId: 'run-1',
+      }),
+    }))
+    vi.doMock('@/lib/agent-api/services/run-service', () => ({
+      createOrResumeRun: vi.fn().mockResolvedValue({
+        runId: 'run-1',
+        resumed: false,
+        status: 'created',
+        projectId: 'project-1',
+        sourceHash: HASH_A,
+        runFingerprint: request().runFingerprint,
+        episodes: [],
+        leakedProvider: 'must-not-leak',
+      }),
+      getCreatorRun: vi.fn().mockResolvedValue({
+        runId: 'run-1',
+        projectId: 'project-1',
+        status: 'created',
+        currentStage: 'created',
+        sourceHash: HASH_A,
+        runFingerprint: request().runFingerprint,
+        ruleSetVersion: 'waoo-creator-v1',
+        ruleSetHash: HASH_B,
+        episodes: [],
+        leakedToken: 'must-not-leak',
+      }),
+    }))
+    const [{ POST }, { GET }] = await Promise.all([
+      import('@/app/api/agent/v1/projects/[projectId]/runs/route'),
+      import('@/app/api/agent/v1/runs/[runId]/route'),
+    ])
+
+    const post = await POST(new Request(
+      'http://localhost/api/agent/v1/projects/project-1/runs',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': request().runFingerprint,
+          'X-Request-Id': 'req-invalid-create-output',
+        },
+        body: JSON.stringify(request()),
+      },
+    ), {
+      params: Promise.resolve({ projectId: 'project-1' }),
+    })
+    const get = await GET(new Request(
+      'http://localhost/api/agent/v1/runs/run-1',
+      {
+        headers: {
+          'X-Request-Id': 'req-invalid-get-output',
+        },
+      },
+    ), {
+      params: Promise.resolve({ runId: 'run-1' }),
+    })
+
+    expect(post.status).toBe(500)
+    expect(await post.json()).toMatchObject({
+      success: false,
+      requestId: 'req-invalid-create-output',
+      error: { code: 'AGENT_INTERNAL_ERROR' },
+    })
+    expect(get.status).toBe(500)
+    expect(await get.json()).toMatchObject({
+      success: false,
+      requestId: 'req-invalid-get-output',
+      error: { code: 'AGENT_INTERNAL_ERROR' },
+    })
   })
 })
