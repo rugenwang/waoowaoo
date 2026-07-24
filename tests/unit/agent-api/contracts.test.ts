@@ -1,15 +1,7 @@
 import Ajv from 'ajv'
 import { describe, expect, it } from 'vitest'
 
-import {
-  CommitEnvelopeSchema,
-  ExternalKeySchema,
-  InputKindHintSchema,
-  InputKindSchema,
-  LocaleSchema,
-  RunStatusSchema,
-  Sha256Schema,
-} from '@/lib/agent-api/contracts/common'
+import * as commonContracts from '@/lib/agent-api/contracts/common'
 import {
   ResolveProjectRequestSchema,
 } from '@/lib/agent-api/contracts/project'
@@ -27,6 +19,16 @@ import {
   AGENT_CONTRACT_IDS,
   agentContractRegistry,
 } from '@/lib/agent-api/contracts/registry'
+
+const {
+  createCommitEnvelopeSchema,
+  ExternalKeySchema,
+  InputKindHintSchema,
+  InputKindSchema,
+  LocaleSchema,
+  RunStatusSchema,
+  Sha256Schema,
+} = commonContracts
 
 const HASH_A = `sha256:${'a'.repeat(64)}`
 const HASH_B = `sha256:${'b'.repeat(64)}`
@@ -357,9 +359,21 @@ describe('common Agent API contract scalars', () => {
     ])
   })
 
-  it('requires CommitEnvelope schemaVersion to equal 1', () => {
-    expect(CommitEnvelopeSchema.safeParse(storyFixture).success).toBe(true)
-    expect(CommitEnvelopeSchema.safeParse({ ...storyFixture, schemaVersion: 2 }).success).toBe(false)
+  it('requires a concrete strict data schema for every CommitEnvelope', () => {
+    expect(commonContracts).not.toHaveProperty('CommitEnvelopeSchema')
+
+    const schema = createCommitEnvelopeSchema(ResolveProjectRequestSchema)
+    const valid = commit(projectFixture)
+    const withoutData = { ...valid }
+    Reflect.deleteProperty(withoutData, 'data')
+
+    expect(schema.safeParse(valid).success).toBe(true)
+    expect(schema.safeParse({ ...valid, schemaVersion: 2 }).success).toBe(false)
+    expect(schema.safeParse(withoutData).success).toBe(false)
+    expect(schema.safeParse({
+      ...valid,
+      data: { arbitrary: true },
+    }).success).toBe(false)
   })
 })
 

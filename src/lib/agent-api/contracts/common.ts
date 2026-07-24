@@ -40,15 +40,6 @@ const DetailValueSchema = z.union([
 export const ErrorDetailsSchema = z.record(DetailValueSchema)
 export const OpenJsonObjectSchema = z.record(z.unknown())
 
-export const CommitEnvelopeSchema = z.object({
-  schemaVersion: z.literal(1),
-  ruleSetVersion: RuleSetVersionSchema,
-  ruleSetHash: Sha256Schema,
-  artifactHash: Sha256Schema,
-  dryRun: z.boolean(),
-  data: z.unknown(),
-}).strict()
-
 export function createCommitEnvelopeSchema<T extends z.ZodTypeAny>(dataSchema: T) {
   return z.object({
     schemaVersion: z.literal(1),
