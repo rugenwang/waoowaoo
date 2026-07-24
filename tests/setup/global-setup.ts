@@ -4,6 +4,7 @@ import mysql from 'mysql2/promise'
 import Redis from 'ioredis'
 import { loadTestEnv } from './env'
 import { runGlobalTeardown } from './global-teardown'
+import { runTestComposeDown, runTestComposeUp } from './test-compose'
 
 function parseDbUrl(dbUrl: string) {
   const url = new URL(dbUrl)
@@ -75,15 +76,8 @@ export default async function globalSetup() {
     return async () => {}
   }
 
-  execSync('docker compose -f docker-compose.test.yml down -v --remove-orphans', {
-    cwd: process.cwd(),
-    stdio: 'inherit',
-  })
-
-  execSync('docker compose -f docker-compose.test.yml up -d --remove-orphans', {
-    cwd: process.cwd(),
-    stdio: 'inherit',
-  })
+  runTestComposeDown()
+  runTestComposeUp()
 
   await waitForMysql()
   await waitForRedis()

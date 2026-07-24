@@ -1,5 +1,5 @@
-import { execSync } from 'node:child_process'
 import { loadTestEnv } from './env'
+import { runTestComposeDown } from './test-compose'
 
 export async function runGlobalTeardown() {
   loadTestEnv()
@@ -8,8 +8,5 @@ export async function runGlobalTeardown() {
   if (!shouldBootstrap) return
   if (process.env.BILLING_TEST_KEEP_SERVICES === '1') return
 
-  execSync('docker compose -f docker-compose.test.yml down -v --remove-orphans', {
-    cwd: process.cwd(),
-    stdio: 'inherit',
-  })
+  runTestComposeDown()
 }
