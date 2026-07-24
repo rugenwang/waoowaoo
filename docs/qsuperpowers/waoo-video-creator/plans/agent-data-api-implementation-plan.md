@@ -270,9 +270,9 @@ await prisma.agentCreationRun.deleteMany()
 使用项目现有测试库启动方式后运行：
 
 ```bash
-docker compose -f docker-compose.test.yml up -d --wait mysql
+docker compose --project-name waoowaoo-test-runtime -f docker-compose.test.yml up -d --wait mysql
 DATABASE_URL='mysql://root:root@127.0.0.1:3307/waoowaoo_test' npx prisma migrate deploy
-docker compose -f docker-compose.test.yml down -v --remove-orphans
+docker compose --project-name waoowaoo-test-runtime -f docker-compose.test.yml down -v --remove-orphans
 BILLING_TEST_BOOTSTRAP=1 npx vitest run tests/integration/agent-api/run-persistence.integration.test.ts
 ```
 

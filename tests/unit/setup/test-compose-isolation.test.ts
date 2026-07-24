@@ -1,10 +1,16 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('node:child_process', () => ({
+  execFileSync: vi.fn(),
+}))
 
 const helperPath = resolve(process.cwd(), 'tests/setup/test-compose.ts')
 const helperExists = existsSync(helperPath)
+const execFileSyncMock = vi.mocked(execFileSync)
 
 type TestComposeModule = typeof import('../../setup/test-compose')
 
@@ -17,6 +23,10 @@ describe.skipIf(!helperExists)('test compose project isolation', () => {
 
   beforeAll(async () => {
     testCompose = await import('../../setup/test-compose')
+  })
+
+  beforeEach(() => {
+    execFileSyncMock.mockClear()
   })
 
   it('uses a fixed project name distinct from the main stack', () => {
@@ -83,6 +93,52 @@ describe.skipIf(!helperExists)('test compose project isolation', () => {
       ])
     }
   })
+
+  it('executes the isolated up command without a shell', () => {
+    testCompose.runTestComposeUp()
+
+    expect(execFileSyncMock).toHaveBeenCalledTimes(1)
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      'docker',
+      [
+        'compose',
+        '--project-name',
+        'waoowaoo-test-runtime',
+        '-f',
+        'docker-compose.test.yml',
+        'up',
+        '-d',
+        '--remove-orphans',
+      ],
+      {
+        cwd: process.cwd(),
+        stdio: 'inherit',
+      },
+    )
+  })
+
+  it('executes the isolated down command without a shell', () => {
+    testCompose.runTestComposeDown()
+
+    expect(execFileSyncMock).toHaveBeenCalledTimes(1)
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      'docker',
+      [
+        'compose',
+        '--project-name',
+        'waoowaoo-test-runtime',
+        '-f',
+        'docker-compose.test.yml',
+        'down',
+        '-v',
+        '--remove-orphans',
+      ],
+      {
+        cwd: process.cwd(),
+        stdio: 'inherit',
+      },
+    )
+  })
 })
 
 describe('global test lifecycle compose boundary', () => {
@@ -101,6 +157,8 @@ describe('global test lifecycle compose boundary', () => {
     expect(globalSetupSource).toContain('runTestComposeUp()')
     expect(globalSetupSource).not.toContain('docker compose')
     expect(globalSetupSource).not.toMatch(/\bexecSync\(\s*['"`]docker compose/)
+    expect(globalSetupSource).not.toMatch(/['"`]docker['"`]/)
+    expect(globalSetupSource).not.toMatch(/\bexecFileSync\(\s*['"`]docker['"`]/)
   })
 
   it('routes teardown compose operations through the isolated helper', () => {
@@ -108,5 +166,30 @@ describe('global test lifecycle compose boundary', () => {
     expect(globalTeardownSource).toContain('runTestComposeDown()')
     expect(globalTeardownSource).not.toContain('docker compose')
     expect(globalTeardownSource).not.toMatch(/\bexecSync\(\s*['"`]docker compose/)
+    expect(globalTeardownSource).not.toMatch(/['"`]docker['"`]/)
+    expect(globalTeardownSource).not.toMatch(/\bexecFileSync\(\s*['"`]docker['"`]/)
+  })
+})
+
+describe('documented test compose commands', () => {
+  const planSource = readFileSync(
+    resolve(
+      process.cwd(),
+      'docs/qsuperpowers/waoo-video-creator/plans/agent-data-api-implementation-plan.md',
+    ),
+    'utf8',
+  )
+
+  it('always uses the isolated test project name', () => {
+    const testComposeCommands = planSource
+      .split('\n')
+      .filter((line) => line.includes('docker compose') && line.includes('docker-compose.test.yml'))
+
+    expect(testComposeCommands.length).toBeGreaterThan(0)
+    for (const command of testComposeCommands) {
+      expect(command).toContain(
+        'docker compose --project-name waoowaoo-test-runtime -f docker-compose.test.yml',
+      )
+    }
   })
 })
