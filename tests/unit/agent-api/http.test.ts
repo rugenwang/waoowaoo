@@ -306,22 +306,111 @@ describe('agentRoute', () => {
     expect(response.headers.get('x-request-id')).toBe(body.requestId)
   })
 
+  it('allows a managed Response to be consumed only once across sequential requests', async () => {
+    const requestId = 'req_sequential_reuse'
+    const managedResponse = agentSuccess(
+      requestId,
+      { accepted: true },
+      { status: 202 },
+    )
+    const route = agentRoute(async () => managedResponse)
+    const context = { params: Promise.resolve({}) }
+
+    const first = await route(
+      new Request('http://localhost/api/agent/v1/runs', {
+        headers: { 'x-request-id': requestId },
+      }),
+      context,
+    )
+    const second = await route(
+      new Request('http://localhost/api/agent/v1/runs', {
+        headers: { 'x-request-id': requestId },
+      }),
+      context,
+    )
+
+    expect(first.status).toBe(202)
+    expect(await json(first)).toEqual({
+      success: true,
+      requestId,
+      data: { accepted: true },
+    })
+    expect(second.status).toBe(500)
+    expect(await json(second)).toEqual({
+      success: false,
+      requestId,
+      error: {
+        code: 'AGENT_INTERNAL_ERROR',
+        message: AGENT_ERROR_SPECS.AGENT_INTERNAL_ERROR.message,
+        retryable: true,
+      },
+    })
+  })
+
+  it('allows exactly one concurrent request to consume a shared managed Response', async () => {
+    const requestId = 'req_concurrent_reuse'
+    const managedResponse = agentSuccess(
+      requestId,
+      { accepted: true },
+      { status: 202 },
+    )
+    const route = agentRoute(async () => managedResponse)
+    const invoke = () => route(
+      new Request('http://localhost/api/agent/v1/runs', {
+        headers: { 'x-request-id': requestId },
+      }),
+      { params: Promise.resolve({}) },
+    )
+
+    const responses = await Promise.all([invoke(), invoke()])
+    const successes = responses.filter((response) => response.status === 202)
+    const failures = responses.filter((response) => response.status === 500)
+
+    expect(successes).toHaveLength(1)
+    expect(failures).toHaveLength(1)
+    expect(await json(successes[0])).toEqual({
+      success: true,
+      requestId,
+      data: { accepted: true },
+    })
+    expect(await json(failures[0])).toEqual({
+      success: false,
+      requestId,
+      error: {
+        code: 'AGENT_INTERNAL_ERROR',
+        message: AGENT_ERROR_SPECS.AGENT_INTERNAL_ERROR.message,
+        retryable: true,
+      },
+    })
+  })
+
   it('normalizes thrown errors and logs only safe metadata', async () => {
     const secret = 'Bearer super-secret-token DB query password=hidden'
+    const unsafeError = new Error(secret)
+    unsafeError.stack = `Error: ${secret}\n at secret-stack-marker.ts:1`
     const route = agentRoute(async () => {
-      throw new Error(secret)
+      throw unsafeError
     })
 
     const response = await route(
-      new Request('http://localhost/api/agent/v1/runs/run-1'),
+      new Request('http://localhost/api/agent/v1/runs/run-1', {
+        headers: { 'x-request-id': 'req_logged_failure' },
+      }),
       { params: Promise.resolve({ runId: 'run-1' }) },
     )
-    const serializedResponse = JSON.stringify(await json(response))
+    const body = await json(response)
+    const serializedResponse = JSON.stringify(body)
     const serializedLogs = JSON.stringify(loggerMock.error.mock.calls)
 
     expect(response.status).toBe(500)
+    expect(body.requestId).toBe('req_logged_failure')
+    expect(loggerMock.error).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'req_logged_failure',
+      errorCode: 'AGENT_INTERNAL_ERROR',
+    }))
     expect(serializedResponse).not.toContain(secret)
     expect(serializedLogs).not.toContain('super-secret-token')
     expect(serializedLogs).not.toContain('password=hidden')
+    expect(serializedLogs).not.toContain('secret-stack-marker')
   })
 })

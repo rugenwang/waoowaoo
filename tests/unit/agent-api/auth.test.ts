@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const prismaMock = vi.hoisted(() => ({
@@ -161,6 +163,19 @@ describe('agent API authentication', () => {
     await expect(requireAgentAuth(agentRequest())).resolves.toEqual({
       userId: 'user-1',
     })
+  })
+
+  it('keeps bearer token verification on fixed-length timing-safe digests', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/lib/agent-api/auth.ts'),
+      'utf8',
+    )
+    const directTokenComparison =
+      /\b(?:actualToken|expectedToken|actual|expected)\b\s*(?:===|!==|==|!=)\s*\b(?:actualToken|expectedToken|actual|expected)\b/
+
+    expect(source).toMatch(/\bcreateHash\s*\(\s*['"]sha256['"]\s*\)/)
+    expect(source).toMatch(/\btimingSafeEqual\s*\(/)
+    expect(source).not.toMatch(directTokenComparison)
   })
 })
 

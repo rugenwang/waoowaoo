@@ -143,6 +143,7 @@ export function agentRoute<TParams extends RouteParams = RouteParams>(
       ) {
         throw new AgentApiError('AGENT_INTERNAL_ERROR')
       }
+      managedResponseRequestIds.delete(result)
       return result
     } catch (error) {
       const normalized = isAgentApiError(error)
@@ -152,6 +153,7 @@ export function agentRoute<TParams extends RouteParams = RouteParams>(
       logger.error({
         action: 'agent_api.request.error',
         message: 'Agent API request failed',
+        requestId,
         errorCode: normalized.code,
         retryable: normalized.retryable,
         details: {
