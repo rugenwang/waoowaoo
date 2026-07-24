@@ -8,6 +8,7 @@ import {
   IdSchema,
   LongContentSchema,
   Sha256Schema,
+  trimmedTextSchema,
 } from './common'
 
 export const ScreenplayActionSchema = z.object({
@@ -25,7 +26,7 @@ export const ScreenplayDialogueSchema = z.object({
 export const ScreenplayVoiceoverSchema = z.object({
   type: z.literal('voiceover'),
   characterKey: ExternalKeySchema.optional(),
-  speakerLabel: z.string().trim().min(1).max(100).regex(/\S/).optional(),
+  speakerLabel: trimmedTextSchema(100).optional(),
   text: DescriptionSchema,
 }).strict().superRefine((value, context) => {
   if (value.characterKey === undefined && value.speakerLabel === undefined) {
@@ -48,7 +49,7 @@ export const ScreenplaySceneSchema = z.object({
   heading: z.object({
     intExt: z.enum(['INT', 'EXT']),
     locationKey: ExternalKeySchema,
-    time: z.string().trim().min(1).max(100).regex(/\S/),
+    time: trimmedTextSchema(100),
   }).strict(),
   description: DescriptionSchema,
   characterKeys: z.array(ExternalKeySchema).max(500),
@@ -60,7 +61,7 @@ export const ClipArtifactSchema = z.object({
   ordinal: z.number().int().positive(),
   startText: DescriptionSchema,
   endText: DescriptionSchema,
-  summary: z.string().trim().min(1).max(2_000).regex(/\S/),
+  summary: trimmedTextSchema(2_000),
   locationKey: ExternalKeySchema.nullable(),
   characterKeys: z.array(ExternalKeySchema).max(500),
   propKeys: z.array(ExternalKeySchema).max(500),

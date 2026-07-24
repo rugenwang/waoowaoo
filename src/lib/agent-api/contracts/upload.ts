@@ -5,6 +5,7 @@ import {
   ExternalKeySchema,
   IdSchema,
   Sha256Schema,
+  trimmedTextSchema,
   UrlSchema,
 } from './common'
 
@@ -76,7 +77,7 @@ export const UploadResponseSchema = createSuccessSchema(z.object({
   variantIndex: z.number().int().nonnegative(),
   contentSha256: Sha256Schema,
   mediaId: IdSchema,
-  storageKey: z.string().trim().min(1).max(2_000).regex(/\S/),
+  storageKey: trimmedTextSchema(2_000),
   url: UrlSchema,
   reused: z.boolean(),
   panelImageUpdated: z.boolean().optional(),

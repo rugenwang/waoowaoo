@@ -334,6 +334,61 @@ function issuePaths(result: { success: boolean; error?: { issues: Array<{ path: 
   return result.error?.issues.map((issue) => issue.path.join('.')) ?? []
 }
 
+function textBoundaryCases(maxLength: number) {
+  return [
+    {
+      label: 'exact maximum',
+      value: 'x'.repeat(maxLength),
+      accepted: true,
+    },
+    {
+      label: 'maximum plus one visible character',
+      value: 'x'.repeat(maxLength + 1),
+      accepted: false,
+    },
+    {
+      label: 'maximum plus leading whitespace',
+      value: ` ${'x'.repeat(maxLength)}`,
+      accepted: false,
+    },
+    {
+      label: 'maximum plus trailing whitespace',
+      value: `${'x'.repeat(maxLength)} `,
+      accepted: false,
+    },
+    {
+      label: 'large whitespace prefix within the maximum',
+      value: `${' '.repeat(maxLength - 1)}x`,
+      accepted: true,
+    },
+    {
+      label: 'large whitespace prefix beyond the maximum',
+      value: `${' '.repeat(maxLength)}x`,
+      accepted: false,
+    },
+    {
+      label: 'pure whitespace',
+      value: ' '.repeat(maxLength),
+      accepted: false,
+    },
+  ]
+}
+
+function validateRegistryFixture(
+  id: keyof typeof agentContractRegistry,
+  fixture: unknown,
+) {
+  const entry = agentContractRegistry[id]
+  const ajv = new Ajv({ strict: true, allErrors: true })
+  ajv.addFormat('binary', true)
+  const validate = ajv.compile(entry.jsonSchema)
+
+  return {
+    zodAccepted: entry.zodSchema.safeParse(fixture).success,
+    ajvAccepted: validate(fixture),
+  }
+}
+
 describe('common Agent API contract scalars', () => {
   it('validates ExternalKey, Sha256, locale, input kind, hint, and run status', () => {
     expect(ExternalKeySchema.safeParse('episode-001').success).toBe(true)
@@ -713,6 +768,113 @@ describe('single-source JSON Schema registry', () => {
 
     expect(entry.zodSchema.safeParse(whitespaceName).success).toBe(false)
     expect(validate(whitespaceName)).toBe(false)
+  })
+
+  it('keeps raw text length boundaries aligned across shared and local request schemas', () => {
+    const fields: Array<{
+      label: string
+      id: keyof typeof agentContractRegistry
+      maxLength: number
+      fixture: (value: string) => unknown
+    }> = [
+      {
+        label: 'shared NameSchema',
+        id: 'waoo-agent-resolve-project.v1',
+        maxLength: 100,
+        fixture: (value) => ({ ...projectFixture, name: value }),
+      },
+      {
+        label: 'assets NonEmptyTextSchema',
+        id: 'waoo-agent-assets.v1',
+        maxLength: 20_000,
+        fixture: (value) => {
+          const input = clone(assetsFixture)
+          input.data.characters[0].ageRange = value
+          return input
+        },
+      },
+      {
+        label: 'run episodeSplitHint',
+        id: 'waoo-agent-create-run.v1',
+        maxLength: 2_000,
+        fixture: (value) => {
+          const input = clone(runFixture)
+          input.effectiveOptions.episodeSplitHint = value
+          return input
+        },
+      },
+      {
+        label: 'run episode description',
+        id: 'waoo-agent-create-run.v1',
+        maxLength: 2_000,
+        fixture: (value) => {
+          const input = clone(runFixture)
+          input.episodes[0].description = value
+          return input
+        },
+      },
+      {
+        label: 'story description',
+        id: 'waoo-agent-story.v1',
+        maxLength: 2_000,
+        fixture: (value) => {
+          const input = clone(storyFixture)
+          input.data.description = value
+          return input
+        },
+      },
+      {
+        label: 'screenplay voiceover speakerLabel',
+        id: 'waoo-agent-screenplay.v1',
+        maxLength: 100,
+        fixture: (value) => {
+          const input = clone(screenplayFixture)
+          const item = input.data.clips[0].screenplay.scenes[0].content[2]
+          if (item.type === 'voiceover') item.speakerLabel = value
+          return input
+        },
+      },
+      {
+        label: 'screenplay heading time',
+        id: 'waoo-agent-screenplay.v1',
+        maxLength: 100,
+        fixture: (value) => {
+          const input = clone(screenplayFixture)
+          input.data.clips[0].screenplay.scenes[0].heading.time = value
+          return input
+        },
+      },
+      {
+        label: 'screenplay clip summary',
+        id: 'waoo-agent-screenplay.v1',
+        maxLength: 2_000,
+        fixture: (value) => {
+          const input = clone(screenplayFixture)
+          input.data.clips[0].summary = value
+          return input
+        },
+      },
+    ]
+
+    for (const field of fields) {
+      for (const boundary of textBoundaryCases(field.maxLength)) {
+        const result = validateRegistryFixture(field.id, field.fixture(boundary.value))
+        const context = `${field.label}: ${boundary.label}`
+
+        expect(result.zodAccepted, `${context} (Zod)`).toBe(boundary.accepted)
+        expect(result.ajvAccepted, `${context} (AJV)`).toBe(boundary.accepted)
+      }
+    }
+  })
+
+  it('returns trimmed text after validating the raw boundary', () => {
+    expect(ResolveProjectRequestSchema.parse({
+      name: ' Demo project ',
+      description: ' Project description ',
+    })).toEqual({
+      name: 'Demo project',
+      description: 'Project description',
+    })
   })
 
   it('keeps multipart Zod and AJV adapter fixtures consistent', () => {

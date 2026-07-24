@@ -9,6 +9,7 @@ import {
   LongContentSchema,
   NameSchema,
   Sha256Schema,
+  trimmedTextSchema,
 } from './common'
 
 export const StoryArtifactSchema = z.object({
@@ -16,7 +17,7 @@ export const StoryArtifactSchema = z.object({
   sourceHash: Sha256Schema,
   inputKind: InputKindSchema,
   name: NameSchema,
-  description: z.string().trim().min(1).max(2_000).regex(/\S/).optional(),
+  description: trimmedTextSchema(2_000).optional(),
   novelText: LongContentSchema,
 }).strict()
 

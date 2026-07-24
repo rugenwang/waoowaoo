@@ -21,14 +21,18 @@ export const RunStatusSchema = z.enum([
   'failed',
 ])
 
-export const NameSchema = z.string().trim().min(1).max(100).regex(/\S/)
-export const IntroductionSchema = z.string().trim().min(1).max(2_000).regex(/\S/)
-export const DescriptionSchema = z.string().trim().min(1).max(20_000).regex(/\S/)
+export function trimmedTextSchema(maxLength: number) {
+  return z.string().min(1).max(maxLength).regex(/\S/).trim()
+}
+
+export const NameSchema = trimmedTextSchema(100)
+export const IntroductionSchema = trimmedTextSchema(2_000)
+export const DescriptionSchema = trimmedTextSchema(20_000)
 export const PromptSchema = DescriptionSchema
-export const LongContentSchema = z.string().trim().min(1).max(500_000).regex(/\S/)
-export const RuleSetVersionSchema = z.string().trim().min(1).max(64).regex(/\S/)
-export const UrlSchema = z.string().trim().min(1).max(20_000).regex(/\S/)
-export const IdSchema = z.string().trim().min(1).max(200).regex(/\S/)
+export const LongContentSchema = trimmedTextSchema(500_000)
+export const RuleSetVersionSchema = trimmedTextSchema(64)
+export const UrlSchema = trimmedTextSchema(20_000)
+export const IdSchema = trimmedTextSchema(200)
 
 const DetailValueSchema = z.union([
   z.string(),
@@ -63,9 +67,9 @@ export const FailureSchema = z.object({
   success: z.literal(false),
   requestId: IdSchema,
   error: z.object({
-    code: z.string().trim().min(1).max(100).regex(/\S/),
+    code: trimmedTextSchema(100),
     message: DescriptionSchema,
-    field: z.string().trim().min(1).max(2_000).regex(/\S/).optional(),
+    field: trimmedTextSchema(2_000).optional(),
     retryable: z.boolean(),
     details: ErrorDetailsSchema.optional(),
   }).strict(),

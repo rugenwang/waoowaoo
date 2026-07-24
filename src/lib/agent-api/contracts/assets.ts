@@ -9,9 +9,10 @@ import {
   IntroductionSchema,
   NameSchema,
   Sha256Schema,
+  trimmedTextSchema,
 } from './common'
 
-const NonEmptyTextSchema = z.string().trim().min(1).max(20_000).regex(/\S/)
+const NonEmptyTextSchema = trimmedTextSchema(20_000)
 
 export const RoleLevelSchema = z.enum(['S', 'A', 'B', 'C', 'D'])
 export const GenderSchema = z.enum(['male', 'female', 'nonbinary', 'unknown'])
@@ -147,7 +148,7 @@ export const AssetsCommitResponseSchema = createSuccessSchema(z.object({
   warnings: z.array(z.object({
     code: z.literal('EXISTING_ASSET_PRESERVED'),
     targetKey: ExternalKeySchema,
-    field: z.string().trim().min(1).max(2_000),
+    field: trimmedTextSchema(2_000),
   }).strict()).max(2_000),
 }).strict())
 

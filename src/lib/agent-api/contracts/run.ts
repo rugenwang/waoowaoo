@@ -11,12 +11,13 @@ import {
   RuleSetVersionSchema,
   RunStatusSchema,
   Sha256Schema,
+  trimmedTextSchema,
 } from './common'
 
 export const EffectiveOptionsSchema = z.object({
   artStyle: DescriptionSchema,
   videoRatio: DescriptionSchema,
-  episodeSplitHint: z.string().trim().min(1).max(2_000).regex(/\S/),
+  episodeSplitHint: trimmedTextSchema(2_000),
 }).strict()
 
 export const RunEpisodeDefinitionSchema = z.object({
@@ -24,7 +25,7 @@ export const RunEpisodeDefinitionSchema = z.object({
   ordinal: z.number().int().positive(),
   sourceHash: Sha256Schema,
   name: NameSchema,
-  description: z.string().trim().min(1).max(2_000).regex(/\S/).optional(),
+  description: trimmedTextSchema(2_000).optional(),
 }).strict()
 
 export const CreateRunRequestSchema = z.object({
@@ -78,7 +79,7 @@ export const RunResponseSchema = createSuccessSchema(z.object({
   runId: IdSchema,
   projectId: IdSchema,
   status: RunStatusSchema,
-  currentStage: z.string().trim().min(1).max(100).regex(/\S/),
+  currentStage: trimmedTextSchema(100),
   sourceHash: Sha256Schema,
   runFingerprint: Sha256Schema,
   ruleSetVersion: RuleSetVersionSchema,
@@ -114,8 +115,8 @@ export const SnapshotResponseSchema = createSuccessSchema(z.object({
     url: DescriptionSchema,
   }).strict()).max(20_000),
   missing: z.array(z.object({
-    code: z.string().trim().min(1).max(100).regex(/\S/),
-    targetType: z.string().trim().min(1).max(100).regex(/\S/),
+    code: trimmedTextSchema(100),
+    targetType: trimmedTextSchema(100),
     targetKey: ExternalKeySchema,
     message: DescriptionSchema,
   }).strict()).max(20_000),
