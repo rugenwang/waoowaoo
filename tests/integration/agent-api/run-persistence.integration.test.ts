@@ -85,16 +85,21 @@ describe('AgentCreationRun persistence', () => {
   })
 
   it('cascades run deletion when its user is deleted', async () => {
-    const user = await createFixtureUser()
-    const project = await createFixtureProject(user.id)
-    const run = await createFixtureAgentRun(
-      user.id,
-      project.id,
-      `sha256:${'5'.repeat(64)}`,
-    )
+    const userA = await createFixtureUser()
+    const userB = await createFixtureUser()
+    const projectB = await createFixtureProject(userB.id)
+    const run = await prisma.agentCreationRun.create({
+      data: runData(userA.id, projectB.id, `sha256:${'5'.repeat(64)}`),
+    })
 
-    await prisma.user.delete({ where: { id: user.id } })
+    await prisma.user.delete({ where: { id: userA.id } })
 
+    await expect(
+      prisma.user.findUnique({ where: { id: userB.id } }),
+    ).resolves.not.toBeNull()
+    await expect(
+      prisma.project.findUnique({ where: { id: projectB.id } }),
+    ).resolves.not.toBeNull()
     await expect(
       prisma.agentCreationRun.findUnique({ where: { id: run.id } }),
     ).resolves.toBeNull()
