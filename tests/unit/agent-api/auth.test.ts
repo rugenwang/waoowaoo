@@ -1,6 +1,8 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const cryptoMock = vi.hoisted(() => ({
+  timingSafeEqual: vi.fn(),
+}))
 
 const prismaMock = vi.hoisted(() => ({
   user: {
@@ -13,6 +15,19 @@ const prismaMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
   },
 }))
+
+vi.mock('node:crypto', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:crypto')>()
+  cryptoMock.timingSafeEqual.mockImplementation((
+    left: NodeJS.ArrayBufferView,
+    right: NodeJS.ArrayBufferView,
+  ) => original.timingSafeEqual(left, right))
+
+  return {
+    ...original,
+    timingSafeEqual: cryptoMock.timingSafeEqual,
+  }
+})
 
 vi.mock('@/lib/prisma', () => ({
   prisma: prismaMock,
@@ -165,17 +180,20 @@ describe('agent API authentication', () => {
     })
   })
 
-  it('keeps bearer token verification on fixed-length timing-safe digests', () => {
-    const source = readFileSync(
-      resolve(process.cwd(), 'src/lib/agent-api/auth.ts'),
-      'utf8',
-    )
-    const directTokenComparison =
-      /\b(?:actualToken|expectedToken|actual|expected)\b\s*(?:===|!==|==|!=)\s*\b(?:actualToken|expectedToken|actual|expected)\b/
+  it('compares different-length tokens as fixed-length timing-safe digests', async () => {
+    await expect(requireAgentAuth(agentRequest({
+      Authorization: 'Bearer x',
+    }))).rejects.toMatchObject({
+      code: 'AGENT_UNAUTHORIZED',
+      status: 401,
+    })
 
-    expect(source).toMatch(/\bcreateHash\s*\(\s*['"]sha256['"]\s*\)/)
-    expect(source).toMatch(/\btimingSafeEqual\s*\(/)
-    expect(source).not.toMatch(directTokenComparison)
+    expect(cryptoMock.timingSafeEqual).toHaveBeenCalledTimes(1)
+    const [actualDigest, expectedDigest] = cryptoMock.timingSafeEqual.mock.calls[0]
+    expect(Buffer.isBuffer(actualDigest)).toBe(true)
+    expect(Buffer.isBuffer(expectedDigest)).toBe(true)
+    expect((actualDigest as Buffer).byteLength).toBe(32)
+    expect((expectedDigest as Buffer).byteLength).toBe(32)
   })
 })
 
