@@ -18,11 +18,15 @@ import {
   parseAssetMap,
   parseStoryboardMap,
   parseUploadReceipts,
+  isCompletedUploadReceipt,
+  isPendingUploadReceipt,
   serializeUploadReceipts,
   transitionRunStatus,
   type AssetMap,
   type StoryboardMap,
+  type PendingUploadReceipt,
   type UploadReceipt,
+  type UploadReceiptRecord,
   type UploadReceipts,
 } from '@/lib/agent-api/run-state'
 import { decodeImageUrlsFromDb } from '@/lib/contracts/image-urls-contract'
@@ -32,6 +36,7 @@ import { prisma } from '@/lib/prisma'
 import { uploadObject } from '@/lib/storage'
 
 const DEFAULT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+const DEFAULT_UPLOAD_MAX_PIXELS = 40_000_000
 const UPLOAD_TRANSACTION_OPTIONS = {
   maxWait: 10_000,
   timeout: 30_000,
@@ -130,7 +135,7 @@ export type CommitGeneratedImageUploadResult = {
 }
 
 type UploadIdentity = Pick<
-  UploadReceipt,
+  UploadReceiptRecord,
   'targetType' | 'targetKey' | 'variantIndex' | 'contentSha256'
 >
 
@@ -184,7 +189,7 @@ function parseRunMappings(run: UploadRun): {
 }
 
 function receiptMatches(
-  receipt: UploadReceipt,
+  receipt: UploadReceiptRecord,
   identity: UploadIdentity,
 ): boolean {
   return receipt.targetType === identity.targetType
@@ -193,10 +198,10 @@ function receiptMatches(
     && receipt.contentSha256 === identity.contentSha256
 }
 
-function findReceipt(
+function findReceiptRecord(
   receipts: UploadReceipts,
   identity: UploadIdentity,
-): UploadReceipt | undefined {
+): UploadReceiptRecord | undefined {
   return receipts.find((receipt) => receiptMatches(receipt, identity))
 }
 
@@ -241,6 +246,15 @@ export function configuredUploadMaxBytes(): number {
   return value
 }
 
+export function configuredUploadMaxPixels(): number {
+  const raw = process.env.WAOO_AGENT_UPLOAD_MAX_PIXELS
+  if (raw === undefined || raw.trim() === '') return DEFAULT_UPLOAD_MAX_PIXELS
+  if (!/^[1-9]\d*$/.test(raw)) internalState('WAOO_AGENT_UPLOAD_MAX_PIXELS')
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value)) internalState('WAOO_AGENT_UPLOAD_MAX_PIXELS')
+  return value
+}
+
 export function deterministicUploadStorageKey(input: {
   runId: string
   targetType: UploadTargetType
@@ -272,6 +286,7 @@ export async function normalizeUploadImage(input: {
   declaredMimeType: string
   contentSha256: string
   maxBytes: number
+  maxPixels: number
 }): Promise<NormalizedUploadImage> {
   if (input.raw.length > input.maxBytes) {
     throw new AgentApiError('UPLOAD_TOO_LARGE', { field: 'file' })
@@ -284,7 +299,9 @@ export async function normalizeUploadImage(input: {
 
   let metadata: sharp.Metadata
   try {
-    metadata = await sharp(input.raw).metadata()
+    metadata = await sharp(input.raw, {
+      limitInputPixels: false,
+    }).metadata()
   } catch {
     throw new AgentApiError('UPLOAD_TYPE_UNSUPPORTED', { field: 'file' })
   }
@@ -294,9 +311,18 @@ export async function normalizeUploadImage(input: {
   if (!actualMimeType || actualMimeType !== input.declaredMimeType) {
     throw new AgentApiError('UPLOAD_TYPE_UNSUPPORTED', { field: 'file' })
   }
+  if (
+    !metadata.width
+    || !metadata.height
+    || metadata.width > Math.floor(input.maxPixels / metadata.height)
+  ) {
+    throw new AgentApiError('UPLOAD_TOO_LARGE', { field: 'file' })
+  }
 
   try {
-    const output = await sharp(input.raw)
+    const output = await sharp(input.raw, {
+      limitInputPixels: input.maxPixels,
+    })
       .rotate()
       .jpeg({ quality: 90, mozjpeg: true })
       .toBuffer({ resolveWithObject: true })
@@ -640,6 +666,75 @@ async function loadValidatedTarget(
   return { ...mappings, target }
 }
 
+async function lockUploadRun(
+  tx: Prisma.TransactionClient,
+  input: Pick<CommitGeneratedImageUploadInput, 'userId' | 'runId' | 'fields'>,
+) {
+  await tx.$queryRaw(Prisma.sql`
+    SELECT id FROM agent_creation_runs
+    WHERE id = ${input.runId}
+    FOR UPDATE
+  `)
+  const run = assertRunOwner(
+    await tx.agentCreationRun.findUnique({
+      where: { id: input.runId },
+      select: UPLOAD_RUN_SELECT,
+    }),
+    input.userId,
+  )
+  const locked = await loadValidatedTarget(
+    tx as unknown as UploadDb,
+    run,
+    input.fields,
+  )
+  return { run, locked }
+}
+
+type UploadReservationResult = {
+  target: ResolvedUploadTarget
+  completed?: UploadReceipt
+}
+
+async function reserveUploadReceipt(
+  input: CommitGeneratedImageUploadInput,
+  identity: UploadIdentity,
+  storageKey: string,
+): Promise<UploadReservationResult> {
+  return prisma.$transaction(async (tx) => {
+    const { run, locked } = await lockUploadRun(tx, input)
+    const existing = findReceiptRecord(locked.receipts, identity)
+    if (existing) {
+      if (isCompletedUploadReceipt(existing)) {
+        return { target: locked.target, completed: existing }
+      }
+      if (!isPendingUploadReceipt(existing) || existing.storageKey !== storageKey) {
+        internalState('receiptJson')
+      }
+      return { target: locked.target }
+    }
+    if (locked.receipts.length >= 20_000) {
+      throw new AgentApiError('AGENT_INTERNAL_ERROR', {
+        message: 'Upload receipt limit reached',
+        details: { maxReceipts: 20_000 },
+      })
+    }
+    const pending: PendingUploadReceipt = {
+      ...identity,
+      status: 'pending',
+      storageKey,
+    }
+    await tx.agentCreationRun.update({
+      where: { id: run.id },
+      data: {
+        receiptJson: serializeUploadReceipts(
+          sortReceipts([...locked.receipts, pending]),
+        ),
+      },
+    })
+    return { target: locked.target }
+  }, UPLOAD_TRANSACTION_OPTIONS)
+}
+
 export async function commitGeneratedImageUpload(
   input: CommitGeneratedImageUploadInput,
 ): Promise<CommitGeneratedImageUploadResult> {
@@ -650,7 +745,7 @@ export async function commitGeneratedImageUpload(
     }),
     input.userId,
   )
-  const preflight = await loadValidatedTarget(
+  await loadValidatedTarget(
     prisma as unknown as UploadDb,
     preflightRun,
     input.fields,
@@ -674,15 +769,20 @@ export async function commitGeneratedImageUpload(
     declaredMimeType: input.fields.file.type,
     contentSha256: input.fields.contentSha256,
     maxBytes: configuredUploadMaxBytes(),
+    maxPixels: configuredUploadMaxPixels(),
   })
-  const existingReceipt = findReceipt(preflight.receipts, identity)
-  if (existingReceipt) {
-    return resultFromReceipt(input.runId, existingReceipt, preflight.target)
-  }
   const storageKey = deterministicUploadStorageKey({
     runId: input.runId,
     ...identity,
   })
+  const reservation = await reserveUploadReceipt(input, identity, storageKey)
+  if (reservation.completed) {
+    return resultFromReceipt(
+      input.runId,
+      reservation.completed,
+      reservation.target,
+    )
+  }
   await uploadObject(normalized.bytes, storageKey, 1, normalized.mimeType)
   const media = await ensureMediaObjectFromStorageKey(storageKey, {
     sha256: normalized.sha256,
@@ -693,32 +793,17 @@ export async function commitGeneratedImageUpload(
   })
 
   return prisma.$transaction(async (tx) => {
-    await tx.$queryRaw(Prisma.sql`
-      SELECT id FROM agent_creation_runs
-      WHERE id = ${input.runId}
-      FOR UPDATE
-    `)
-    const run = assertRunOwner(
-      await tx.agentCreationRun.findUnique({
-        where: { id: input.runId },
-        select: UPLOAD_RUN_SELECT,
-      }),
-      input.userId,
-    )
-    const locked = await loadValidatedTarget(
-      tx as unknown as UploadDb,
-      run,
-      input.fields,
-    )
-    const concurrentReceipt = findReceipt(locked.receipts, identity)
-    if (concurrentReceipt) {
-      return resultFromReceipt(input.runId, concurrentReceipt, locked.target)
+    const { run, locked } = await lockUploadRun(tx, input)
+    const reserved = findReceiptRecord(locked.receipts, identity)
+    if (reserved && isCompletedUploadReceipt(reserved)) {
+      return resultFromReceipt(input.runId, reserved, locked.target)
     }
-    if (locked.receipts.length >= 20_000) {
-      throw new AgentApiError('AGENT_INTERNAL_ERROR', {
-        message: 'Upload receipt limit reached',
-        details: { maxReceipts: 20_000 },
-      })
+    if (
+      !reserved
+      || !isPendingUploadReceipt(reserved)
+      || reserved.storageKey !== storageKey
+    ) {
+      internalState('receiptJson')
     }
 
     const panelImageUpdated = await updateUploadTarget(
@@ -733,7 +818,9 @@ export async function commitGeneratedImageUpload(
       storageKey,
       url: media.url,
     }
-    const receipts = sortReceipts([...locked.receipts, receipt])
+    const receipts = sortReceipts(locked.receipts.map((entry) => (
+      receiptMatches(entry, identity) ? receipt : entry
+    )))
     const status = parseRunStatus(run.status)
     const nextStatus = status === 'storyboards_committed'
       ? transitionRunStatus(status, run.currentStage, 'images_in_progress')

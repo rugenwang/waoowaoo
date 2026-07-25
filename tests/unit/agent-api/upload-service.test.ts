@@ -27,6 +27,7 @@ describe('upload image preparation', () => {
       declaredMimeType: 'image/png',
       contentSha256: sha256Prefixed(raw),
       maxBytes: raw.length,
+      maxPixels: 100,
     })
 
     expect(normalized.mimeType).toBe('image/jpeg')
@@ -44,25 +45,43 @@ describe('upload image preparation', () => {
       declaredMimeType: 'image/jpeg',
       contentSha256: sha256Prefixed(raw),
       maxBytes: raw.length,
+      maxPixels: 100,
     })).rejects.toMatchObject({ code: 'UPLOAD_TYPE_UNSUPPORTED' })
     await expect(normalizeUploadImage({
       raw: Buffer.from('not-an-image'),
       declaredMimeType: 'image/png',
       contentSha256: sha256Prefixed(Buffer.from('not-an-image')),
       maxBytes: 100,
+      maxPixels: 100,
     })).rejects.toMatchObject({ code: 'UPLOAD_TYPE_UNSUPPORTED' })
     await expect(normalizeUploadImage({
       raw,
       declaredMimeType: 'image/png',
       contentSha256: `sha256:${'0'.repeat(64)}`,
       maxBytes: raw.length,
+      maxPixels: 100,
     })).rejects.toMatchObject({ code: 'ARTIFACT_HASH_MISMATCH' })
     await expect(normalizeUploadImage({
       raw,
       declaredMimeType: 'image/png',
       contentSha256: sha256Prefixed(raw),
       maxBytes: raw.length - 1,
+      maxPixels: 100,
     })).rejects.toMatchObject({ code: 'UPLOAD_TOO_LARGE' })
+  })
+
+  it('rejects compressed images whose decoded dimensions exceed the pixel limit', async () => {
+    const raw = await png()
+    await expect(normalizeUploadImage({
+      raw,
+      declaredMimeType: 'image/png',
+      contentSha256: sha256Prefixed(raw),
+      maxBytes: raw.length,
+      maxPixels: 11,
+    })).rejects.toMatchObject({
+      code: 'UPLOAD_TOO_LARGE',
+      field: 'file',
+    })
   })
 
   it('builds a safe deterministic key and a strict four-part receipt identity', () => {

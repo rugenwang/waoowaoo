@@ -14,8 +14,12 @@ import {
   requireIdempotencyKey,
   uploadIdempotencyKey,
 } from '@/lib/agent-api/idempotency'
-import { commitGeneratedImageUpload } from '@/lib/agent-api/services/upload-service'
+import {
+  commitGeneratedImageUpload,
+  configuredUploadMaxBytes,
+} from '@/lib/agent-api/services/upload-service'
 
+const MULTIPART_OVERHEAD_BYTES = 1024 * 1024
 const ALLOWED_FIELDS = new Set([
   'targetType',
   'targetKey',
@@ -67,9 +71,48 @@ async function parseMultipartUpload(request: Request) {
   if (!contentType.toLowerCase().startsWith('multipart/form-data;')) {
     contractInvalid('content-type')
   }
+  const maxBodyBytes = Math.min(
+    Number.MAX_SAFE_INTEGER,
+    configuredUploadMaxBytes() + MULTIPART_OVERHEAD_BYTES,
+  )
+  const declaredLength = request.headers.get('content-length')
+  if (declaredLength && /^\d+$/.test(declaredLength)) {
+    const parsedLength = Number(declaredLength)
+    if (
+      !Number.isSafeInteger(parsedLength)
+      || parsedLength > maxBodyBytes
+    ) {
+      throw new AgentApiError('UPLOAD_TOO_LARGE', { field: 'file' })
+    }
+  }
+  if (!request.body) contractInvalid('body')
+  const reader = request.body.getReader()
+  const chunks: Buffer[] = []
+  let totalBytes = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      totalBytes += value.byteLength
+      if (totalBytes > maxBodyBytes) {
+        await reader.cancel().catch(() => undefined)
+        throw new AgentApiError('UPLOAD_TOO_LARGE', { field: 'file' })
+      }
+      chunks.push(Buffer.from(value))
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  const boundedHeaders = new Headers(request.headers)
+  boundedHeaders.set('content-length', String(totalBytes))
+  const boundedRequest = new Request(request.url, {
+    method: request.method,
+    headers: boundedHeaders,
+    body: Buffer.concat(chunks, totalBytes),
+  })
   let form: FormData
   try {
-    form = await request.formData()
+    form = await boundedRequest.formData()
   } catch {
     contractInvalid('body')
   }

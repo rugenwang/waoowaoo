@@ -11,15 +11,31 @@ import {
 const storageMock = vi.hoisted(() => ({
   uploadObject: vi.fn(async (_body: Buffer, key: string) => key),
 }))
+const mediaMock = vi.hoisted(() => ({
+  ensureMediaObjectFromStorageKey: vi.fn(),
+}))
 
 vi.mock('@/lib/storage', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/storage')>(),
   uploadObject: storageMock.uploadObject,
 }))
+vi.mock('@/lib/media/service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/media/service')>()
+  mediaMock.ensureMediaObjectFromStorageKey.mockImplementation(
+    actual.ensureMediaObjectFromStorageKey,
+  )
+  return {
+    ...actual,
+    ensureMediaObjectFromStorageKey:
+      mediaMock.ensureMediaObjectFromStorageKey,
+  }
+})
 
 import { sha256Prefixed } from '@/lib/agent-api/canonical-json'
 import { buildProjectedEntityId } from '@/lib/agent-api/entity-id'
 import {
+  isCompletedUploadReceipt,
+  isPendingUploadReceipt,
   parseUploadReceipts,
   serializeAssetMap,
   serializeStoryboardMap,
@@ -166,15 +182,32 @@ async function receipts(runId: string) {
   return parseUploadReceipts(run.receiptJson!)
 }
 
+function completedReceipts(count: number) {
+  return Array.from({ length: count }, (_, index) => {
+    const suffix = index.toString(16).padStart(64, '0')
+    return {
+      targetType: 'panel-frame' as const,
+      targetKey: `historical-${index}`,
+      variantIndex: 0,
+      contentSha256: `sha256:${suffix}`,
+      mediaId: 'historical-media',
+      storageKey: `historical/${index}.jpg`,
+      url: `/m/historical-${index}`,
+    }
+  })
+}
+
 describe('Agent upload receipt concurrency', () => {
   beforeEach(async () => {
     await resetSystemState()
     vi.clearAllMocks()
     process.env.WAOO_AGENT_UPLOAD_MAX_BYTES = String(1024 * 1024)
+    process.env.WAOO_AGENT_UPLOAD_MAX_PIXELS = String(40_000_000)
   })
 
   afterAll(async () => {
     delete process.env.WAOO_AGENT_UPLOAD_MAX_BYTES
+    delete process.env.WAOO_AGENT_UPLOAD_MAX_PIXELS
     await prisma.$disconnect()
   })
 
@@ -236,5 +269,79 @@ describe('Agent upload receipt concurrency', () => {
     })
     expect(results.map((result) => result.storageKey)).toContain(slot.imageUrl)
     expect(results.map((result) => result.mediaId)).toHaveLength(2)
+  })
+
+  it('rejects a full 20,000 receipt run before storage or MediaObject writes', async () => {
+    const fixture = await createFixture()
+    await prisma.agentCreationRun.update({
+      where: { id: fixture.run.id },
+      data: {
+        receiptJson: serializeUploadReceipts(completedReceipts(20_000)),
+      },
+    })
+    const raw = await png('#666666')
+
+    await expect(upload(fixture, 'location.first', raw)).rejects.toMatchObject({
+      code: 'AGENT_INTERNAL_ERROR',
+      message: 'Upload receipt limit reached',
+    })
+    expect(storageMock.uploadObject).not.toHaveBeenCalled()
+    expect(mediaMock.ensureMediaObjectFromStorageKey).not.toHaveBeenCalled()
+    expect(await prisma.mediaObject.count({
+      where: { storageKey: { startsWith: `agent-runs/${fixture.run.id}/` } },
+    })).toBe(0)
+    expect((await prisma.locationImage.findUniqueOrThrow({
+      where: { id: fixture.firstImage.id },
+    })).imageUrl).toBeNull()
+  })
+
+  it('atomically reserves the last capacity slot for only one of two hashes', async () => {
+    const fixture = await createFixture()
+    await prisma.agentCreationRun.update({
+      where: { id: fixture.run.id },
+      data: {
+        receiptJson: serializeUploadReceipts(completedReceipts(19_999)),
+      },
+    })
+    const [leftRaw, rightRaw] = await Promise.all([
+      png('#777777'),
+      png('#888888'),
+    ])
+
+    const results = await Promise.allSettled([
+      upload(fixture, 'location.first', leftRaw),
+      upload(fixture, 'location.first', rightRaw),
+    ])
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+    expect(storageMock.uploadObject).toHaveBeenCalledTimes(1)
+    expect(mediaMock.ensureMediaObjectFromStorageKey).toHaveBeenCalledTimes(1)
+    expect(await receipts(fixture.run.id)).toHaveLength(20_000)
+    expect(await prisma.mediaObject.count({
+      where: { storageKey: { startsWith: `agent-runs/${fixture.run.id}/` } },
+    })).toBe(1)
+  })
+
+  it('keeps a failed storage reservation pending and completes it on retry', async () => {
+    const fixture = await createFixture()
+    const raw = await png('#999999')
+    storageMock.uploadObject.mockRejectedValueOnce(new Error('storage down'))
+
+    await expect(upload(fixture, 'location.first', raw))
+      .rejects.toThrow('storage down')
+    const pending = await receipts(fixture.run.id)
+    expect(pending).toHaveLength(1)
+    expect(isPendingUploadReceipt(pending[0])).toBe(true)
+    expect((await prisma.locationImage.findUniqueOrThrow({
+      where: { id: fixture.firstImage.id },
+    })).imageUrl).toBeNull()
+
+    const retried = await upload(fixture, 'location.first', raw)
+    expect(retried.reused).toBe(false)
+    const completed = await receipts(fixture.run.id)
+    expect(completed).toHaveLength(1)
+    expect(isCompletedUploadReceipt(completed[0])).toBe(true)
+    expect(storageMock.uploadObject).toHaveBeenCalledTimes(2)
   })
 })

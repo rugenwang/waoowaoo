@@ -272,7 +272,47 @@ export const UploadReceiptSchema = z.object({
   url: UrlSchema,
 }).strict()
 
-export const UploadReceiptsSchema = z.array(UploadReceiptSchema).max(20_000)
+export const PendingUploadReceiptSchema = z.object({
+  targetType: z.enum([
+    'character-appearance',
+    'location-image',
+    'prop-image',
+    'panel-frame',
+  ]),
+  targetKey: ExternalKeySchema,
+  variantIndex: z.number().int().nonnegative(),
+  contentSha256: Sha256Schema,
+  status: z.literal('pending'),
+  storageKey: UrlSchema,
+}).strict()
+
+export const UploadReceiptRecordSchema = z.union([
+  UploadReceiptSchema,
+  PendingUploadReceiptSchema,
+])
+
+export const UploadReceiptsSchema = z.array(UploadReceiptRecordSchema)
+  .max(20_000)
+  .superRefine((receipts, context) => {
+    const identities = new Set<string>()
+    for (let index = 0; index < receipts.length; index += 1) {
+      const receipt = receipts[index]
+      const identity = [
+        receipt.targetType,
+        receipt.targetKey,
+        String(receipt.variantIndex),
+        receipt.contentSha256,
+      ].join('\u0000')
+      if (identities.has(identity)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'upload receipt identity must be unique',
+          path: [index],
+        })
+      }
+      identities.add(identity)
+    }
+  })
 
 export type EpisodeMap = z.infer<typeof EpisodeMapSchema>
 export type AssetMap = z.infer<typeof AssetMapSchema>
@@ -280,8 +320,26 @@ export type ClipMap = z.infer<typeof ClipMapSchema>
 export type StoryboardMap = z.infer<typeof StoryboardMapSchema>
 export type ArtifactHashes = z.infer<typeof ArtifactHashesSchema>
 export type UploadReceipt = z.infer<typeof UploadReceiptSchema>
+export type PendingUploadReceipt = z.infer<
+  typeof PendingUploadReceiptSchema
+>
+export type UploadReceiptRecord = z.infer<
+  typeof UploadReceiptRecordSchema
+>
 export type UploadReceipts = z.infer<typeof UploadReceiptsSchema>
 export type EffectiveOptions = CreateRunRequest['effectiveOptions']
+
+export function isPendingUploadReceipt(
+  receipt: UploadReceiptRecord,
+): receipt is PendingUploadReceipt {
+  return 'status' in receipt && receipt.status === 'pending'
+}
+
+export function isCompletedUploadReceipt(
+  receipt: UploadReceiptRecord,
+): receipt is UploadReceipt {
+  return !isPendingUploadReceipt(receipt)
+}
 
 function invalidPersistedState(field: string): never {
   throw new AgentApiError('AGENT_INTERNAL_ERROR', {

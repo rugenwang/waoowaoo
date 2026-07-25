@@ -47,6 +47,7 @@ const ORIGINAL_ENV = {
   WAOO_AGENT_TOKEN: process.env.WAOO_AGENT_TOKEN,
   WAOO_AGENT_USER_ID: process.env.WAOO_AGENT_USER_ID,
   WAOO_AGENT_UPLOAD_MAX_BYTES: process.env.WAOO_AGENT_UPLOAD_MAX_BYTES,
+  WAOO_AGENT_UPLOAD_MAX_PIXELS: process.env.WAOO_AGENT_UPLOAD_MAX_PIXELS,
 }
 
 type Fixture = Awaited<ReturnType<typeof createReadyFixture>>
@@ -393,6 +394,7 @@ describe('Agent generated image upload', () => {
     process.env.WAOO_AGENT_TOKEN = 'integration-agent-token'
     process.env.WAOO_AGENT_USER_ID = fixture.user.id
     process.env.WAOO_AGENT_UPLOAD_MAX_BYTES = String(1024 * 1024)
+    process.env.WAOO_AGENT_UPLOAD_MAX_PIXELS = String(40_000_000)
   })
 
   afterEach(() => {
@@ -432,6 +434,13 @@ describe('Agent generated image upload', () => {
       raw,
     })).response.status).toBe(413)
     process.env.WAOO_AGENT_UPLOAD_MAX_BYTES = String(1024 * 1024)
+    process.env.WAOO_AGENT_UPLOAD_MAX_PIXELS = '10'
+    expect((await upload({
+      targetType: 'panel-frame',
+      targetKey: 'frame.first',
+      raw,
+    })).response.status).toBe(413)
+    process.env.WAOO_AGENT_UPLOAD_MAX_PIXELS = String(40_000_000)
     expect((await upload({
       targetType: 'character-appearance',
       targetKey: 'appearance.lin.default',
@@ -465,6 +474,7 @@ describe('Agent generated image upload', () => {
     expect(await prisma.mediaObject.count({
       where: { storageKey: { startsWith: `agent-runs/${fixture.run.id}/` } },
     })).toBe(0)
+    expect(storageMock.uploadObject).not.toHaveBeenCalled()
   })
 
   it('updates only run-owned asset slots and preserves reused selections', async () => {

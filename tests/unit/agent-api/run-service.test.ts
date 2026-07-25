@@ -218,7 +218,7 @@ describe('typed Agent run state', () => {
       screenplays: {},
       storyboards: { 'episode-001': HASH_C },
     }
-    const receipts = [{
+    const completedReceipt = {
       targetType: 'panel-frame' as const,
       targetKey: 'frame-001',
       variantIndex: 0,
@@ -226,13 +226,28 @@ describe('typed Agent run state', () => {
       mediaId: 'media-1',
       storageKey: 'agent/run-1/frame.png',
       url: '/api/media/media-1',
-    }]
+    }
+    const receipts = [
+      completedReceipt,
+      {
+        targetType: 'location-image' as const,
+        targetKey: 'location-001',
+        variantIndex: 0,
+        contentSha256: HASH_C,
+        status: 'pending' as const,
+        storageKey: 'agent/run-1/location.png',
+      },
+    ]
     expect(parseArtifactHashes(serializeArtifactHashes(hashes))).toEqual(hashes)
     expect(parseUploadReceipts(serializeUploadReceipts(receipts))).toEqual(receipts)
     expect(() => parseUploadReceipts(JSON.stringify([{
-      ...receipts[0],
+      ...completedReceipt,
       provider: 'must-not-be-persisted',
     }]))).toThrowError(expect.objectContaining({ code: 'AGENT_INTERNAL_ERROR' }))
+    expect(() => parseUploadReceipts(JSON.stringify([
+      completedReceipt,
+      completedReceipt,
+    ]))).toThrowError(expect.objectContaining({ code: 'AGENT_INTERNAL_ERROR' }))
   })
 
   it('strictly round-trips asset, clip, and storyboard association maps', () => {
