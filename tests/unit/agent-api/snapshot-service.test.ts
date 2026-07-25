@@ -400,6 +400,77 @@ describe('snapshot service integrity', () => {
     ]))
   })
 
+  it('requires persisted media links for location, prop, and frame while allowing candidate-only character links', async () => {
+    prismaMock.characterAppearance.findMany.mockResolvedValue([{
+      id: ids.appearance,
+      characterId: ids.character,
+      appearanceIndex: 0,
+      imageUrls: JSON.stringify([storage.character]),
+      imageUrl: 'historical-selected.jpg',
+      imageMediaId: null,
+    }])
+    prismaMock.locationImage.findMany.mockResolvedValue([
+      {
+        id: ids.locationImage,
+        locationId: ids.location,
+        imageIndex: 0,
+        imageUrl: storage.location,
+        imageMediaId: null,
+      },
+      {
+        id: ids.propImage,
+        locationId: ids.prop,
+        imageIndex: 0,
+        imageUrl: storage.prop,
+        imageMediaId: null,
+      },
+    ])
+    prismaMock.novelPromotionPanel.findMany.mockResolvedValue([{
+      id: ids.panel,
+      storyboardId: ids.storyboard,
+      panelIndex: 0,
+      imageUrl: storage.frame,
+      imageMediaId: null,
+    }])
+    prismaMock.novelPromotionPanelFrame.findMany.mockResolvedValue([{
+      id: ids.frame,
+      panelId: ids.panel,
+      frameIndex: 0,
+      imageUrl: storage.frame,
+      imageMediaId: null,
+      generationStatus: 'completed',
+    }])
+
+    const snapshot = await getRunSnapshot({
+      userId: 'user-1',
+      runId: ids.run,
+    })
+
+    expect(snapshot.missing).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'ASSET_IMAGE_MISSING',
+        targetType: 'character-appearance',
+      }),
+    ]))
+    expect(snapshot.missing).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'ASSET_IMAGE_MISSING',
+        targetType: 'location-image',
+        targetKey: 'home',
+      }),
+      expect.objectContaining({
+        code: 'ASSET_IMAGE_MISSING',
+        targetType: 'prop-image',
+        targetKey: 'sword',
+      }),
+      expect.objectContaining({
+        code: 'FRAME_IMAGE_MISSING',
+        targetType: 'panel-frame',
+        targetKey: 'frame-1',
+      }),
+    ]))
+  })
+
   it('reports absent artifacts, panel frames, and frame images in a fixed order', async () => {
     prismaMock.agentCreationRun.findUnique.mockResolvedValue(baseRun({
       artifactHashesJson: serializeArtifactHashes({

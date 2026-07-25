@@ -406,6 +406,50 @@ describe('agent finalize integration', () => {
     })
   })
 
+  it('refuses to finalize a frame whose URL and receipt exist but persisted media links are missing', async () => {
+    const raw = await sharp({
+      create: {
+        width: 8,
+        height: 6,
+        channels: 3,
+        background: '#00cc00',
+      },
+    }).png().toBuffer()
+    const uploaded = await uploadFrame(raw)
+    expect(uploaded.response.status).toBe(200)
+
+    await prisma.novelPromotionPanelFrame.update({
+      where: {
+        id: buildProjectedEntityId(
+          fixture.run.id,
+          'Frame',
+          fixture.frameKey,
+        ),
+      },
+      data: { imageMediaId: null },
+    })
+    await prisma.novelPromotionPanel.update({
+      where: {
+        id: buildProjectedEntityId(
+          fixture.run.id,
+          'Panel',
+          'panel-1',
+        ),
+      },
+      data: { imageMediaId: null },
+    })
+
+    const result = await finalize()
+    expect(result.response.status).toBe(422)
+    expect(result.payload.error.code).toBe('RUN_INCOMPLETE')
+    await expect(prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: fixture.run.id },
+    })).resolves.toMatchObject({
+      status: 'incomplete',
+      currentStage: 'images_in_progress',
+    })
+  })
+
   it('exposes the same stable missing list through snapshot without mutation', async () => {
     const before = await prisma.agentCreationRun.findUniqueOrThrow({
       where: { id: fixture.run.id },

@@ -575,12 +575,16 @@ export async function inspectRunIntegrity(
     receipt: UploadReceipt,
     storageKey: string | null,
     mediaId: string | null,
+    allowMissingMediaLink: boolean,
   ) => {
     const media = mediaById.get(receipt.mediaId)
     return !!storageKey
       && receipt.storageKey === storageKey
       && expectedStorageKey(run.id, receipt) === receipt.storageKey
-      && (!mediaId || receipt.mediaId === mediaId)
+      && (
+        allowMissingMediaLink
+        || (!!mediaId && receipt.mediaId === mediaId)
+      )
       && !!media
       && media.storageKey === receipt.storageKey
       && receipt.url === mediaUrl(media.publicId)
@@ -591,11 +595,17 @@ export async function inspectRunIntegrity(
     variantIndex: number,
     storageKey: string | null,
     mediaId: string | null,
+    allowMissingMediaLink = false,
   ) => {
     const target = [targetType, targetKey, String(variantIndex)].join('\u0000')
     expectedTargets.add(target)
     return (completedByTarget.get(target) ?? []).find(
-      (receipt) => receiptValid(receipt, storageKey, mediaId),
+      (receipt) => receiptValid(
+        receipt,
+        storageKey,
+        mediaId,
+        allowMissingMediaLink,
+      ),
     )
   }
 
@@ -756,6 +766,7 @@ export async function inspectRunIntegrity(
         0,
         storageKey,
         null,
+        true,
       )) {
         addMissing(
           missing,
@@ -958,7 +969,9 @@ export async function inspectRunIntegrity(
       || (
         !!panelRow
         && panelRow.imageUrl === row?.imageUrl
+        && !!panelRow.imageMediaId
         && panelRow.imageMediaId === row?.imageMediaId
+        && panelRow.imageMediaId === receipt?.mediaId
       )
     if (
       !receipt
