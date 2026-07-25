@@ -474,6 +474,7 @@ async function loadExistingAssets(
 
 async function commitCharacters(
   tx: Prisma.TransactionClient,
+  runId: string,
   novelProjectId: string,
   inputs: CharacterInput[],
   existingCharacters: ExistingCharacter[],
@@ -495,6 +496,11 @@ async function commitCharacters(
     if (!stored) {
       const created = await tx.novelPromotionCharacter.create({
         data: {
+          id: buildProjectedEntityId(
+            runId,
+            'Character',
+            character.characterKey,
+          ),
           novelPromotionProjectId: novelProjectId,
           name: character.name,
           aliases: JSON.stringify(character.aliases),
@@ -539,6 +545,9 @@ async function commitCharacters(
     }
 
     const storedAppearances = appearancesByCharacter.get(stored.id) ?? []
+    const reusableAppearances = characterReused
+      ? [...storedAppearances]
+      : []
     let nextIndex = characterReused
       ? Math.max(
         -1,
@@ -547,7 +556,7 @@ async function commitCharacters(
       : 0
     const mappedAppearances: AssetMap['characters'][string]['appearances'] = {}
     for (const appearance of character.appearances) {
-      const exact = storedAppearances
+      const exact = reusableAppearances
         .filter((entry) => (
           normalizeAssetIdentityText(entry.changeReason)
             === normalizeAssetIdentityText(appearance.changeReason)
@@ -582,6 +591,11 @@ async function commitCharacters(
         : appearance.appearanceOrdinal - 1
       const created = await tx.characterAppearance.create({
         data: {
+          id: buildProjectedEntityId(
+            runId,
+            'Appearance',
+            appearance.appearanceKey,
+          ),
           characterId: stored.id,
           appearanceIndex,
           changeReason: appearance.changeReason,
@@ -623,6 +637,7 @@ async function commitCharacters(
 
 async function commitImageAsset(
   tx: Prisma.TransactionClient,
+  runId: string,
   novelProjectId: string,
   input: ImageAssetInput,
   kind: ImageAssetKind,
@@ -641,6 +656,11 @@ async function commitImageAsset(
   if (!stored) {
     const created = await tx.novelPromotionLocation.create({
       data: {
+        id: buildProjectedEntityId(
+          runId,
+          kind === 'location' ? 'Location' : 'Prop',
+          externalKey,
+        ),
         novelPromotionProjectId: novelProjectId,
         name: input.name,
         summary: input.summary,
@@ -672,6 +692,11 @@ async function commitImageAsset(
   for (let slotIndex = 0; slotIndex < descriptions.length; slotIndex += 1) {
     const created = await tx.locationImage.create({
       data: {
+        id: buildProjectedEntityId(
+          runId,
+          'LocationImage',
+          `${externalKey}:${slotIndex}`,
+        ),
         locationId: stored.id,
         imageIndex: firstIndex + slotIndex,
         description: descriptions[slotIndex],
@@ -785,6 +810,15 @@ async function commitAssetsInTransaction(
       [],
     )
   }
+  if (
+    Object.keys(persistedMapping.characters).length > 0
+    || Object.keys(persistedMapping.locations).length > 0
+    || Object.keys(persistedMapping.props).length > 0
+  ) {
+    throw new AgentApiError('AGENT_INTERNAL_ERROR', {
+      details: { field: 'assetMapJson' },
+    })
+  }
 
   const novelProject = await tx.novelPromotionProject.findUnique({
     where: { projectId: run.projectId },
@@ -812,6 +846,7 @@ async function commitAssetsInTransaction(
   const mapping = emptyAssetMap()
   await commitCharacters(
     tx,
+    run.id,
     novelProject.id,
     input.request.data.characters,
     existing.characters,
@@ -823,6 +858,7 @@ async function commitAssetsInTransaction(
   for (const location of input.request.data.locations) {
     await commitImageAsset(
       tx,
+      run.id,
       novelProject.id,
       location,
       'location',
@@ -837,6 +873,7 @@ async function commitAssetsInTransaction(
   for (const prop of input.request.data.props) {
     await commitImageAsset(
       tx,
+      run.id,
       novelProject.id,
       prop,
       'prop',

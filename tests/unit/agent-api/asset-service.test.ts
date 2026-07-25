@@ -260,6 +260,142 @@ describe('commitAssetsArtifact', () => {
     expect(txMock.agentCreationRun.update).not.toHaveBeenCalled()
   })
 
+  it('uses the exact dry-run projected IDs when the same artifact is committed', async () => {
+    txMock.novelPromotionCharacter.create.mockImplementation(async ({ data }) => ({
+      id: data.id,
+      name: data.name,
+      aliases: data.aliases,
+      profileData: data.profileData,
+      profileConfirmed: data.profileConfirmed,
+      introduction: data.introduction,
+    }))
+    txMock.characterAppearance.create.mockImplementation(async ({ data }) => ({
+      id: data.id,
+      characterId: data.characterId,
+      appearanceIndex: data.appearanceIndex,
+      changeReason: data.changeReason,
+      description: data.description,
+      descriptions: data.descriptions,
+      imageUrl: null,
+      imageUrls: data.imageUrls,
+      selectedIndex: null,
+    }))
+    txMock.novelPromotionLocation.create.mockImplementation(async ({ data }) => ({
+      id: data.id,
+      name: data.name,
+      summary: data.summary,
+      assetKind: data.assetKind,
+      selectedImageId: null,
+    }))
+    txMock.locationImage.create.mockImplementation(async ({ data }) => ({
+      id: data.id,
+      imageIndex: data.imageIndex,
+    }))
+    const commitRequest = request()
+    const dryRunResult = await commitAssetsArtifact({
+      userId: 'user-1',
+      runId: 'run-1',
+      request: { ...commitRequest, dryRun: true },
+    })
+    const committed = await commitAssetsArtifact({
+      userId: 'user-1',
+      runId: 'run-1',
+      request: commitRequest,
+    })
+
+    expect({
+      ...committed,
+      dryRun: true,
+    }).toEqual(dryRunResult)
+    expect(txMock.novelPromotionCharacter.create.mock.calls[0][0].data.id)
+      .toBe(dryRunResult.characters[0].characterId)
+    expect(txMock.characterAppearance.create.mock.calls[0][0].data.id)
+      .toBe(dryRunResult.characters[0].appearances[0].appearanceId)
+    expect(txMock.novelPromotionLocation.create.mock.calls.map(
+      (call) => call[0].data.id,
+    )).toEqual([
+      dryRunResult.locations[0].locationId,
+      dryRunResult.props[0].propId,
+    ])
+    expect(txMock.locationImage.create.mock.calls.map(
+      (call) => call[0].data.id,
+    )).toEqual([
+      ...dryRunResult.locations[0].imageSlotIds,
+      ...dryRunResult.props[0].imageSlotIds,
+    ])
+  })
+
+  it('creates every new-character appearance independently when change reasons repeat', async () => {
+    const first = request().data.characters[0]
+    const commitRequest = request({
+      data: {
+        locations: [],
+        props: [],
+        characters: [{
+          ...first,
+          appearances: [{
+            ...first.appearances[0],
+            appearanceKey: 'appearance.lin.one',
+            appearanceOrdinal: 1,
+          }, {
+            ...first.appearances[0],
+            appearanceKey: 'appearance.lin.two',
+            appearanceOrdinal: 2,
+          }],
+        }],
+      },
+    })
+    txMock.novelPromotionCharacter.create.mockImplementation(async ({ data }) => ({
+      id: data.id,
+      name: data.name,
+      aliases: data.aliases,
+      profileData: data.profileData,
+      profileConfirmed: data.profileConfirmed,
+      introduction: data.introduction,
+    }))
+    txMock.characterAppearance.create.mockImplementation(async ({ data }) => ({
+      id: data.id,
+      characterId: data.characterId,
+      appearanceIndex: data.appearanceIndex,
+      changeReason: data.changeReason,
+      description: data.description,
+      descriptions: data.descriptions,
+      imageUrl: null,
+      imageUrls: data.imageUrls,
+      selectedIndex: null,
+    }))
+
+    const result = await commitAssetsArtifact({
+      userId: 'user-1',
+      runId: 'run-1',
+      request: commitRequest,
+    })
+    expect(txMock.characterAppearance.create).toHaveBeenCalledTimes(2)
+    expect(txMock.characterAppearance.update).not.toHaveBeenCalled()
+    expect(result.characters[0].appearances).toEqual([
+      expect.objectContaining({
+        appearanceKey: 'appearance.lin.one',
+        appearanceId: buildProjectedEntityId(
+          'run-1',
+          'Appearance',
+          'appearance.lin.one',
+        ),
+        appearanceIndex: 0,
+        reused: false,
+      }),
+      expect.objectContaining({
+        appearanceKey: 'appearance.lin.two',
+        appearanceId: buildProjectedEntityId(
+          'run-1',
+          'Appearance',
+          'appearance.lin.two',
+        ),
+        appearanceIndex: 1,
+        reused: false,
+      }),
+    ])
+  })
+
   it('creates complete character/profile/appearances and run-owned location/prop slots', async () => {
     const commitRequest = request()
     const result = await commitAssetsArtifact({
@@ -605,6 +741,36 @@ describe('commitAssetsArtifact', () => {
       details: { field: 'assetMapJson' },
     })
     expect(txMock.novelPromotionCharacter.create).not.toHaveBeenCalled()
+    expect(txMock.agentCreationRun.update).not.toHaveBeenCalled()
+  })
+
+  it('rejects a valid nonempty asset mapping when the assets hash is missing', async () => {
+    txMock.agentCreationRun.findUnique.mockResolvedValue(storedRun({
+      assetMapJson: serializeAssetMap({
+        characters: {
+          'character.lin': {
+            characterKey: 'character.lin',
+            characterId: 'existing-character',
+            reused: false,
+            appearances: {},
+          },
+        },
+        locations: {},
+        props: {},
+      }),
+    }))
+    await expect(commitAssetsArtifact({
+      userId: 'user-1',
+      runId: 'run-1',
+      request: request(),
+    })).rejects.toMatchObject({
+      code: 'AGENT_INTERNAL_ERROR',
+      details: { field: 'assetMapJson' },
+    })
+    expect(txMock.novelPromotionCharacter.findMany).not.toHaveBeenCalled()
+    expect(txMock.novelPromotionCharacter.create).not.toHaveBeenCalled()
+    expect(txMock.characterAppearance.create).not.toHaveBeenCalled()
+    expect(txMock.locationImage.create).not.toHaveBeenCalled()
     expect(txMock.agentCreationRun.update).not.toHaveBeenCalled()
   })
 

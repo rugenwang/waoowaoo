@@ -209,6 +209,35 @@ describe('Agent assets artifact commit with MySQL', () => {
     await expect(prisma.agentCreationRun.findUniqueOrThrow({
       where: { id: run.id },
     })).resolves.toEqual(beforeRun)
+
+    const committed = await commit(run.id, { ...body, dryRun: false })
+    expect(committed.response.status).toBe(200)
+    expect({
+      ...committed.payload.data,
+      dryRun: true,
+    }).toEqual(first.payload.data)
+    const persisted = await Promise.all([
+      prisma.novelPromotionCharacter.findFirstOrThrow({
+        where: { novelPromotionProjectId: novelProjectId },
+      }),
+      prisma.characterAppearance.findFirstOrThrow(),
+      prisma.novelPromotionLocation.findMany({
+        where: { novelPromotionProjectId: novelProjectId },
+        orderBy: { assetKind: 'asc' },
+      }),
+      prisma.locationImage.findMany({ orderBy: { id: 'asc' } }),
+    ])
+    expect(persisted[0].id).toBe(first.payload.data.characters[0].characterId)
+    expect(persisted[1].id)
+      .toBe(first.payload.data.characters[0].appearances[0].appearanceId)
+    expect(persisted[2].map((asset) => asset.id).sort()).toEqual([
+      first.payload.data.locations[0].locationId,
+      first.payload.data.props[0].propId,
+    ].sort())
+    expect(persisted[3].map((image) => image.id).sort()).toEqual([
+      ...first.payload.data.locations[0].imageSlotIds,
+      ...first.payload.data.props[0].imageSlotIds,
+    ].sort())
   })
 
   it('creates complete deterministic assets and run-owned slots without queue/model records', async () => {
@@ -348,6 +377,53 @@ describe('Agent assets artifact commit with MySQL', () => {
       orderBy: { assetKind: 'asc' },
     })
     expect(rows.map((row) => row.assetKind)).toEqual(['location', 'prop'])
+  })
+
+  it('creates distinct indexed appearances for a new character with repeated change reasons', async () => {
+    const run = await createReadyRun()
+    const baseCharacter = assetsRequest().data.characters[0]
+    const body = assetsRequest({
+      data: {
+        locations: [],
+        props: [],
+        characters: [{
+          ...baseCharacter,
+          appearances: [{
+            ...baseCharacter.appearances[0],
+            appearanceKey: 'appearance.lin.one',
+            appearanceOrdinal: 1,
+          }, {
+            ...baseCharacter.appearances[0],
+            appearanceKey: 'appearance.lin.two',
+            appearanceOrdinal: 2,
+          }],
+        }],
+      },
+    })
+    const result = await commit(run.id, body)
+    expect(result.response.status).toBe(200)
+    expect(result.payload.data.characters[0].appearances).toEqual([
+      expect.objectContaining({
+        appearanceKey: 'appearance.lin.one',
+        appearanceIndex: 0,
+        reused: false,
+      }),
+      expect.objectContaining({
+        appearanceKey: 'appearance.lin.two',
+        appearanceIndex: 1,
+        reused: false,
+      }),
+    ])
+    const rows = await prisma.characterAppearance.findMany({
+      orderBy: { appearanceIndex: 'asc' },
+    })
+    expect(rows).toHaveLength(2)
+    expect(rows.map((row) => row.appearanceIndex)).toEqual([0, 1])
+    expect(rows.map((row) => row.id)).toEqual(
+      result.payload.data.characters[0].appearances.map(
+        (appearance: { appearanceId: string }) => appearance.appearanceId,
+      ),
+    )
   })
 
   it('reuses existing assets, preserves historical fields and selections, and retry adds no slot', async () => {
