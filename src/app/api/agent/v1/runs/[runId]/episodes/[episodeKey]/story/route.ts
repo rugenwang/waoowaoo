@@ -12,7 +12,7 @@ import {
 import { requireIdempotencyKey } from '@/lib/agent-api/idempotency'
 import { commitStoryArtifact } from '@/lib/agent-api/services/story-service'
 
-export const POST = agentRoute(async (
+export const PUT = agentRoute(async (
   request,
   context: AgentRouteContext<{
     runId: string

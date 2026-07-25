@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { POST as CREATE_RUN } from '@/app/api/agent/v1/projects/[projectId]/runs/route'
-import { POST as COMMIT_STORY } from '@/app/api/agent/v1/runs/[runId]/episodes/[episodeKey]/story/route'
+import { PUT as COMMIT_STORY } from '@/app/api/agent/v1/runs/[runId]/episodes/[episodeKey]/story/route'
 import {
   buildRunFingerprint,
   hashArtifact,
@@ -156,7 +156,7 @@ async function commit(
   const response = await COMMIT_STORY(new Request(
     `http://localhost/api/agent/v1/runs/${runId}/episodes/${episodeKey}/story`,
     {
-      method: 'POST',
+      method: 'PUT',
       headers: agentHeaders(idempotencyKey),
       body: JSON.stringify(body),
     },
