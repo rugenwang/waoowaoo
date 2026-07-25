@@ -9,6 +9,10 @@ const UUID_V8_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
 describe('buildProjectedEntityId', () => {
+  it('includes a distinct run-owned appearance candidate identity type', () => {
+    expect(PROJECTED_ENTITY_TYPES).toContain('AppearanceCandidate')
+  })
+
   it('matches the stable SHA-256 UUIDv8 vector', () => {
     expect(buildProjectedEntityId('run-123', 'Character', 'character-001')).toBe(
       'c66a6b3f-8204-8bce-b4a4-2bc3335aa696',

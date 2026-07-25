@@ -18,7 +18,10 @@ import {
   RunStatusSchema,
   type RunStatus,
 } from '@/lib/agent-api/contracts/common'
-import { buildProjectedEntityId } from '@/lib/agent-api/entity-id'
+import {
+  buildAppearanceCandidateOwnerId,
+  buildProjectedEntityId,
+} from '@/lib/agent-api/entity-id'
 import { AgentApiError, isAgentApiError } from '@/lib/agent-api/errors'
 import {
   assertRunAcceptsArtifact,
@@ -326,7 +329,15 @@ function buildDryRunMapping(
         appearanceIndex,
         reused: Boolean(exact),
         variantSlots: {
-          0: { entityId: appearanceId, index: candidateIndex },
+          0: {
+            entityId: buildAppearanceCandidateOwnerId(
+              runId,
+              appearance.appearanceKey,
+              0,
+              candidateIndex,
+            ),
+            index: candidateIndex,
+          },
         },
       }
     }
@@ -587,7 +598,15 @@ async function commitCharacters(
           appearanceIndex: exact.appearanceIndex,
           reused: true,
           variantSlots: {
-            0: { entityId: exact.id, index: candidateIndex },
+            0: {
+              entityId: buildAppearanceCandidateOwnerId(
+                runId,
+                appearance.appearanceKey,
+                0,
+                candidateIndex,
+              ),
+              index: candidateIndex,
+            },
           },
         }
         continue
@@ -629,7 +648,15 @@ async function commitCharacters(
         appearanceIndex: created.appearanceIndex,
         reused: false,
         variantSlots: {
-          0: { entityId: created.id, index: 0 },
+          0: {
+            entityId: buildAppearanceCandidateOwnerId(
+              runId,
+              appearance.appearanceKey,
+              0,
+              0,
+            ),
+            index: 0,
+          },
         },
       }
     }

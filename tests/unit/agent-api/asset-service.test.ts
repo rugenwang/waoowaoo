@@ -486,7 +486,14 @@ describe('commitAssetsArtifact', () => {
           appearances: {
             'appearance.lin.default': {
               variantSlots: {
-                0: { entityId: 'appearance-db-1', index: 0 },
+                0: {
+                  entityId: buildProjectedEntityId(
+                    'run-1',
+                    'AppearanceCandidate',
+                    'appearance.lin.default:0:0',
+                  ),
+                  index: 0,
+                },
               },
             },
           },
@@ -565,7 +572,14 @@ describe('commitAssetsArtifact', () => {
     expect(
       map.characters['character.lin'].appearances['appearance.lin.default']
         .variantSlots['0'],
-    ).toEqual({ entityId: 'existing-appearance', index: 2 })
+    ).toEqual({
+      entityId: buildProjectedEntityId(
+        'run-1',
+        'AppearanceCandidate',
+        'appearance.lin.default:0:2',
+      ),
+      index: 2,
+    })
   })
 
   it.each([

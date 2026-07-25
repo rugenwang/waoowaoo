@@ -6,7 +6,10 @@ import {
   ScreenplayCommitResponseSchema,
   type ScreenplayCommitRequest,
 } from '@/lib/agent-api/contracts/screenplay'
-import { buildProjectedEntityId } from '@/lib/agent-api/entity-id'
+import {
+  buildAppearanceCandidateOwnerId,
+  buildProjectedEntityId,
+} from '@/lib/agent-api/entity-id'
 import {
   parseArtifactHashes,
   parseClipMap,
@@ -44,6 +47,7 @@ let projectId: string
 let episodeId: string
 let secondEpisodeId: string
 let assets: AssetMap
+let baseAssets: AssetMap
 
 function definitions(includeSecond = false) {
   return [{
@@ -174,13 +178,116 @@ function secondEpisodeRequest(): ScreenplayCommitRequest {
   }
 }
 
+function scaleScreenplayRequest(
+  count: number,
+  revision: number,
+): {
+  body: ScreenplayCommitRequest
+  novelText: string
+} {
+  const clips = Array.from({ length: count }, (_, index) => {
+    const ordinal = index + 1
+    const marker = String(ordinal).padStart(4, '0')
+    const startText = `S${marker}`
+    const endText = `E${marker}`
+    const content = `${startText}第${ordinal}个分镜正文${endText}`
+    return {
+      clipKey: `clip-scale-${marker}`,
+      ordinal,
+      startText,
+      endText,
+      summary: `批量分镜-${ordinal}-修订${revision}`,
+      locationKey: null,
+      characterKeys: [],
+      propKeys: [],
+      content,
+      screenplay: {
+        originalText: content,
+        scenes: [],
+      },
+    }
+  })
+  const data: ScreenplayCommitRequest['data'] = {
+    episodeKey: 'episode-001',
+    clips,
+  }
+  return {
+    body: {
+      schemaVersion: 1,
+      ruleSetVersion: 'waoo-creator-v1',
+      ruleSetHash: RULE_SET_HASH,
+      artifactHash: hashArtifact(data),
+      dryRun: false,
+      data,
+    },
+    novelText: clips.map((clip) => clip.content).join('|'),
+  }
+}
+
 async function createReadyRun(options: {
   includeSecond?: boolean
   fingerprint?: string
 } = {}) {
+  const runId = crypto.randomUUID()
+  const runAssets = structuredClone(baseAssets)
+  const appearance = runAssets.characters[
+    'character.lin'
+  ].appearances['appearance.lin.default']
+  const appearanceRow = await prisma.characterAppearance.findUniqueOrThrow({
+    where: { id: appearance.appearanceId },
+    select: { imageUrls: true },
+  })
+  const imageUrls = JSON.parse(appearanceRow.imageUrls ?? '[]') as string[]
+  const candidateIndex = imageUrls.length
+  await prisma.characterAppearance.update({
+    where: { id: appearance.appearanceId },
+    data: { imageUrls: JSON.stringify([...imageUrls, '']) },
+  })
+  appearance.variantSlots = {
+    0: {
+      entityId: buildAppearanceCandidateOwnerId(
+        runId,
+        appearance.appearanceKey,
+        0,
+        candidateIndex,
+      ),
+      index: candidateIndex,
+    },
+  }
+
+  for (const [assetKey, asset] of [
+    ...Object.entries(runAssets.locations),
+    ...Object.entries(runAssets.props),
+  ]) {
+    const latest = await prisma.locationImage.findFirst({
+      where: { locationId: asset.entityId },
+      select: { imageIndex: true },
+      orderBy: { imageIndex: 'desc' },
+    })
+    const firstIndex = (latest?.imageIndex ?? -1) + 1
+    for (const [localSlot, slot] of Object.entries(asset.imageSlots)) {
+      const imageId = buildProjectedEntityId(
+        runId,
+        'LocationImage',
+        `${assetKey}:${localSlot}`,
+      )
+      const imageIndex = firstIndex + Number(localSlot)
+      await prisma.locationImage.create({
+        data: {
+          id: imageId,
+          locationId: asset.entityId,
+          imageIndex,
+        },
+      })
+      slot.entityId = imageId
+      slot.index = imageIndex
+    }
+  }
+  assets = runAssets
   const episodeDefinitions = definitions(options.includeSecond)
   return await prisma.agentCreationRun.create({
     data: {
+      id: runId,
       userId,
       projectId,
       sourceHash: SOURCE_HASH_1,
@@ -204,7 +311,7 @@ async function createReadyRun(options: {
           },
         ]),
       )),
-      assetMapJson: serializeAssetMap(assets),
+      assetMapJson: serializeAssetMap(runAssets),
       clipMapJson: serializeClipMap({}),
       artifactHashesJson: serializeArtifactHashes({
         assets: ASSET_HASH,
@@ -320,7 +427,7 @@ describe('Agent screenplay artifact commit with MySQL', () => {
     const hairpinImage = await prisma.locationImage.create({
       data: { locationId: hairpin.id, imageIndex: 0 },
     })
-    assets = {
+    baseAssets = {
       characters: {
         'character.lin': {
           characterKey: 'character.lin',
@@ -376,6 +483,7 @@ describe('Agent screenplay artifact commit with MySQL', () => {
         },
       },
     }
+    assets = structuredClone(baseAssets)
     userId = user.id
     projectId = project.id
     episodeId = episode.id
@@ -588,6 +696,57 @@ describe('Agent screenplay artifact commit with MySQL', () => {
       where: { id: { in: beforeSecond.map((clip) => clip.id) } },
       orderBy: { createdAt: 'asc' },
     })).resolves.toEqual(beforeSecond)
+  })
+
+  it('creates and revises 1000 clips in bulk while preserving IDs and createdAt', async () => {
+    const run = await createReadyRun()
+    const initial = scaleScreenplayRequest(1_000, 1)
+    await prisma.novelPromotionEpisode.update({
+      where: { id: episodeId },
+      data: { novelText: initial.novelText },
+    })
+
+    const first = await commit(run.id, 'episode-001', initial.body)
+    expect(first.response.status, JSON.stringify(first.payload)).toBe(200)
+    expect(first.payload.data.clips).toHaveLength(1_000)
+    const created = await prisma.novelPromotionClip.findMany({
+      where: {
+        id: {
+          in: first.payload.data.clips.map(
+            (entry: { clipId: string }) => entry.clipId,
+          ),
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+    expect(created).toHaveLength(1_000)
+    expect(created[0].id).toBe(
+      buildProjectedEntityId(run.id, 'Clip', 'clip-scale-0001'),
+    )
+    expect(created[999].id).toBe(
+      buildProjectedEntityId(run.id, 'Clip', 'clip-scale-1000'),
+    )
+    expect(created.every((clip, index) => (
+      index === 0
+      || clip.createdAt.getTime() > created[index - 1].createdAt.getTime()
+    ))).toBe(true)
+
+    const revised = scaleScreenplayRequest(1_000, 2)
+    const revision = await commit(run.id, 'episode-001', revised.body)
+    expect(revision.response.status, JSON.stringify(revision.payload)).toBe(200)
+    expect(revision.payload.data.clips).toEqual(first.payload.data.clips)
+    const updated = await prisma.novelPromotionClip.findMany({
+      where: { id: { in: created.map((clip) => clip.id) } },
+      orderBy: { createdAt: 'asc' },
+    })
+    expect(updated.map((clip) => clip.id)).toEqual(
+      created.map((clip) => clip.id),
+    )
+    expect(updated.map((clip) => clip.createdAt)).toEqual(
+      created.map((clip) => clip.createdAt),
+    )
+    expect(updated[0].summary).toBe('批量分镜-1-修订2')
+    expect(updated[999].summary).toBe('批量分镜-1000-修订2')
   })
 
   it('rejects different-hash topology changes without partially updating clips or the run', async () => {
@@ -840,6 +999,19 @@ describe('Agent screenplay artifact commit with MySQL', () => {
       details: { field: 'assetMapJson' },
     })
 
+    await prisma.characterAppearance.update({
+      where: { id: appearanceId },
+      data: {
+        imageUrls: JSON.stringify(Array.from(
+          {
+            length: assets.characters['character.lin'].appearances[
+              'appearance.lin.default'
+            ].variantSlots['0'].index + 1,
+          },
+          () => '',
+        )),
+      },
+    })
     const nullRun = await createReadyRun()
     await prisma.characterAppearance.update({
       where: { id: appearanceId },
@@ -852,6 +1024,49 @@ describe('Agent screenplay artifact commit with MySQL', () => {
     )
     expect(nullCandidate.response.status).toBe(500)
     expect(nullCandidate.payload.error).toMatchObject({
+      code: 'AGENT_INTERNAL_ERROR',
+      details: { field: 'assetMapJson' },
+    })
+    await expect(prisma.novelPromotionClip.count()).resolves.toBe(0)
+  })
+
+  it('rejects historical asset slots that do not belong to the current run', async () => {
+    const historicalLocationRun = await createReadyRun()
+    const historicalLocationAssets = structuredClone(assets)
+    historicalLocationAssets.locations['location.home'].imageSlots['0'] = {
+      ...baseAssets.locations['location.home'].imageSlots['0'],
+    }
+    await prisma.agentCreationRun.update({
+      where: { id: historicalLocationRun.id },
+      data: { assetMapJson: serializeAssetMap(historicalLocationAssets) },
+    })
+    const historicalLocation = await commit(
+      historicalLocationRun.id,
+      'episode-001',
+      screenplayRequest({ envelope: { dryRun: true } }),
+    )
+    expect(historicalLocation.response.status).toBe(500)
+    expect(historicalLocation.payload.error).toMatchObject({
+      code: 'AGENT_INTERNAL_ERROR',
+      details: { field: 'assetMapJson' },
+    })
+
+    const historicalAppearanceRun = await createReadyRun()
+    const historicalAppearanceAssets = structuredClone(assets)
+    historicalAppearanceAssets.characters['character.lin'].appearances[
+      'appearance.lin.default'
+    ].variantSlots['0'].index = 0
+    await prisma.agentCreationRun.update({
+      where: { id: historicalAppearanceRun.id },
+      data: { assetMapJson: serializeAssetMap(historicalAppearanceAssets) },
+    })
+    const historicalAppearance = await commit(
+      historicalAppearanceRun.id,
+      'episode-001',
+      screenplayRequest({ envelope: { dryRun: true } }),
+    )
+    expect(historicalAppearance.response.status).toBe(500)
+    expect(historicalAppearance.payload.error).toMatchObject({
       code: 'AGENT_INTERNAL_ERROR',
       details: { field: 'assetMapJson' },
     })

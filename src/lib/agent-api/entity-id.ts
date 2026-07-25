@@ -5,6 +5,7 @@ import { canonicalJson } from './canonical-json'
 export const PROJECTED_ENTITY_TYPES = [
   'Character',
   'Appearance',
+  'AppearanceCandidate',
   'Location',
   'Prop',
   'LocationImage',
@@ -37,4 +38,17 @@ export function buildProjectedEntityId(
     hex.slice(16, 20),
     hex.slice(20),
   ].join('-')
+}
+
+export function buildAppearanceCandidateOwnerId(
+  runId: string,
+  appearanceKey: string,
+  localVariant: number,
+  actualIndex: number,
+): string {
+  return buildProjectedEntityId(
+    runId,
+    'AppearanceCandidate',
+    `${appearanceKey}:${localVariant}:${actualIndex}`,
+  )
 }

@@ -10,7 +10,10 @@ import {
   RunStatusSchema,
   type RunStatus,
 } from '@/lib/agent-api/contracts/common'
-import { buildProjectedEntityId } from '@/lib/agent-api/entity-id'
+import {
+  buildAppearanceCandidateOwnerId,
+  buildProjectedEntityId,
+} from '@/lib/agent-api/entity-id'
 import { AgentApiError, isAgentApiError } from '@/lib/agent-api/errors'
 import {
   assertRunAcceptsArtifact,
@@ -30,11 +33,15 @@ import {
   validateScreenplayAnchors,
   validateScreenplayReferences,
 } from '@/lib/agent-api/screenplay-validation'
+import {
+  createScreenplayClipsInBulk,
+  updateScreenplayClipsInBulk,
+} from '@/lib/agent-api/screenplay-bulk-write'
 import { prisma } from '@/lib/prisma'
 
 const SCREENPLAY_TRANSACTION_OPTIONS = {
   maxWait: 10_000,
-  timeout: 30_000,
+  timeout: 120_000,
 } as const
 
 const SCREENPLAY_RUN_SELECT = {
@@ -179,6 +186,7 @@ function assertScreenplayStage(
 
 async function loadAndValidateAssetNames(
   tx: TransactionClient,
+  runId: string,
   projectId: string,
   assets: AssetMap,
 ): Promise<AssetNames> {
@@ -258,9 +266,14 @@ async function loadAndValidateAssetNames(
       !row
       || row.characterId !== entry.characterId
       || row.appearanceIndex !== entry.appearance.appearanceIndex
-      || Object.values(entry.appearance.variantSlots).some(
-        (slot) => (
-          slot.entityId !== entry.appearance.appearanceId
+      || Object.entries(entry.appearance.variantSlots).some(
+        ([localVariant, slot]) => (
+          slot.entityId !== buildAppearanceCandidateOwnerId(
+            runId,
+            entry.appearanceKey,
+            Number(localVariant),
+            slot.index,
+          )
           || !Number.isInteger(slot.index)
           || slot.index < 0
           || slot.index >= imageUrls.length
@@ -310,12 +323,14 @@ async function loadAndValidateAssetNames(
     imageAssetRows.map((row) => [row.id, row]),
   )
   const imageSlotEntries = imageAssetEntries.flatMap(
-    ({ key, entry, kind }) => Object.values(entry.imageSlots).map((slot) => ({
-      key,
-      kind,
-      entityId: entry.entityId,
-      slot,
-    })),
+    ({ key, entry, kind }) => Object.entries(entry.imageSlots)
+      .map(([localSlot, slot]) => ({
+        key,
+        kind,
+        entityId: entry.entityId,
+        localSlot,
+        slot,
+      })),
   )
   const imageIds = imageSlotEntries.map(({ slot }) => slot.entityId)
   const imageRows = imageIds.length === 0
@@ -345,10 +360,15 @@ async function loadAndValidateAssetNames(
     if (kind === 'location') locationNames.set(key, row.name)
     else propNames.set(key, row.name)
   }
-  for (const { key, entityId, slot } of imageSlotEntries) {
+  for (const { key, entityId, localSlot, slot } of imageSlotEntries) {
     const row = imageRowsById.get(slot.entityId)
     if (
-      !row
+      slot.entityId !== buildProjectedEntityId(
+        runId,
+        'LocationImage',
+        `${key}:${localSlot}`,
+      )
+      || !row
       || row.locationId !== entityId
       || row.imageIndex !== slot.index
     ) {
@@ -505,11 +525,13 @@ function clipData(
     if (!name) internalState('assetMapJson', key)
     return name
   })
-  const location = clip.locationKey === null
-    ? null
-    : names.locations.get(clip.locationKey)
-  if (clip.locationKey !== null && !location) {
-    internalState('assetMapJson', clip.locationKey)
+  let location: string | null = null
+  if (clip.locationKey !== null) {
+    const mappedLocation = names.locations.get(clip.locationKey)
+    if (!mappedLocation) {
+      internalState('assetMapJson', clip.locationKey)
+    }
+    location = mappedLocation
   }
 
   return {
@@ -623,6 +645,7 @@ async function commitScreenplayInTransaction(
   validateScreenplayReferences(input.request.data, assets)
   const names = await loadAndValidateAssetNames(
     tx,
+    run.id,
     run.projectId,
     assets,
   )
@@ -687,15 +710,17 @@ async function commitScreenplayInTransaction(
   if (input.request.dryRun) return response(input.request, run.id, mapped)
 
   if (existingHash === undefined) {
+    const rows = input.request.data.clips.map((clip) => {
+      const clipId = buildProjectedEntityId(run.id, 'Clip', clip.clipKey)
+      return {
+        id: clipId,
+        ...clipData(clip, episode.episodeId, names),
+        createdAt: new Date(run.createdAt.getTime() + clip.ordinal),
+      }
+    })
+    await createScreenplayClipsInBulk(tx, rows)
     for (const clip of input.request.data.clips) {
       const clipId = buildProjectedEntityId(run.id, 'Clip', clip.clipKey)
-      await tx.novelPromotionClip.create({
-        data: {
-          id: clipId,
-          ...clipData(clip, episode.episodeId, names),
-          createdAt: new Date(run.createdAt.getTime() + clip.ordinal),
-        },
-      })
       clipMapping[clip.clipKey] = {
         clipKey: clip.clipKey,
         clipId,
@@ -704,7 +729,7 @@ async function commitScreenplayInTransaction(
       }
     }
   } else {
-    for (const clip of input.request.data.clips) {
+    const rows = input.request.data.clips.map((clip) => {
       const mappedClip = clipMapping[clip.clipKey]
       if (
         !mappedClip
@@ -713,11 +738,12 @@ async function commitScreenplayInTransaction(
       ) {
         internalState('clipMapJson', clip.clipKey)
       }
-      await tx.novelPromotionClip.update({
-        where: { id: mappedClip.clipId },
-        data: clipData(clip, episode.episodeId, names),
-      })
-    }
+      return {
+        id: mappedClip.clipId,
+        ...clipData(clip, episode.episodeId, names),
+      }
+    })
+    await updateScreenplayClipsInBulk(tx, rows)
   }
 
   episodes[input.episodeKey] = {
