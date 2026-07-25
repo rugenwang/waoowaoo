@@ -87,13 +87,40 @@ function mapMediaObjectToRef(row: MediaObjectRow): MediaRef {
 
 export async function ensureMediaObjectFromStorageKey(
   rawStorageKey: string,
-  metadata?: Partial<Pick<MediaRef, 'mimeType' | 'sizeBytes' | 'width' | 'height' | 'durationMs'>>,
+  metadata?: Partial<Pick<MediaRef, 'sha256' | 'mimeType' | 'sizeBytes' | 'width' | 'height' | 'durationMs'>>,
 ): Promise<MediaRef> {
   const storageKey = normalizeStorageKey(rawStorageKey)
 
   const existing = (await mediaModel.findUnique({ where: { storageKey } })) as MediaObjectRow | null
   if (existing != null) {
-    return mapMediaObjectToRef(existing)
+    if (!metadata || Object.values(metadata).every((value) => value === undefined)) {
+      return mapMediaObjectToRef(existing)
+    }
+    const updated = (await mediaModel.upsert({
+      where: { publicId: existing.publicId },
+      update: {
+        storageKey,
+        sha256: metadata.sha256 ?? undefined,
+        mimeType: metadata.mimeType ?? undefined,
+        sizeBytes: metadata.sizeBytes == null ? undefined : BigInt(metadata.sizeBytes),
+        width: metadata.width ?? undefined,
+        height: metadata.height ?? undefined,
+        durationMs: metadata.durationMs ?? undefined,
+      },
+      create: {
+        publicId: existing.publicId,
+        storageKey,
+        sha256: metadata.sha256 ?? existing.sha256,
+        mimeType: metadata.mimeType ?? existing.mimeType,
+        sizeBytes: metadata.sizeBytes == null
+          ? existing.sizeBytes
+          : BigInt(metadata.sizeBytes),
+        width: metadata.width ?? existing.width,
+        height: metadata.height ?? existing.height,
+        durationMs: metadata.durationMs ?? existing.durationMs,
+      },
+    })) as MediaObjectRow
+    return mapMediaObjectToRef(updated)
   }
 
   const publicId = stablePublicIdFromStorageKey(storageKey)
@@ -102,6 +129,7 @@ export async function ensureMediaObjectFromStorageKey(
       where: { publicId },
       update: {
         storageKey,
+        sha256: metadata?.sha256 ?? undefined,
         mimeType: metadata?.mimeType ?? guessMimeTypeFromStorageKey(storageKey),
         sizeBytes: metadata?.sizeBytes == null ? undefined : BigInt(metadata.sizeBytes),
         width: metadata?.width ?? undefined,
@@ -111,6 +139,7 @@ export async function ensureMediaObjectFromStorageKey(
       create: {
         publicId,
         storageKey,
+        sha256: metadata?.sha256 ?? null,
         mimeType: metadata?.mimeType ?? guessMimeTypeFromStorageKey(storageKey),
         sizeBytes: metadata?.sizeBytes == null ? null : BigInt(metadata.sizeBytes),
         width: metadata?.width ?? null,
