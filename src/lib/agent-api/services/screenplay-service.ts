@@ -65,6 +65,26 @@ type AssetNames = {
   props: Map<string, string>
 }
 
+function parseMappedImageUrls(
+  value: string | null,
+  targetKey: string,
+): string[] {
+  if (value === null) internalState('assetMapJson', targetKey)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    internalState('assetMapJson', targetKey)
+  }
+  if (
+    !Array.isArray(parsed)
+    || !parsed.every((entry) => typeof entry === 'string')
+  ) {
+    internalState('assetMapJson', targetKey)
+  }
+  return parsed
+}
+
 function parseRunStatus(value: string): RunStatus {
   const result = RunStatusSchema.safeParse(value)
   if (!result.success) {
@@ -206,6 +226,7 @@ async function loadAndValidateAssetNames(
           id: true,
           characterId: true,
           appearanceIndex: true,
+          imageUrls: true,
         },
       })
   const appearanceRowsById = new Map(appearanceRows.map((row) => [row.id, row]))
@@ -223,12 +244,20 @@ async function loadAndValidateAssetNames(
   }
   for (const entry of appearanceEntries) {
     const row = appearanceRowsById.get(entry.appearance.appearanceId)
+    const imageUrls = row
+      ? parseMappedImageUrls(row.imageUrls, entry.appearanceKey)
+      : []
     if (
       !row
       || row.characterId !== entry.characterId
       || row.appearanceIndex !== entry.appearance.appearanceIndex
       || Object.values(entry.appearance.variantSlots).some(
-        (slot) => slot.entityId !== entry.appearance.appearanceId,
+        (slot) => (
+          slot.entityId !== entry.appearance.appearanceId
+          || !Number.isInteger(slot.index)
+          || slot.index < 0
+          || slot.index >= imageUrls.length
+        ),
       )
     ) {
       internalState('assetMapJson', entry.appearanceKey)
@@ -360,6 +389,57 @@ function currentEpisodeMapping(
     .sort((left, right) => left.ordinal - right.ordinal)
 }
 
+function assertGlobalClipState(
+  episodes: EpisodeMap,
+  artifactHashes: ReturnType<typeof parseArtifactHashes>,
+  mapping: ClipMap,
+): void {
+  const mappedByEpisode = new Map<string, Array<ClipMap[string]>>()
+  for (const entry of Object.values(mapping)) {
+    const episode = episodes[entry.episodeKey]
+    if (
+      !episode
+      || episode.status !== 'screenplay_committed'
+      || !artifactHashes.screenplays[entry.episodeKey]
+    ) {
+      internalState('clipMapJson', entry.clipKey)
+    }
+    const list = mappedByEpisode.get(entry.episodeKey) ?? []
+    list.push(entry)
+    mappedByEpisode.set(entry.episodeKey, list)
+  }
+
+  for (const episode of Object.values(episodes)) {
+    const mapped = (mappedByEpisode.get(episode.episodeKey) ?? [])
+      .sort((left, right) => left.ordinal - right.ordinal)
+    const screenplayHash = artifactHashes.screenplays[episode.episodeKey]
+    if (episode.status === 'story_committed') {
+      if (mapped.length > 0) {
+        internalState('clipMapJson', episode.episodeKey)
+      }
+      continue
+    }
+    if (episode.status !== 'screenplay_committed' || !screenplayHash) {
+      internalState('episodeMapJson', episode.episodeKey)
+    }
+    const emptyArtifactHash = hashArtifact({
+      episodeKey: episode.episodeKey,
+      clips: [],
+    })
+    if (
+      (mapped.length === 0 && screenplayHash !== emptyArtifactHash)
+      || (mapped.length > 0 && screenplayHash === emptyArtifactHash)
+      || mapped.some((entry, index) => (
+        entry.episodeKey !== episode.episodeKey
+        || entry.clipKey !== mapping[entry.clipKey]?.clipKey
+        || entry.ordinal !== index + 1
+      ))
+    ) {
+      internalState('clipMapJson', episode.episodeKey)
+    }
+  }
+}
+
 function hasSameTopology(
   request: ScreenplayCommitRequest,
   mapped: ReturnType<typeof currentEpisodeMapping>,
@@ -487,6 +567,7 @@ async function commitScreenplayInTransaction(
   if (!run.clipMapJson) internalState('clipMapJson')
   const assets = parseAssetMap(run.assetMapJson)
   const clipMapping = parseClipMap(run.clipMapJson)
+  assertGlobalClipState(episodes, artifactHashes, clipMapping)
 
   await tx.$queryRaw(Prisma.sql`
     SELECT id FROM novel_promotion_episodes

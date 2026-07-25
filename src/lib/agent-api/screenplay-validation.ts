@@ -34,7 +34,10 @@ export function validateScreenplayAnchors(
 
     const startIndex = novelText.indexOf(clip.startText, cursor)
     if (startIndex < 0) invalidReference(startField)
-    const endIndex = novelText.indexOf(clip.endText, startIndex)
+    const endIndex = novelText.indexOf(
+      clip.endText,
+      startIndex + clip.startText.length,
+    )
     if (endIndex < 0) invalidReference(endField)
 
     cursor = endIndex + clip.endText.length

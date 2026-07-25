@@ -277,6 +277,7 @@ describe('Agent screenplay artifact commit with MySQL', () => {
         characterId: character.id,
         appearanceIndex: 0,
         changeReason: '默认',
+        imageUrls: JSON.stringify(['']),
       },
     })
     const home = await prisma.novelPromotionLocation.create({
@@ -797,6 +798,191 @@ describe('Agent screenplay artifact commit with MySQL', () => {
       details: { field: 'clipMapJson' },
     })
     await expect(prisma.novelPromotionClip.count()).resolves.toBe(0)
+  })
+
+  it('rejects out-of-range, malformed, and null character candidate slots without writing clips', async () => {
+    const outOfRangeRun = await createReadyRun()
+    const outOfRangeAssets = structuredClone(assets)
+    outOfRangeAssets.characters['character.lin'].appearances[
+      'appearance.lin.default'
+    ].variantSlots['0'].index = 999
+    await prisma.agentCreationRun.update({
+      where: { id: outOfRangeRun.id },
+      data: { assetMapJson: serializeAssetMap(outOfRangeAssets) },
+    })
+    const outOfRange = await commit(
+      outOfRangeRun.id,
+      'episode-001',
+      screenplayRequest(),
+    )
+    expect(outOfRange.response.status).toBe(500)
+    expect(outOfRange.payload.error).toMatchObject({
+      code: 'AGENT_INTERNAL_ERROR',
+      details: { field: 'assetMapJson' },
+    })
+
+    const malformedRun = await createReadyRun()
+    const appearanceId = assets.characters[
+      'character.lin'
+    ].appearances['appearance.lin.default'].appearanceId
+    await prisma.characterAppearance.update({
+      where: { id: appearanceId },
+      data: { imageUrls: '{broken' },
+    })
+    const malformed = await commit(
+      malformedRun.id,
+      'episode-001',
+      screenplayRequest(),
+    )
+    expect(malformed.response.status).toBe(500)
+    expect(malformed.payload.error).toMatchObject({
+      code: 'AGENT_INTERNAL_ERROR',
+      details: { field: 'assetMapJson' },
+    })
+
+    const nullRun = await createReadyRun()
+    await prisma.characterAppearance.update({
+      where: { id: appearanceId },
+      data: { imageUrls: null },
+    })
+    const nullCandidate = await commit(
+      nullRun.id,
+      'episode-001',
+      screenplayRequest(),
+    )
+    expect(nullCandidate.response.status).toBe(500)
+    expect(nullCandidate.payload.error).toMatchObject({
+      code: 'AGENT_INTERNAL_ERROR',
+      details: { field: 'assetMapJson' },
+    })
+    await expect(prisma.novelPromotionClip.count()).resolves.toBe(0)
+  })
+
+  it('rejects another committed episode whose non-empty screenplay hash has no clip mapping', async () => {
+    const run = await createReadyRun({ includeSecond: true })
+    const second = secondEpisodeRequest()
+    await prisma.agentCreationRun.update({
+      where: { id: run.id },
+      data: {
+        currentStage: 'screenplay_committing:1/2',
+        episodeMapJson: serializeEpisodeMap({
+          'episode-001': {
+            ...definitions(true)[0],
+            episodeId,
+            episodeNumber: 1,
+            status: 'story_committed',
+          },
+          'episode-002': {
+            ...definitions(true)[1],
+            episodeId: secondEpisodeId,
+            episodeNumber: 2,
+            status: 'screenplay_committed',
+          },
+        }),
+        artifactHashesJson: serializeArtifactHashes({
+          assets: ASSET_HASH,
+          stories: {
+            'episode-001': STORY_HASH_1,
+            'episode-002': STORY_HASH_2,
+          },
+          screenplays: { 'episode-002': second.artifactHash },
+          storyboards: {},
+        }),
+      },
+    })
+    const beforeRun = await prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: run.id },
+    })
+
+    const result = await commit(
+      run.id,
+      'episode-001',
+      screenplayRequest(),
+    )
+    expect(result.response.status).toBe(500)
+    expect(result.payload.error).toMatchObject({
+      code: 'AGENT_INTERNAL_ERROR',
+      details: { field: 'clipMapJson' },
+    })
+    await expect(prisma.novelPromotionClip.count()).resolves.toBe(0)
+    await expect(prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: run.id },
+    })).resolves.toEqual(beforeRun)
+  })
+
+  it('rejects an orphan clip mapping on another uncommitted episode', async () => {
+    const run = await createReadyRun({ includeSecond: true })
+    const orphanId = buildProjectedEntityId(run.id, 'Clip', 'clip-201')
+    await prisma.novelPromotionClip.create({
+      data: {
+        id: orphanId,
+        episodeId: secondEpisodeId,
+        summary: '孤儿映射',
+        content: '不得存在',
+      },
+    })
+    await prisma.agentCreationRun.update({
+      where: { id: run.id },
+      data: {
+        clipMapJson: serializeClipMap({
+          'clip-201': {
+            clipKey: 'clip-201',
+            clipId: orphanId,
+            episodeKey: 'episode-002',
+            ordinal: 1,
+          },
+        }),
+      },
+    })
+    const beforeRun = await prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: run.id },
+    })
+
+    const result = await commit(
+      run.id,
+      'episode-001',
+      screenplayRequest(),
+    )
+    expect(result.response.status).toBe(500)
+    expect(result.payload.error).toMatchObject({
+      code: 'AGENT_INTERNAL_ERROR',
+      details: { field: 'clipMapJson' },
+    })
+    await expect(prisma.novelPromotionClip.findMany()).resolves.toHaveLength(1)
+    await expect(prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: run.id },
+    })).resolves.toEqual(beforeRun)
+  })
+
+  it('accepts an intentionally empty committed episode only with its exact empty artifact hash', async () => {
+    const run = await createReadyRun()
+    const emptyData: ScreenplayCommitRequest['data'] = {
+      episodeKey: 'episode-001',
+      clips: [],
+    }
+    const body: ScreenplayCommitRequest = {
+      schemaVersion: 1,
+      ruleSetVersion: 'waoo-creator-v1',
+      ruleSetHash: RULE_SET_HASH,
+      artifactHash: hashArtifact(emptyData),
+      dryRun: false,
+      data: emptyData,
+    }
+
+    const first = await commit(run.id, 'episode-001', body)
+    const retry = await commit(run.id, 'episode-001', body)
+    expect(first.response.status).toBe(200)
+    expect(retry.response.status).toBe(200)
+    expect(first.payload.data.clips).toEqual([])
+    expect(retry.payload.data).toEqual(first.payload.data)
+    const persisted = await prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: run.id },
+    })
+    expect(parseClipMap(persisted.clipMapJson!)).toEqual({})
+    expect(parseArtifactHashes(persisted.artifactHashesJson!).screenplays)
+      .toEqual({ 'episode-001': body.artifactHash })
+    expect(parseEpisodeMap(persisted.episodeMapJson)['episode-001'].status)
+      .toBe('screenplay_committed')
   })
 
   it('rejects a persisted partial-stage counter that disagrees with the episode map', async () => {

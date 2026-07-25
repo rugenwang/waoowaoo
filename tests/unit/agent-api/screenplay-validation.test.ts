@@ -166,6 +166,28 @@ describe('validateScreenplayAnchors', () => {
       'data.clips[1].startText',
     )
   })
+
+  it('requires endText to begin after the entire startText anchor', () => {
+    const clip = artifact().clips[0]
+    expectAgentError(
+      () => validateScreenplayAnchors('清晨出门。', [{
+        ...clip,
+        startText: '清晨',
+        endText: '晨',
+      }]),
+      'REFERENCE_INVALID',
+      'data.clips[0].endText',
+    )
+    expectAgentError(
+      () => validateScreenplayAnchors('清晨出门。', [{
+        ...clip,
+        startText: '清晨',
+        endText: '清晨',
+      }]),
+      'REFERENCE_INVALID',
+      'data.clips[0].endText',
+    )
+  })
 })
 
 describe('validateScreenplayReferences', () => {
