@@ -138,12 +138,24 @@ describe('location and prop identity', () => {
     expect(findImageAssetIdentity('怀表', 'prop', existing)?.id).toBe('prop-1')
   })
 
-  it('keeps location and prop identities separate and conflicts on a wrong existing kind', () => {
+  it('keeps location and prop identities separate when only the opposite kind exists', () => {
     expect(findImageAssetIdentity('新场景', 'location', existing)).toBeUndefined()
-    expect(() => findImageAssetIdentity(
+    expect(findImageAssetIdentity(
       '怀表',
       'location',
       [{ id: 'wrong', name: '怀表', assetKind: 'prop' }],
+    )).toBeUndefined()
+  })
+
+  it('conflicts only when the requested kind has multiple normalized-name matches', () => {
+    expect(() => findImageAssetIdentity(
+      '怀表',
+      'location',
+      [
+        { id: 'one', name: '怀表', assetKind: 'location' },
+        { id: 'two', name: ' 怀表 ', assetKind: 'location' },
+        { id: 'prop', name: '怀表', assetKind: 'prop' },
+      ],
     )).toThrowError(expect.objectContaining({ code: 'ASSET_IDENTITY_CONFLICT' }))
   })
 })

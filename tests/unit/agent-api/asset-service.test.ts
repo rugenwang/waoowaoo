@@ -568,6 +568,53 @@ describe('commitAssetsArtifact', () => {
     ).toEqual({ entityId: 'existing-appearance', index: 2 })
   })
 
+  it.each([
+    ['malformed JSON', '{broken'],
+    ['non-array JSON', JSON.stringify({ old: 'history.jpg' })],
+    ['mixed/non-string array', JSON.stringify(['history.jpg', 42])],
+  ])('rejects %s stored imageUrls without overwriting history', async (
+    _label,
+    imageUrls,
+  ) => {
+    txMock.novelPromotionCharacter.findMany.mockResolvedValue([{
+      id: 'existing-character',
+      name: '林晓',
+      aliases: JSON.stringify(['小林']),
+      profileData: JSON.stringify({ gender: 'female' }),
+      profileConfirmed: true,
+      introduction: '历史介绍',
+    }])
+    txMock.characterAppearance.findMany.mockResolvedValue([{
+      id: 'existing-appearance',
+      characterId: 'existing-character',
+      appearanceIndex: 4,
+      changeReason: '默认',
+      description: '历史描述',
+      descriptions: JSON.stringify(['历史描述']),
+      imageUrl: 'history-main.jpg',
+      imageUrls,
+      selectedIndex: 0,
+    }])
+
+    await expect(commitAssetsArtifact({
+      userId: 'user-1',
+      runId: 'run-1',
+      request: request({ data: { locations: [], props: [] } }),
+    })).rejects.toMatchObject({
+      code: 'AGENT_INTERNAL_ERROR',
+      details: {
+        field: 'imageUrls',
+        targetKey: 'appearance.lin.default',
+      },
+    })
+    expect(txMock.novelPromotionCharacter.update).not.toHaveBeenCalled()
+    expect(txMock.characterAppearance.update).not.toHaveBeenCalled()
+    expect(txMock.characterAppearance.create).not.toHaveBeenCalled()
+    expect(txMock.novelPromotionLocation.create).not.toHaveBeenCalled()
+    expect(txMock.locationImage.create).not.toHaveBeenCalled()
+    expect(txMock.agentCreationRun.update).not.toHaveBeenCalled()
+  })
+
   it('allocates max appearanceIndex + 1 under a character lock for a different change reason', async () => {
     txMock.novelPromotionCharacter.findMany.mockResolvedValue([{
       id: 'existing-character',

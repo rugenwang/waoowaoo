@@ -379,6 +379,72 @@ describe('Agent assets artifact commit with MySQL', () => {
     expect(rows.map((row) => row.assetKind)).toEqual(['location', 'prop'])
   })
 
+  it('creates a new requested kind when only the same-name opposite kind exists', async () => {
+    const existingProp = await prisma.novelPromotionLocation.create({
+      data: {
+        novelPromotionProjectId: novelProjectId,
+        name: '旧道具同名',
+        summary: '必须保持的旧道具',
+        assetKind: 'prop',
+      },
+    })
+    const existingLocation = await prisma.novelPromotionLocation.create({
+      data: {
+        novelPromotionProjectId: novelProjectId,
+        name: '旧场景同名',
+        summary: '必须保持的旧场景',
+        assetKind: 'location',
+      },
+    })
+    const run = await createReadyRun()
+    const body = assetsRequest({
+      data: {
+        characters: [],
+        locations: [{
+          locationKey: 'location.from-opposite',
+          name: '旧道具同名',
+          summary: '新场景',
+          availableSlots: [],
+          descriptions: ['新场景描述'],
+        }],
+        props: [{
+          propKey: 'prop.from-opposite',
+          name: '旧场景同名',
+          summary: '新道具',
+          visualDescription: '新道具描述',
+        }],
+      },
+    })
+    const result = await commit(run.id, body)
+    expect(result.response.status).toBe(200)
+    expect(result.payload.data).toMatchObject({
+      locations: [{
+        locationKey: 'location.from-opposite',
+        reused: false,
+      }],
+      props: [{
+        propKey: 'prop.from-opposite',
+        reused: false,
+      }],
+    })
+    expect(result.payload.data.locations[0].locationId).not.toBe(existingProp.id)
+    expect(result.payload.data.props[0].propId).not.toBe(existingLocation.id)
+    await expect(prisma.novelPromotionLocation.findUniqueOrThrow({
+      where: { id: existingProp.id },
+    })).resolves.toEqual(existingProp)
+    await expect(prisma.novelPromotionLocation.findUniqueOrThrow({
+      where: { id: existingLocation.id },
+    })).resolves.toEqual(existingLocation)
+    const rows = await prisma.novelPromotionLocation.findMany({
+      where: { novelPromotionProjectId: novelProjectId },
+    })
+    expect(rows).toHaveLength(4)
+    expect(rows.filter((row) => row.name === '旧道具同名')
+      .map((row) => row.assetKind).sort()).toEqual(['location', 'prop'])
+    expect(rows.filter((row) => row.name === '旧场景同名')
+      .map((row) => row.assetKind).sort()).toEqual(['location', 'prop'])
+  })
+
   it('creates distinct indexed appearances for a new character with repeated change reasons', async () => {
     const run = await createReadyRun()
     const baseCharacter = assetsRequest().data.characters[0]
@@ -533,6 +599,59 @@ describe('Agent assets artifact commit with MySQL', () => {
     expect(preservedLocation.images).toHaveLength(3)
     expect(preservedLocation.images.slice(1).map((image) => image.id))
       .toEqual(first.payload.data.locations[0].imageSlotIds)
+  })
+
+  it('rolls back the whole artifact when matched historical imageUrls are malformed', async () => {
+    const character = await prisma.novelPromotionCharacter.create({
+      data: {
+        novelPromotionProjectId: novelProjectId,
+        name: '林晓',
+        aliases: JSON.stringify(['小林']),
+        introduction: '历史介绍',
+        profileData: JSON.stringify({ gender: 'female' }),
+        profileConfirmed: true,
+        appearances: {
+          create: {
+            appearanceIndex: 3,
+            changeReason: '默认',
+            description: '历史描述',
+            imageUrl: 'history-main.jpg',
+            imageUrls: '{broken',
+            selectedIndex: 0,
+          },
+        },
+      },
+      include: { appearances: true },
+    })
+    const run = await createReadyRun()
+    const beforeRun = await prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: run.id },
+    })
+    const result = await commit(run.id, assetsRequest())
+    expect(result.response.status).toBe(500)
+    expect(result.payload.error).toMatchObject({
+      code: 'AGENT_INTERNAL_ERROR',
+      details: {
+        field: 'imageUrls',
+        targetKey: 'appearance.lin.default',
+      },
+    })
+    await expect(prisma.characterAppearance.findUniqueOrThrow({
+      where: { id: character.appearances[0].id },
+    })).resolves.toMatchObject({
+      imageUrl: 'history-main.jpg',
+      imageUrls: '{broken',
+      selectedIndex: 0,
+    })
+    await expect(prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: run.id },
+    })).resolves.toEqual(beforeRun)
+    await expect(Promise.all([
+      prisma.novelPromotionCharacter.count(),
+      prisma.characterAppearance.count(),
+      prisma.novelPromotionLocation.count(),
+      prisma.locationImage.count(),
+    ])).resolves.toEqual([1, 1, 0, 0])
   })
 
   it('enforces idempotency/hash/rules and reports deterministic identity conflicts', async () => {

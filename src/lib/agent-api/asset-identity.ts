@@ -253,18 +253,18 @@ export function findImageAssetIdentity<T extends StoredImageAssetIdentity>(
   existing: T[],
 ): T | undefined {
   const identity = normalizeAssetIdentityText(requestedName)
-  const nameMatches = existing.filter(
-    (candidate) => normalizeAssetIdentityText(candidate.name) === identity,
+  const kindMatches = existing.filter(
+    (candidate) => (
+      candidate.assetKind === requestedKind
+      && normalizeAssetIdentityText(candidate.name) === identity
+    ),
   )
-  const kindMatches = nameMatches.filter(
-    (candidate) => candidate.assetKind === requestedKind,
-  )
-  if (kindMatches.length > 1 || (kindMatches.length === 0 && nameMatches.length > 0)) {
+  if (kindMatches.length > 1) {
     throw new AgentApiError('ASSET_IDENTITY_CONFLICT', {
       details: {
         field: 'assetKind',
         assetKind: requestedKind,
-        matchCount: nameMatches.length,
+        matchCount: kindMatches.length,
       },
     })
   }

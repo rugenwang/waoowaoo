@@ -240,21 +240,25 @@ function profileData(character: CharacterInput): string {
   })
 }
 
-function parseImageUrls(raw: string | null): string[] {
+function parseImageUrls(raw: string | null, targetKey: string): string[] {
   if (raw === null) return []
+  let parsed: unknown
   try {
-    const parsed: unknown = JSON.parse(raw)
-    if (
-      Array.isArray(parsed)
-      && parsed.every((entry) => typeof entry === 'string')
-    ) {
-      return parsed
-    }
+    parsed = JSON.parse(raw)
   } catch {
-    // The legacy value is preserved in imageUrl; imageUrls needs a valid
-    // array so this run can own a separately addressable candidate.
+    throw new AgentApiError('AGENT_INTERNAL_ERROR', {
+      details: { field: 'imageUrls', targetKey },
+    })
   }
-  return []
+  if (
+    !Array.isArray(parsed)
+    || !parsed.every((entry) => typeof entry === 'string')
+  ) {
+    throw new AgentApiError('AGENT_INTERNAL_ERROR', {
+      details: { field: 'imageUrls', targetKey },
+    })
+  }
+  return parsed
 }
 
 function buildDryRunMapping(
@@ -310,7 +314,7 @@ function buildDryRunMapping(
       )
       const appearanceIndex = exact?.appearanceIndex ?? nextIndex++
       const candidateIndex = exact
-        ? parseImageUrls(exact.imageUrls).length
+        ? parseImageUrls(exact.imageUrls, appearance.appearanceKey).length
         : 0
       if (exact) {
         addWarning(warnings, appearance.appearanceKey, 'description')
@@ -564,7 +568,10 @@ async function commitCharacters(
         .sort((left, right) => left.appearanceIndex - right.appearanceIndex)[0]
 
       if (exact) {
-        const historical = parseImageUrls(exact.imageUrls)
+        const historical = parseImageUrls(
+          exact.imageUrls,
+          appearance.appearanceKey,
+        )
         const candidateIndex = historical.length
         const updatedImageUrls = JSON.stringify([...historical, ''])
         await tx.characterAppearance.update({
