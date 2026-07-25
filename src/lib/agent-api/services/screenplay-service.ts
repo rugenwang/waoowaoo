@@ -243,6 +243,13 @@ async function loadAndValidateAssetNames(
     characterNames.set(characterKey, row.name)
   }
   for (const entry of appearanceEntries) {
+    const variantSlotKeys = Object.keys(entry.appearance.variantSlots)
+    if (
+      variantSlotKeys.length !== 1
+      || variantSlotKeys[0] !== '0'
+    ) {
+      internalState('assetMapJson', entry.appearanceKey)
+    }
     const row = appearanceRowsById.get(entry.appearance.appearanceId)
     const imageUrls = row
       ? parseMappedImageUrls(row.imageUrls, entry.appearanceKey)
@@ -276,6 +283,17 @@ async function loadAndValidateAssetNames(
       kind: 'prop' as const,
     })),
   ]
+  for (const { key, entry, kind } of imageAssetEntries) {
+    const slotKeys = Object.keys(entry.imageSlots)
+      .sort((left, right) => Number(left) - Number(right))
+    if (
+      slotKeys.length === 0
+      || slotKeys.some((slotKey, index) => slotKey !== String(index))
+      || (kind === 'prop' && slotKeys.length !== 1)
+    ) {
+      internalState('assetMapJson', key)
+    }
+  }
   const imageAssetIds = imageAssetEntries.map(({ entry }) => entry.entityId)
   const imageAssetRows = imageAssetIds.length === 0
     ? []

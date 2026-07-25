@@ -858,6 +858,87 @@ describe('Agent screenplay artifact commit with MySQL', () => {
     await expect(prisma.novelPromotionClip.count()).resolves.toBe(0)
   })
 
+  it('rejects malformed run-owned asset slot topologies during dry-run', async () => {
+    const corruptions: Array<{
+      name: string
+      mutate: (mapping: AssetMap) => void
+    }> = [{
+      name: 'appearance slots are empty',
+      mutate: (mapping) => {
+        mapping.characters['character.lin'].appearances[
+          'appearance.lin.default'
+        ].variantSlots = {}
+      },
+    }, {
+      name: 'appearance has more than run-local slot 0',
+      mutate: (mapping) => {
+        const appearance = mapping.characters[
+          'character.lin'
+        ].appearances['appearance.lin.default']
+        appearance.variantSlots['1'] = {
+          entityId: appearance.appearanceId,
+          index: 0,
+        }
+      },
+    }, {
+      name: 'location slots are empty',
+      mutate: (mapping) => {
+        mapping.locations['location.home'].imageSlots = {}
+      },
+    }, {
+      name: 'prop has more than slot 0',
+      mutate: (mapping) => {
+        const prop = mapping.props['prop.bag']
+        prop.imageSlots['1'] = {
+          ...prop.imageSlots['0'],
+        }
+      },
+    }]
+
+    const statuses: Array<{ name: string; status: number; field?: string }> = []
+    for (const corruption of corruptions) {
+      const run = await createReadyRun()
+      const corrupted = structuredClone(assets)
+      corruption.mutate(corrupted)
+      await prisma.agentCreationRun.update({
+        where: { id: run.id },
+        data: { assetMapJson: serializeAssetMap(corrupted) },
+      })
+      const body = screenplayRequest({ envelope: { dryRun: true } })
+      const result = await commit(run.id, 'episode-001', body)
+      statuses.push({
+        name: corruption.name,
+        status: result.response.status,
+        field: result.payload.error?.details?.field,
+      })
+    }
+
+    expect(statuses).toEqual(corruptions.map(({ name }) => ({
+      name,
+      status: 500,
+      field: 'assetMapJson',
+    })))
+    await expect(prisma.novelPromotionClip.count()).resolves.toBe(0)
+    const runs = await prisma.agentCreationRun.findMany({
+      select: {
+        status: true,
+        currentStage: true,
+        clipMapJson: true,
+        artifactHashesJson: true,
+      },
+    })
+    expect(runs).toHaveLength(corruptions.length)
+    for (const run of runs) {
+      expect(run).toMatchObject({
+        status: 'assets_committed',
+        currentStage: 'assets_committed',
+      })
+      expect(parseClipMap(run.clipMapJson!)).toEqual({})
+      expect(parseArtifactHashes(run.artifactHashesJson!).screenplays)
+        .toEqual({})
+    }
+  })
+
   it('rejects another committed episode whose non-empty screenplay hash has no clip mapping', async () => {
     const run = await createReadyRun({ includeSecond: true })
     const second = secondEpisodeRequest()
