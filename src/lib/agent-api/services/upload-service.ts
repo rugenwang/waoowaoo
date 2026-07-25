@@ -155,9 +155,16 @@ function parseRunStatus(value: string): RunStatus {
   return parsed.data
 }
 
-function assertUploadStatus(value: string): RunStatus {
+function assertUploadStatus(
+  value: string,
+  currentStage: string,
+): RunStatus {
   const status = parseRunStatus(value)
-  if (status !== 'storyboards_committed' && status !== 'images_in_progress') {
+  if (
+    status !== 'storyboards_committed'
+    && status !== 'images_in_progress'
+    && !(status === 'incomplete' && currentStage === 'images_in_progress')
+  ) {
     throw new AgentApiError('RUN_INCOMPLETE', {
       details: { status },
     })
@@ -654,7 +661,7 @@ async function loadValidatedTarget(
   run: UploadRun,
   fields: UploadFields,
 ) {
-  assertUploadStatus(run.status)
+  assertUploadStatus(run.status, run.currentStage)
   const mappings = parseRunMappings(run)
   const target = await resolveUploadTarget(
     db,
@@ -822,7 +829,10 @@ export async function commitGeneratedImageUpload(
       receiptMatches(entry, identity) ? receipt : entry
     )))
     const status = parseRunStatus(run.status)
-    const nextStatus = status === 'storyboards_committed'
+    const nextStatus = (
+      status === 'storyboards_committed'
+      || status === 'incomplete'
+    )
       ? transitionRunStatus(status, run.currentStage, 'images_in_progress')
       : status
     await tx.agentCreationRun.update({
