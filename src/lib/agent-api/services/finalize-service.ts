@@ -7,6 +7,7 @@ import {
 } from '@/lib/agent-api/contracts/finalize'
 import { AgentApiError } from '@/lib/agent-api/errors'
 import { prisma } from '@/lib/prisma'
+import { buildBoundedMissingState } from './integrity-scan'
 import {
   inspectRunIntegrity,
   loadIntegrityRun,
@@ -30,7 +31,10 @@ export type FinalizeCreationRunResult = {
 
 type TransactionResult =
   | { kind: 'completed'; data: FinalizeCreationRunResult }
-  | { kind: 'incomplete'; missing: IntegrityMissing[] }
+  | {
+      kind: 'incomplete'
+      details: ReturnType<typeof buildBoundedMissingState>['details']
+    }
 
 function exactExpectedMatch(
   expected: FinalizeRequest['expected'],
@@ -54,37 +58,17 @@ function recoveryStage(
   missing: IntegrityMissing[],
   currentStage: string,
 ): string {
+  if (missing.some((item) => item.code === 'MAPPING_INVALID')) {
+    return 'new_run_required'
+  }
   const codes = new Set(missing.map((item) => item.code))
   if (codes.has('STORY_MISSING')) return 'story_committed'
-  if (
-    codes.has('ASSETS_MISSING')
-    || missing.some((item) => (
-      item.targetType === 'character'
-      || item.targetType === 'character-appearance'
-      || item.targetType === 'location'
-      || item.targetType === 'location-image'
-      || item.targetType === 'prop'
-      || item.targetType === 'prop-image'
-    ) && item.code === 'MAPPING_INVALID')
-  ) {
-    return 'assets_committed'
-  }
-  if (
-    codes.has('SCREENPLAY_MISSING')
-    || missing.some((item) => (
-      item.targetType === 'clip' && item.code === 'MAPPING_INVALID'
-    ))
-  ) {
-    return 'screenplay_committed'
-  }
+  if (codes.has('ASSETS_MISSING')) return 'assets_committed'
+  if (codes.has('SCREENPLAY_MISSING')) return 'screenplay_committed'
   if (
     codes.has('STORYBOARD_MISSING')
     || codes.has('CLIP_STORYBOARD_MISSING')
     || codes.has('PANEL_FRAME_MISSING')
-    || missing.some((item) => (
-      ['storyboard', 'panel'].includes(item.targetType)
-      && item.code === 'MAPPING_INVALID'
-    ))
   ) {
     return 'storyboards_committed'
   }
@@ -140,6 +124,26 @@ export async function finalizeCreationRun(input: {
     await lockRunIntegrityEntities(tx, run, state)
     const report = await inspectRunIntegrity(tx, run)
 
+    if (report.missing.length > 0) {
+      const currentStage = recoveryStage(
+        report.missing,
+        run.currentStage,
+      )
+      const bounded = buildBoundedMissingState(run.id, report.missing)
+      await tx.agentCreationRun.update({
+        where: { id: run.id },
+        data: {
+          status: 'incomplete',
+          currentStage,
+          lastErrorJson: JSON.stringify(bounded.persisted),
+        },
+      })
+      return {
+        kind: 'incomplete',
+        details: bounded.details,
+      }
+    }
+
     if (run.status === 'completed') {
       if (!run.completedAt) {
         throw new AgentApiError('AGENT_INTERNAL_ERROR', {
@@ -154,28 +158,6 @@ export async function finalizeCreationRun(input: {
           completedAt: run.completedAt.toISOString(),
           counts: report.counts,
         },
-      }
-    }
-
-    if (report.missing.length > 0) {
-      const currentStage = recoveryStage(
-        report.missing,
-        run.currentStage,
-      )
-      await tx.agentCreationRun.update({
-        where: { id: run.id },
-        data: {
-          status: 'incomplete',
-          currentStage,
-          lastErrorJson: JSON.stringify({
-            code: 'RUN_INCOMPLETE',
-            missing: report.missing,
-          }),
-        },
-      })
-      return {
-        kind: 'incomplete',
-        missing: report.missing,
       }
     }
 
@@ -202,10 +184,7 @@ export async function finalizeCreationRun(input: {
 
   if (result.kind === 'incomplete') {
     throw new AgentApiError('RUN_INCOMPLETE', {
-      details: {
-        missingCount: result.missing.length,
-        missingJson: JSON.stringify(result.missing),
-      },
+      details: result.details,
     })
   }
   return result.data

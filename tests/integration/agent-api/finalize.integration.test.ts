@@ -28,18 +28,23 @@ import {
 } from '@/lib/agent-api/canonical-json'
 import type { FinalizeRequest } from '@/lib/agent-api/contracts/finalize'
 import type { StoryCommitRequest } from '@/lib/agent-api/contracts/story'
-import { buildProjectedEntityId } from '@/lib/agent-api/entity-id'
+import {
+  buildAppearanceCandidateOwnerId,
+  buildProjectedEntityId,
+} from '@/lib/agent-api/entity-id'
 import {
   finalizeIdempotencyKey,
   uploadIdempotencyKey,
 } from '@/lib/agent-api/idempotency'
 import {
+  parseUploadReceipts,
   serializeArtifactHashes,
   serializeAssetMap,
   serializeClipMap,
   serializeEpisodeMap,
   serializeStoryboardMap,
   serializeUploadReceipts,
+  type AssetMap,
 } from '@/lib/agent-api/run-state'
 import { resetSystemState } from '../../helpers/db-reset'
 import {
@@ -447,6 +452,353 @@ describe('agent finalize integration', () => {
     })).resolves.toMatchObject({
       status: 'incomplete',
       currentStage: 'images_in_progress',
+    })
+  })
+
+  it('refuses new assets whose run image exists but main selections were cleared', async () => {
+    const raw = await sharp({
+      create: {
+        width: 8,
+        height: 6,
+        channels: 3,
+        background: '#cccc00',
+      },
+    }).png().toBuffer()
+    expect((await uploadFrame(raw)).response.status).toBe(200)
+
+    const characterKey = 'character-new'
+    const appearanceKey = 'appearance-new'
+    const locationKey = 'location-new'
+    const propKey = 'prop-new'
+    const characterId = buildProjectedEntityId(
+      fixture.run.id,
+      'Character',
+      characterKey,
+    )
+    const appearanceId = buildProjectedEntityId(
+      fixture.run.id,
+      'Appearance',
+      appearanceKey,
+    )
+    const locationId = buildProjectedEntityId(
+      fixture.run.id,
+      'Location',
+      locationKey,
+    )
+    const propId = buildProjectedEntityId(
+      fixture.run.id,
+      'Prop',
+      propKey,
+    )
+    const locationImageId = buildProjectedEntityId(
+      fixture.run.id,
+      'LocationImage',
+      `${locationKey}:0`,
+    )
+    const propImageId = buildProjectedEntityId(
+      fixture.run.id,
+      'LocationImage',
+      `${propKey}:0`,
+    )
+    const receiptRows = [
+      {
+        targetType: 'character-appearance' as const,
+        targetKey: appearanceKey,
+        variantIndex: 0,
+        contentSha256: `sha256:${'a'.repeat(64)}`,
+        storageKey: `agent-runs/${fixture.run.id}/character-appearance/${appearanceKey}/0/${'a'.repeat(64)}.jpg`,
+        publicId: `character-${fixture.run.id}`,
+      },
+      {
+        targetType: 'location-image' as const,
+        targetKey: locationKey,
+        variantIndex: 0,
+        contentSha256: `sha256:${'b'.repeat(64)}`,
+        storageKey: `agent-runs/${fixture.run.id}/location-image/${locationKey}/0/${'b'.repeat(64)}.jpg`,
+        publicId: `location-${fixture.run.id}`,
+      },
+      {
+        targetType: 'prop-image' as const,
+        targetKey: propKey,
+        variantIndex: 0,
+        contentSha256: `sha256:${'c'.repeat(64)}`,
+        storageKey: `agent-runs/${fixture.run.id}/prop-image/${propKey}/0/${'c'.repeat(64)}.jpg`,
+        publicId: `prop-${fixture.run.id}`,
+      },
+    ]
+    const media = await Promise.all(receiptRows.map((row) => (
+      prisma.mediaObject.create({
+        data: {
+          publicId: row.publicId,
+          storageKey: row.storageKey,
+        },
+      })
+    )))
+    await prisma.novelPromotionCharacter.create({
+      data: {
+        id: characterId,
+        novelPromotionProjectId: fixture.episode.novelPromotionProjectId,
+        name: '新角色',
+        appearances: {
+          create: {
+            id: appearanceId,
+            appearanceIndex: 0,
+            changeReason: '初始',
+            imageUrls: JSON.stringify([receiptRows[0].storageKey]),
+            imageUrl: null,
+            imageMediaId: null,
+            selectedIndex: null,
+          },
+        },
+      },
+    })
+    await prisma.novelPromotionLocation.create({
+      data: {
+        id: locationId,
+        novelPromotionProjectId: fixture.episode.novelPromotionProjectId,
+        name: '新场景',
+        assetKind: 'location',
+        images: {
+          create: {
+            id: locationImageId,
+            imageIndex: 0,
+            imageUrl: receiptRows[1].storageKey,
+            imageMediaId: media[1].id,
+            isSelected: false,
+          },
+        },
+      },
+    })
+    await prisma.novelPromotionLocation.create({
+      data: {
+        id: propId,
+        novelPromotionProjectId: fixture.episode.novelPromotionProjectId,
+        name: '新道具',
+        assetKind: 'prop',
+        images: {
+          create: {
+            id: propImageId,
+            imageIndex: 0,
+            imageUrl: receiptRows[2].storageKey,
+            imageMediaId: media[2].id,
+            isSelected: false,
+          },
+        },
+      },
+    })
+    const assets: AssetMap = {
+      characters: {
+        [characterKey]: {
+          characterKey,
+          characterId,
+          reused: false,
+          appearances: {
+            [appearanceKey]: {
+              appearanceKey,
+              appearanceId,
+              appearanceIndex: 0,
+              reused: false,
+              variantSlots: {
+                0: {
+                  entityId: buildAppearanceCandidateOwnerId(
+                    fixture.run.id,
+                    appearanceKey,
+                    0,
+                    0,
+                  ),
+                  index: 0,
+                },
+              },
+            },
+          },
+        },
+      },
+      locations: {
+        [locationKey]: {
+          assetKey: locationKey,
+          entityId: locationId,
+          reused: false,
+          imageSlots: {
+            0: { entityId: locationImageId, index: 0 },
+          },
+        },
+      },
+      props: {
+        [propKey]: {
+          assetKey: propKey,
+          entityId: propId,
+          reused: false,
+          imageSlots: {
+            0: { entityId: propImageId, index: 0 },
+          },
+        },
+      },
+    }
+    const stored = await prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: fixture.run.id },
+    })
+    const receipts = parseUploadReceipts(stored.receiptJson ?? '[]')
+    await prisma.agentCreationRun.update({
+      where: { id: fixture.run.id },
+      data: {
+        assetMapJson: serializeAssetMap(assets),
+        receiptJson: serializeUploadReceipts([
+          ...receipts,
+          ...receiptRows.map((row, index) => ({
+            targetType: row.targetType,
+            targetKey: row.targetKey,
+            variantIndex: row.variantIndex,
+            contentSha256: row.contentSha256,
+            mediaId: media[index].id,
+            storageKey: row.storageKey,
+            url: `/m/${row.publicId}`,
+          })),
+        ]),
+      },
+    })
+
+    const result = await finalize()
+    expect(result.response.status).toBe(422)
+    expect(result.payload.error.code).toBe('RUN_INCOMPLETE')
+    expect(JSON.parse(
+      (await prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: fixture.run.id },
+      })).lastErrorJson ?? '{}',
+    ).summary).toEqual(expect.arrayContaining([
+      expect.objectContaining({ targetKey: appearanceKey }),
+      expect.objectContaining({ targetKey: locationKey }),
+      expect.objectContaining({ targetKey: propKey }),
+    ]))
+  })
+
+  it('downgrades a completed run when mapped data is externally damaged, while mismatched expected hashes still return 409 first', async () => {
+    const raw = await sharp({
+      create: {
+        width: 8,
+        height: 6,
+        channels: 3,
+        background: '#0000cc',
+      },
+    }).png().toBuffer()
+    expect((await uploadFrame(raw)).response.status).toBe(200)
+    expect((await finalize()).response.status).toBe(200)
+
+    await prisma.novelPromotionPanelFrame.delete({
+      where: {
+        id: buildProjectedEntityId(
+          fixture.run.id,
+          'Frame',
+          fixture.frameKey,
+        ),
+      },
+    })
+    const snapshotResponse = await SNAPSHOT(new Request(
+      `http://localhost/api/agent/v1/runs/${fixture.run.id}/snapshot`,
+      { headers: authHeaders() },
+    ), {
+      params: Promise.resolve({ runId: fixture.run.id }),
+    })
+    const snapshotPayload = await snapshotResponse.json()
+    expect(snapshotPayload.data.missing).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'PANEL_FRAME_MISSING',
+        targetKey: fixture.frameKey,
+      }),
+    ]))
+
+    const mismatched: FinalizeRequest = {
+      ...fixture.expected,
+      expected: {
+        ...fixture.expected.expected,
+        stories: {},
+      },
+    }
+    const conflict = await finalize(mismatched)
+    expect(conflict.response.status).toBe(409)
+    await expect(prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: fixture.run.id },
+    })).resolves.toMatchObject({ status: 'completed' })
+
+    const damaged = await finalize()
+    expect(damaged.response.status).toBe(422)
+    expect(damaged.payload.error.code).toBe('RUN_INCOMPLETE')
+    await expect(prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: fixture.run.id },
+    })).resolves.toMatchObject({ status: 'incomplete' })
+  })
+
+  it.each([
+    ['clipMapJson', 'clip-map'],
+    ['storyboardMapJson', 'storyboard-map'],
+  ] as const)('marks malformed %s as requiring a new run', async (
+    field,
+    targetType,
+  ) => {
+    await prisma.agentCreationRun.update({
+      where: { id: fixture.run.id },
+      data: { [field]: '{broken' },
+    })
+
+    const snapshotResponse = await SNAPSHOT(new Request(
+      `http://localhost/api/agent/v1/runs/${fixture.run.id}/snapshot`,
+      { headers: authHeaders() },
+    ), {
+      params: Promise.resolve({ runId: fixture.run.id }),
+    })
+    const snapshotPayload = await snapshotResponse.json()
+    expect(snapshotPayload.data.missing).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'MAPPING_INVALID',
+        targetType,
+        targetKey: fixture.run.id,
+        message: expect.stringContaining('start a new run'),
+      }),
+    ]))
+
+    const result = await finalize()
+    expect(result.response.status).toBe(422)
+    await expect(prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: fixture.run.id },
+    })).resolves.toMatchObject({
+      status: 'incomplete',
+      currentStage: 'new_run_required',
+    })
+  })
+
+  it('bounds 20,000 missing items in persisted and HTTP errors', async () => {
+    const pending = Array.from({ length: 20_000 }, (_, index) => ({
+      targetType: 'panel-frame' as const,
+      targetKey: `pending-${index}`,
+      variantIndex: 0,
+      contentSha256: `sha256:${index.toString(16).padStart(64, '0')}`,
+      status: 'pending' as const,
+      storageKey: `agent-runs/${fixture.run.id}/pending/${index}.jpg`,
+    }))
+    await prisma.agentCreationRun.update({
+      where: { id: fixture.run.id },
+      data: { receiptJson: serializeUploadReceipts(pending) },
+    })
+
+    const result = await finalize()
+    expect(result.response.status).toBe(422)
+    expect(result.payload.error.details).toMatchObject({
+      missingCount: 20_001,
+      summaryCount: 50,
+      truncated: true,
+    })
+    expect(result.payload.error.details.missingJson).toBeUndefined()
+    expect(JSON.stringify(result.payload.error.details).length)
+      .toBeLessThan(1_024)
+
+    const run = await prisma.agentCreationRun.findUniqueOrThrow({
+      where: { id: fixture.run.id },
+    })
+    expect(run.lastErrorJson?.length).toBeLessThan(64 * 1024)
+    expect(JSON.parse(run.lastErrorJson ?? '{}')).toMatchObject({
+      code: 'RUN_INCOMPLETE',
+      missingCount: 20_001,
+      summaryCount: 50,
+      truncated: true,
     })
   })
 

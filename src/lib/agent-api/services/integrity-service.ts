@@ -24,6 +24,12 @@ import {
   type UploadReceipt,
 } from '@/lib/agent-api/run-state'
 import { decodeImageUrlsFromDb } from '@/lib/contracts/image-urls-contract'
+import {
+  buildRelationCountIndex,
+  loadInStableIdChunks,
+  stableUniqueIds,
+  visitStableIdChunks,
+} from './integrity-scan'
 
 const RUN_SELECT = {
   id: true,
@@ -157,8 +163,24 @@ function addMissing(
   targetKey: string,
   message: string,
 ): void {
-  missing.push({ code, targetType, targetKey, message })
+  missing.push({
+    code,
+    targetType,
+    targetKey,
+    message: code === 'MAPPING_INVALID'
+      ? `${message.replace(/[.;]\s*$/, '')}; start a new run`
+      : message,
+  })
 }
+
+const MAPPING_TARGET_TYPE = {
+  episodeMapJson: 'episode-map',
+  assetMapJson: 'asset-map',
+  clipMapJson: 'clip-map',
+  storyboardMapJson: 'storyboard-map',
+  artifactHashesJson: 'artifact-hashes',
+  receiptJson: 'receipt-map',
+} as const
 
 function safeParseField<T>(
   run: IntegrityRun,
@@ -185,7 +207,7 @@ function safeParseField<T>(
   addMissing(
     missing,
     'MAPPING_INVALID',
-    'run',
+    MAPPING_TARGET_TYPE[field],
     run.id,
     `${field} is invalid`,
   )
@@ -333,20 +355,26 @@ function mappedIds(state: ParsedRunState) {
     }
   }
   return {
-    episodeIds,
-    characterIds,
-    appearanceIds,
-    locationIds,
-    locationImageIds,
-    clipIds: Object.values(state.clips ?? {}).map((entry) => entry.clipId),
-    storyboardIds: Object.values(
-      state.storyboards?.storyboards ?? {},
-    ).map((entry) => entry.storyboardId),
-    panelIds: Object.values(state.storyboards?.panels ?? {}).map(
-      (entry) => entry.panelId,
+    episodeIds: stableUniqueIds(episodeIds),
+    characterIds: stableUniqueIds(characterIds),
+    appearanceIds: stableUniqueIds(appearanceIds),
+    locationIds: stableUniqueIds(locationIds),
+    locationImageIds: stableUniqueIds(locationImageIds),
+    clipIds: stableUniqueIds(
+      Object.values(state.clips ?? {}).map((entry) => entry.clipId),
     ),
-    frameIds: Object.values(state.storyboards?.frames ?? {}).map(
-      (entry) => entry.frameId,
+    storyboardIds: stableUniqueIds(Object.values(
+      state.storyboards?.storyboards ?? {},
+    ).map((entry) => entry.storyboardId)),
+    panelIds: stableUniqueIds(
+      Object.values(state.storyboards?.panels ?? {}).map(
+        (entry) => entry.panelId,
+      ),
+    ),
+    frameIds: stableUniqueIds(
+      Object.values(state.storyboards?.frames ?? {}).map(
+        (entry) => entry.frameId,
+      ),
     ),
   }
 }
@@ -376,10 +404,12 @@ export async function lockRunIntegrityEntities(
       'novel_promotion_panel_frames',
     ])
     if (!allowed.has(table)) throw new Error('invalid integrity lock table')
-    await tx.$queryRawUnsafe(
-      `SELECT id FROM ${table} WHERE id IN (${values.map(() => '?').join(',')}) FOR UPDATE`,
-      ...values,
-    )
+    await visitStableIdChunks(values, async (chunk) => {
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM ${table} WHERE id IN (${chunk.map(() => '?').join(',')}) FOR UPDATE`,
+        ...chunk,
+      )
+    })
   }
   await lock('novel_promotion_episodes', ids.episodeIds)
   await lock('novel_promotion_characters', ids.characterIds)
@@ -404,7 +434,7 @@ export async function inspectRunIntegrity(
     addMissing(
       missing,
       'MAPPING_INVALID',
-      'run',
+      'clip-map',
       run.id,
       'clipMapJson is unavailable for committed screenplays',
     )
@@ -413,7 +443,7 @@ export async function inspectRunIntegrity(
     addMissing(
       missing,
       'MAPPING_INVALID',
-      'run',
+      'storyboard-map',
       run.id,
       'storyboardMapJson is unavailable for committed storyboards',
     )
@@ -422,7 +452,7 @@ export async function inspectRunIntegrity(
     addMissing(
       missing,
       'MAPPING_INVALID',
-      'run',
+      'receipt-map',
       run.id,
       'receiptJson is unavailable for committed storyboards',
     )
@@ -442,84 +472,104 @@ export async function inspectRunIntegrity(
     graphRuns,
     usageCosts,
   ] = await Promise.all([
-    db.novelPromotionEpisode.findMany({
-      where: { id: { in: ids.episodeIds } },
-      select: {
-        id: true,
-        episodeNumber: true,
-        novelText: true,
-        novelPromotionProjectId: true,
-        novelPromotionProject: { select: { projectId: true } },
-      },
-    }),
-    db.novelPromotionCharacter.findMany({
-      where: { id: { in: ids.characterIds } },
-      select: {
-        id: true,
-        novelPromotionProjectId: true,
-        novelPromotionProject: { select: { projectId: true } },
-      },
-    }),
-    db.characterAppearance.findMany({
-      where: { id: { in: ids.appearanceIds } },
-      select: {
-        id: true,
-        characterId: true,
-        appearanceIndex: true,
-        imageUrls: true,
-        imageUrl: true,
-        imageMediaId: true,
-      },
-    }),
-    db.novelPromotionLocation.findMany({
-      where: { id: { in: ids.locationIds } },
-      select: {
-        id: true,
-        novelPromotionProjectId: true,
-        assetKind: true,
-        selectedImageId: true,
-        novelPromotionProject: { select: { projectId: true } },
-      },
-    }),
-    db.locationImage.findMany({
-      where: { id: { in: ids.locationImageIds } },
-      select: {
-        id: true,
-        locationId: true,
-        imageIndex: true,
-        imageUrl: true,
-        imageMediaId: true,
-      },
-    }),
-    db.novelPromotionClip.findMany({
-      where: { id: { in: ids.clipIds } },
-      select: { id: true, episodeId: true },
-    }),
-    db.novelPromotionStoryboard.findMany({
-      where: { id: { in: ids.storyboardIds } },
-      select: { id: true, clipId: true, episodeId: true },
-    }),
-    db.novelPromotionPanel.findMany({
-      where: { id: { in: ids.panelIds } },
-      select: {
-        id: true,
-        storyboardId: true,
-        panelIndex: true,
-        imageUrl: true,
-        imageMediaId: true,
-      },
-    }),
-    db.novelPromotionPanelFrame.findMany({
-      where: { id: { in: ids.frameIds } },
-      select: {
-        id: true,
-        panelId: true,
-        frameIndex: true,
-        imageUrl: true,
-        imageMediaId: true,
-        generationStatus: true,
-      },
-    }),
+    loadInStableIdChunks(ids.episodeIds, (chunk) => (
+      db.novelPromotionEpisode.findMany({
+        where: { id: { in: chunk } },
+        select: {
+          id: true,
+          episodeNumber: true,
+          novelText: true,
+          novelPromotionProjectId: true,
+          novelPromotionProject: { select: { projectId: true } },
+        },
+      })
+    )),
+    loadInStableIdChunks(ids.characterIds, (chunk) => (
+      db.novelPromotionCharacter.findMany({
+        where: { id: { in: chunk } },
+        select: {
+          id: true,
+          novelPromotionProjectId: true,
+          novelPromotionProject: { select: { projectId: true } },
+        },
+      })
+    )),
+    loadInStableIdChunks(ids.appearanceIds, (chunk) => (
+      db.characterAppearance.findMany({
+        where: { id: { in: chunk } },
+        select: {
+          id: true,
+          characterId: true,
+          appearanceIndex: true,
+          imageUrls: true,
+          imageUrl: true,
+          imageMediaId: true,
+          selectedIndex: true,
+        },
+      })
+    )),
+    loadInStableIdChunks(ids.locationIds, (chunk) => (
+      db.novelPromotionLocation.findMany({
+        where: { id: { in: chunk } },
+        select: {
+          id: true,
+          novelPromotionProjectId: true,
+          assetKind: true,
+          selectedImageId: true,
+          novelPromotionProject: { select: { projectId: true } },
+        },
+      })
+    )),
+    loadInStableIdChunks(ids.locationImageIds, (chunk) => (
+      db.locationImage.findMany({
+        where: { id: { in: chunk } },
+        select: {
+          id: true,
+          locationId: true,
+          imageIndex: true,
+          imageUrl: true,
+          imageMediaId: true,
+          isSelected: true,
+        },
+      })
+    )),
+    loadInStableIdChunks(ids.clipIds, (chunk) => (
+      db.novelPromotionClip.findMany({
+        where: { id: { in: chunk } },
+        select: { id: true, episodeId: true },
+      })
+    )),
+    loadInStableIdChunks(ids.storyboardIds, (chunk) => (
+      db.novelPromotionStoryboard.findMany({
+        where: { id: { in: chunk } },
+        select: { id: true, clipId: true, episodeId: true },
+      })
+    )),
+    loadInStableIdChunks(ids.panelIds, (chunk) => (
+      db.novelPromotionPanel.findMany({
+        where: { id: { in: chunk } },
+        select: {
+          id: true,
+          storyboardId: true,
+          panelIndex: true,
+          imageUrl: true,
+          imageMediaId: true,
+        },
+      })
+    )),
+    loadInStableIdChunks(ids.frameIds, (chunk) => (
+      db.novelPromotionPanelFrame.findMany({
+        where: { id: { in: chunk } },
+        select: {
+          id: true,
+          panelId: true,
+          frameIndex: true,
+          imageUrl: true,
+          imageMediaId: true,
+          generationStatus: true,
+        },
+      })
+    )),
     db.task.findMany({
       where: { projectId: run.projectId },
       select: { id: true, payload: true },
@@ -540,13 +590,15 @@ export async function inspectRunIntegrity(
   const pendingReceipts = (state.receipts ?? []).filter(
     isPendingUploadReceipt,
   )
-  const mediaIds = [...new Set(completedReceipts.map(
+  const mediaIds = stableUniqueIds(completedReceipts.map(
     (receipt) => receipt.mediaId,
-  ))]
-  const mediaObjects = await db.mediaObject.findMany({
-    where: { id: { in: mediaIds } },
-    select: { id: true, publicId: true, storageKey: true },
-  })
+  ))
+  const mediaObjects = await loadInStableIdChunks(mediaIds, (chunk) => (
+    db.mediaObject.findMany({
+      where: { id: { in: chunk } },
+      select: { id: true, publicId: true, storageKey: true },
+    })
+  ))
 
   const episodeById = new Map(episodes.map((row) => [row.id, row]))
   const characterById = new Map(characters.map((row) => [row.id, row]))
@@ -560,14 +612,21 @@ export async function inspectRunIntegrity(
   const panelById = new Map(panels.map((row) => [row.id, row]))
   const frameById = new Map(frames.map((row) => [row.id, row]))
   const mediaById = new Map(mediaObjects.map((row) => [row.id, row]))
+  const storyboardCountByClipKey = buildRelationCountIndex(
+    Object.values(state.storyboards?.storyboards ?? {}),
+    (entry) => entry.clipKey,
+  )
+  const frameCountByPanelKey = buildRelationCountIndex(
+    Object.values(state.storyboards?.frames ?? {}),
+    (entry) => entry.panelKey,
+  )
 
   const completedByTarget = new Map<string, UploadReceipt[]>()
   for (const receipt of completedReceipts) {
     const key = receiptTarget(receipt)
-    completedByTarget.set(key, [
-      ...(completedByTarget.get(key) ?? []),
-      receipt,
-    ])
+    const existing = completedByTarget.get(key)
+    if (existing) existing.push(receipt)
+    else completedByTarget.set(key, [receipt])
   }
 
   const expectedTargets = new Set<string>()
@@ -613,7 +672,7 @@ export async function inspectRunIntegrity(
     addMissing(
       missing,
       'MAPPING_INVALID',
-      'run',
+      'episode-map',
       run.id,
       'episode mapping is unavailable',
     )
@@ -760,14 +819,24 @@ export async function inspectRunIntegrity(
         )
       }
       const storageKey = slot ? imageUrls[slot.index] ?? null : null
-      if (!findCurrentReceipt(
+      const receipt = findCurrentReceipt(
         'character-appearance',
         appearance.appearanceKey,
         0,
         storageKey,
         null,
         true,
-      )) {
+      )
+      const mainSelectionValid = appearance.reused
+        || (
+          !!receipt
+          && !!row
+          && !!slot
+          && row.imageUrl === receipt.storageKey
+          && row.imageMediaId === receipt.mediaId
+          && row.selectedIndex === slot.index
+        )
+      if (!receipt || !mainSelectionValid) {
         addMissing(
           missing,
           'ASSET_IMAGE_MISSING',
@@ -818,13 +887,21 @@ export async function inspectRunIntegrity(
             `Mapped ${expectedKind} image variant ${localIndex} is invalid`,
           )
         }
-        if (!findCurrentReceipt(
+        const receipt = findCurrentReceipt(
           targetType,
           asset.assetKey,
           Number(localIndex),
           image?.imageUrl ?? null,
           image?.imageMediaId ?? null,
-        )) {
+        )
+        const mainSelectionValid = asset.reused
+          || localIndex !== '0'
+          || (
+            !!receipt
+            && row?.selectedImageId === slot.entityId
+            && image?.isSelected === true
+          )
+        if (!receipt || !mainSelectionValid) {
           addMissing(
             missing,
             'ASSET_IMAGE_MISSING',
@@ -856,10 +933,7 @@ export async function inspectRunIntegrity(
         'Mapped clip is invalid',
       )
     }
-    const mappedStoryboards = Object.values(
-      state.storyboards?.storyboards ?? {},
-    ).filter((entry) => entry.clipKey === clip.clipKey)
-    if (mappedStoryboards.length !== 1) {
+    if ((storyboardCountByClipKey.get(clip.clipKey) ?? 0) !== 1) {
       addMissing(
         missing,
         'CLIP_STORYBOARD_MISSING',
@@ -922,10 +996,7 @@ export async function inspectRunIntegrity(
         'Mapped panel is invalid',
       )
     }
-    const mappedFrames = Object.values(
-      state.storyboards?.frames ?? {},
-    ).filter((frame) => frame.panelKey === panel.panelKey)
-    if (mappedFrames.length === 0) {
+    if ((frameCountByPanelKey.get(panel.panelKey) ?? 0) === 0) {
       addMissing(
         missing,
         'PANEL_FRAME_MISSING',

@@ -471,6 +471,85 @@ describe('snapshot service integrity', () => {
     ]))
   })
 
+  it('requires run-owned main selections for newly created assets but preserves reused selections', async () => {
+    const run = baseRun()
+    const assets = JSON.parse(run.assetMapJson)
+    assets.characters.hero.reused = false
+    assets.characters.hero.appearances['hero-main'].reused = false
+    assets.locations.home.reused = false
+    assets.props.sword.reused = false
+    prismaMock.agentCreationRun.findUnique.mockResolvedValue({
+      ...run,
+      assetMapJson: JSON.stringify(assets),
+    })
+    prismaMock.characterAppearance.findMany.mockResolvedValue([{
+      id: ids.appearance,
+      characterId: ids.character,
+      appearanceIndex: 0,
+      imageUrls: JSON.stringify([storage.character]),
+      imageUrl: null,
+      imageMediaId: null,
+      selectedIndex: null,
+    }])
+    prismaMock.novelPromotionLocation.findMany.mockResolvedValue([
+      {
+        id: ids.location,
+        novelPromotionProjectId: ids.novelProject,
+        assetKind: 'location',
+        selectedImageId: null,
+        novelPromotionProject: { projectId: ids.project },
+      },
+      {
+        id: ids.prop,
+        novelPromotionProjectId: ids.novelProject,
+        assetKind: 'prop',
+        selectedImageId: null,
+        novelPromotionProject: { projectId: ids.project },
+      },
+    ])
+    prismaMock.locationImage.findMany.mockResolvedValue([
+      {
+        id: ids.locationImage,
+        locationId: ids.location,
+        imageIndex: 0,
+        imageUrl: storage.location,
+        imageMediaId: ids.mediaLocation,
+        isSelected: false,
+      },
+      {
+        id: ids.propImage,
+        locationId: ids.prop,
+        imageIndex: 0,
+        imageUrl: storage.prop,
+        imageMediaId: ids.mediaProp,
+        isSelected: false,
+      },
+    ])
+
+    const snapshot = await getRunSnapshot({
+      userId: 'user-1',
+      runId: ids.run,
+    })
+
+    expect(snapshot.missing).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'ASSET_IMAGE_MISSING',
+        targetType: 'character-appearance',
+        targetKey: 'hero-main',
+      }),
+      expect.objectContaining({
+        code: 'ASSET_IMAGE_MISSING',
+        targetType: 'location-image',
+        targetKey: 'home',
+      }),
+      expect.objectContaining({
+        code: 'ASSET_IMAGE_MISSING',
+        targetType: 'prop-image',
+        targetKey: 'sword',
+      }),
+    ]))
+  })
+
   it('reports absent artifacts, panel frames, and frame images in a fixed order', async () => {
     prismaMock.agentCreationRun.findUnique.mockResolvedValue(baseRun({
       artifactHashesJson: serializeArtifactHashes({
@@ -523,8 +602,9 @@ describe('snapshot service integrity', () => {
     expect(snapshot.missing).toEqual(expect.arrayContaining([
       expect.objectContaining({
         code: 'MAPPING_INVALID',
-        targetType: 'run',
+        targetType: 'asset-map',
         targetKey: ids.run,
+        message: expect.stringContaining('start a new run'),
       }),
       expect.objectContaining({
         code: 'FORBIDDEN_TASK',
