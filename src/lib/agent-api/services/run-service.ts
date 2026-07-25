@@ -367,9 +367,10 @@ function isEpisodeNumberConflict(error: unknown): boolean {
       && target.includes('novelPromotionProjectId')
       && target.includes('episodeNumber')
   }
-  return typeof target === 'string'
-    && target.includes('novelPromotionProjectId')
-    && target.includes('episodeNumber')
+  return target
+    === 'novel_promotion_episodes_novelPromotionProjectId_episodeNumber_key'
+    || target
+    === 'novel_promotion_episodes_novelPromotionProjectId_episodeNumb_key'
 }
 
 async function createInTransaction(

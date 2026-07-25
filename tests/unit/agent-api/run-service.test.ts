@@ -610,6 +610,30 @@ describe('createOrResumeRun', () => {
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
   })
 
+  it('retries a MySQL-truncated Episode number unique target', async () => {
+    const targetConflict = {
+      code: 'P2002',
+      meta: {
+        modelName: 'NovelPromotionEpisode',
+        target:
+          'novel_promotion_episodes_novelPromotionProjectId_episodeNumb_key',
+      },
+    }
+    prismaMock.$transaction
+      .mockRejectedValueOnce(targetConflict)
+      .mockRejectedValueOnce(targetConflict)
+
+    await expect(createOrResumeRun({
+      userId: 'user-1',
+      projectId: 'project-1',
+      request: request(),
+    })).rejects.toMatchObject({
+      code: 'EPISODE_NUMBER_CONFLICT',
+      retryable: true,
+    })
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(2)
+  })
+
   it('retries once after a target Episode P2002 and can then succeed', async () => {
     const targetConflict = {
       code: 'P2002',
