@@ -73,8 +73,23 @@ const RUN_SELECT = {
   project: { select: { userId: true } },
 } satisfies Prisma.AgentCreationRunSelect
 
+const PREFLIGHT_RUN_SELECT = {
+  id: true,
+  userId: true,
+  projectId: true,
+  episodeMapJson: true,
+  assetMapJson: true,
+  clipMapJson: true,
+  project: { select: { userId: true } },
+} satisfies Prisma.AgentCreationRunSelect
+
 type TransactionClient = Prisma.TransactionClient
 type CommitData = StoryboardsCommitResponse['data']
+type PreflightSnapshot = {
+  episodeMapJson: string
+  assetMapJson: string
+  clipMapJson: string
+}
 
 type AssetDisplay = {
   characterNames: Map<string, string>
@@ -965,6 +980,7 @@ async function commitInTransaction(
   tx: TransactionClient,
   input: CommitStoryboardArtifactInput & {
     request: StoryboardsCommitRequest
+    preflightSnapshot: PreflightSnapshot
   },
 ): Promise<CommitData> {
   await tx.$queryRaw(Prisma.sql`
@@ -979,6 +995,18 @@ async function commitInTransaction(
   if (!run) throw new AgentApiError('AGENT_RESOURCE_NOT_FOUND')
   if (run.userId !== input.userId || run.project.userId !== input.userId) {
     throw new AgentApiError('AGENT_FORBIDDEN')
+  }
+  if (
+    run.episodeMapJson !== input.preflightSnapshot.episodeMapJson
+    || run.assetMapJson !== input.preflightSnapshot.assetMapJson
+    || run.clipMapJson !== input.preflightSnapshot.clipMapJson
+  ) {
+    throw new AgentApiError('RUN_DEFINITION_CONFLICT', {
+      message: 'Storyboard preflight inputs changed; retry the request',
+      field: 'preflightSnapshot',
+      retryable: true,
+      details: { operation: 'storyboard_preflight_snapshot' },
+    })
   }
   const status = parseRunStatus(run.status)
   if (
@@ -1022,13 +1050,6 @@ async function commitInTransaction(
     clipMap,
     mapping,
   )
-  validateStoryboardArtifact(
-    input.request.data,
-    assets,
-    clipMap,
-    input.episodeKey,
-  )
-
   await tx.$queryRaw(Prisma.sql`
     SELECT id FROM novel_promotion_episodes
     WHERE id = ${episode.episodeId}
@@ -1253,6 +1274,48 @@ export type CommitStoryboardArtifactInput = {
   request: StoryboardsCommitRequest
 }
 
+async function preflightStoryboardArtifact(
+  input: CommitStoryboardArtifactInput & {
+    request: StoryboardsCommitRequest
+  },
+): Promise<PreflightSnapshot> {
+  if (input.request.data.episodeKey !== input.episodeKey) {
+    throw new AgentApiError('REFERENCE_INVALID', {
+      field: 'data.episodeKey',
+    })
+  }
+  const run = await prisma.agentCreationRun.findUnique({
+    where: { id: input.runId },
+    select: PREFLIGHT_RUN_SELECT,
+  })
+  if (!run) throw new AgentApiError('AGENT_RESOURCE_NOT_FOUND')
+  if (run.userId !== input.userId || run.project.userId !== input.userId) {
+    throw new AgentApiError('AGENT_FORBIDDEN')
+  }
+  if (!run.assetMapJson || !run.clipMapJson) {
+    internalState('runMappings')
+  }
+  const episodes = parseEpisodeMap(run.episodeMapJson)
+  if (!episodes[input.episodeKey]) {
+    throw new AgentApiError('REFERENCE_INVALID', {
+      field: 'data.episodeKey',
+    })
+  }
+  const assets = parseAssetMap(run.assetMapJson)
+  const clipMap = parseClipMap(run.clipMapJson)
+  validateStoryboardArtifact(
+    input.request.data,
+    assets,
+    clipMap,
+    input.episodeKey,
+  )
+  return {
+    episodeMapJson: run.episodeMapJson,
+    assetMapJson: run.assetMapJson,
+    clipMapJson: run.clipMapJson,
+  }
+}
+
 export async function commitStoryboardArtifact(
   input: CommitStoryboardArtifactInput,
 ): Promise<CommitData> {
@@ -1270,10 +1333,15 @@ export async function commitStoryboardArtifact(
     })
   }
   try {
+    const preflightSnapshot = await preflightStoryboardArtifact({
+      ...input,
+      request: parsed.data,
+    })
     return await prisma.$transaction(
       (tx) => commitInTransaction(tx, {
         ...input,
         request: parsed.data,
+        preflightSnapshot,
       }),
       STORYBOARD_TRANSACTION_OPTIONS,
     )
