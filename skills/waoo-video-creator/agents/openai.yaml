@@ -1,0 +1,7 @@
+interface:
+  display_name: "waoo 全流程视频创作"
+  short_description: "按 waoo 项目规则完成剧集、资产、分镜及图片全流程创作"
+  default_prompt: "Use $waoo-video-creator to turn my project name and episode or series script into waoo stories, assets, storyboards, and uploaded images."
+
+policy:
+  allow_implicit_invocation: true
