@@ -69,6 +69,33 @@ describe('no Agent API generation bypass guard', () => {
   })
 
   it.each([
+    ['static import', "import { addTaskJob } from '../../task/queues'", '@/lib/task'],
+    ['multiline static import', "import {\n  addTaskJob,\n} from '../../task/queues'", '@/lib/task'],
+    ['re-export', "export { generate } from '../../../lib/model-gateway'", '@/lib/model-gateway'],
+    ['require', "const queue = require('../../task-queue/scheduler')", '@/lib/task-queue'],
+    ['dynamic import', "const runtime = await import('../../ai-runtime')", '@/lib/ai-runtime'],
+  ])('blocks a dangerous relative module through %s', (_name, content, token) => {
+    expect(inspectAgentGenerationBypass(
+      'src/lib/agent-api/services/relative-bypass.ts',
+      content,
+    )).toEqual([
+      expect.objectContaining({ token }),
+    ])
+  })
+
+  it('does not treat import-like ordinary strings as module imports', () => {
+    const content = `
+      const staticExample = "import { addTaskJob } from '../../task/queues'"
+      const dynamicExample = "import('../../ai-runtime')"
+      const requireExample = "require('../../../lib/model-gateway')"
+    `
+    expect(inspectAgentGenerationBypass(
+      'src/lib/agent-api/services/import-documentation.ts',
+      content,
+    )).toEqual([])
+  })
+
+  it.each([
     'create',
     'createMany',
     'createManyAndReturn',
@@ -94,18 +121,42 @@ describe('no Agent API generation bypass guard', () => {
     }
   })
 
-  it('blocks raw Prisma write execution as an obvious data-only bypass', () => {
+  it.each([
+    ['$executeRaw', 'await tx.$executeRaw`SELECT id FROM tasks`'],
+    ['$executeRawUnsafe', "await tx.$executeRawUnsafe('SELECT id FROM tasks')"],
+    ['$queryRaw', 'await tx.$queryRaw(Prisma.sql`UPDATE tasks SET status = 1`)'],
+    ['$queryRawUnsafe', "await tx.$queryRawUnsafe('DELETE FROM tasks')"],
+    ['$queryRaw', 'await tx.$queryRaw(Prisma.sql`WITH rows AS (SELECT 1) SELECT * FROM rows`)'],
+    ['$queryRaw', 'await tx.$queryRaw(Prisma.sql`SELECT 1; DELETE FROM tasks`)'],
+    ['$queryRaw', 'await tx.$queryRaw(sqlVariable)'],
+    ['$queryRawUnsafe', 'await tx.$queryRawUnsafe(sqlVariable)'],
+  ])('blocks unsafe raw Prisma execution through %s', (method, content) => {
     expect(inspectAgentGenerationBypass(
       'src/lib/agent-api/services/raw-write.ts',
-      'await tx.$executeRaw`DELETE FROM tasks`',
+      content,
     )).toEqual([
-      expect.objectContaining({ token: '$executeRaw' }),
+      expect.objectContaining({ token: method }),
     ])
+  })
+
+  it('allows statically identifiable single SELECT row locks', () => {
+    const content = [
+      'await tx.$queryRaw(Prisma.sql`SELECT id FROM agent_creation_runs WHERE id = ${runId} FOR UPDATE`)',
+      'await tx.$queryRawUnsafe(`SELECT id FROM ${table} WHERE id IN (${placeholders}) FOR UPDATE`, ...chunk)',
+    ].join('\n')
+    expect(inspectAgentGenerationBypass(
+      'src/lib/agent-api/services/row-lock.ts',
+      content,
+    )).toEqual([])
   })
 
   it.each([
     ['prisma alias', 'const delegate = prisma.task\nawait delegate.create({ data: {} })', 'prisma.task'],
     ['transaction alias', 'const taskStore = tx.taskEvent\nawait taskStore.update({ where: {} })', 'tx.taskEvent'],
+    ['destructured delegate', 'const { task } = prisma\nawait task.create({ data: {} })', 'prisma.task'],
+    ['renamed destructured delegate', 'const { graphRun: gr } = tx\nawait gr.deleteMany({})', 'tx.graphRun'],
+    ['assigned destructured delegate', 'let events\n({ taskEvent: events } = tx)\nawait events.update({})', 'tx.taskEvent'],
+    ['post-declaration assignment', 'let delegate\ndelegate = prisma.usageCost\nawait delegate.create({ data: {} })', 'prisma.usageCost'],
     ['bracket delegate', "await prisma['graphRun'].create({ data: {} })", "prisma['graphRun']"],
     ['bracket read', "await db['usageCost'].findMany({})", "db['usageCost']"],
   ])('blocks protected delegate bypass through %s', (_name, content, token) => {

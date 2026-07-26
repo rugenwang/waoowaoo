@@ -94,11 +94,43 @@ function tokenPattern(token) {
   return new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
 }
 
-function importPrefixPattern(prefix) {
-  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(
-    `(?:\\bfrom\\s*|\\bimport\\s*(?:\\(\\s*)?|\\brequire\\s*\\(\\s*)['\"]${escaped}(?:/|['\"])`,
-  )
+function moduleSpecifiers(content, codeOnly) {
+  const matches = []
+  const patterns = [
+    /\b(?:import|export)\s+(?:type\s+)?(?:[^'";]*?\s+from\s*)?(['"])([^'"\r\n]+)\1/g,
+    /\b(?:import|require)\s*\(\s*(['"])([^'"\r\n]+)\1\s*\)/g,
+  ]
+
+  for (const pattern of patterns) {
+    for (const match of content.matchAll(pattern)) {
+      // The specifier string remains visible in content, but the import keyword
+      // must itself remain visible in codeOnly so ordinary strings are ignored.
+      if (!/[A-Za-z_$]/.test(codeOnly[match.index] ?? '')) continue
+      matches.push({ index: match.index, specifier: match[2] })
+    }
+  }
+  return matches
+}
+
+function forbiddenImportToken(file, specifier) {
+  let resolved
+  if (specifier.startsWith('@/')) {
+    resolved = `src/${specifier.slice(2)}`
+  } else if (specifier.startsWith('.')) {
+    resolved = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier))
+  } else {
+    return null
+  }
+
+  for (const prefix of IMPORT_PREFIXES) {
+    const protectedRoot = prefix.replace(/^@\//, 'src/')
+    if (
+      resolved === protectedRoot
+      || resolved.startsWith(`${protectedRoot}/`)
+      || resolved.startsWith(`${protectedRoot}.`)
+    ) return prefix
+  }
+  return null
 }
 
 function maskIgnoredSyntax(content, maskStrings) {
@@ -179,12 +211,16 @@ function protectedPrismaWritePattern() {
   )
 }
 
-function protectedDelegateAliasPattern() {
+function protectedDelegateAssignmentPattern() {
   const models = PROTECTED_PRISMA_MODELS.join('|')
   return new RegExp(
-    `\\b(?:const|let|var)\\s+[A-Za-z_$][\\w$]*\\s*=\\s*([A-Za-z_$][\\w$]*)\\s*\\.\\s*(${models})\\b`,
+    `\\b[A-Za-z_$][\\w$]*\\s*=\\s*([A-Za-z_$][\\w$]*)\\s*\\.\\s*(${models})\\b`,
     'g',
   )
+}
+
+function protectedDelegateDestructurePattern() {
+  return /(?:\b(?:const|let|var)\s*|\(\s*)\{([^{}]*)\}\s*=\s*([A-Za-z_$][\w$]*)\b/g
 }
 
 function protectedBracketDelegatePattern() {
@@ -193,6 +229,54 @@ function protectedBracketDelegatePattern() {
     `\\b([A-Za-z_$][\\w$]*)\\s*\\[\\s*(['\"])(${models})\\2\\s*\\]`,
     'g',
   )
+}
+
+function skipWhitespace(content, start) {
+  let cursor = start
+  while (/\s/.test(content[cursor] ?? '')) cursor += 1
+  return cursor
+}
+
+function readQuotedBody(content, start) {
+  const quote = content[start]
+  if (quote !== "'" && quote !== '"' && quote !== '`') return null
+
+  let escaped = false
+  for (let cursor = start + 1; cursor < content.length; cursor += 1) {
+    const current = content[cursor]
+    if (escaped) {
+      escaped = false
+    } else if (current === '\\') {
+      escaped = true
+    } else if (current === quote) {
+      return content.slice(start + 1, cursor)
+    }
+  }
+  return null
+}
+
+function isSingleStaticSelect(sql) {
+  const normalized = sql.trimStart()
+  return /^SELECT\b/i.test(normalized) && !normalized.includes(';')
+}
+
+function isSafeRawSelect(content, methodIndex, method) {
+  let cursor = skipWhitespace(content, methodIndex + method.length)
+  if (content[cursor] !== '(') return false
+  cursor = skipWhitespace(content, cursor + 1)
+
+  if (method === '$queryRaw') {
+    if (!content.startsWith('Prisma.sql', cursor)) return false
+    cursor = skipWhitespace(content, cursor + 'Prisma.sql'.length)
+    if (content[cursor] !== '`') return false
+  } else if (method === '$queryRawUnsafe') {
+    if (!['"', "'", '`'].includes(content[cursor])) return false
+  } else {
+    return false
+  }
+
+  const sql = readQuotedBody(content, cursor)
+  return sql !== null && isSingleStaticSelect(sql)
 }
 
 export function inspectAgentGenerationBypass(file, content) {
@@ -211,9 +295,9 @@ export function inspectAgentGenerationBypass(file, content) {
       token,
     })
   }
-  for (const token of IMPORT_PREFIXES) {
-    const match = importPrefixPattern(token).exec(withoutComments)
-    if (!match) continue
+  for (const match of moduleSpecifiers(withoutComments, codeOnly)) {
+    const token = forbiddenImportToken(normalizedFile, match.specifier)
+    if (!token) continue
     violations.push({
       file: normalizedFile,
       line: lineForOffset(content, match.index),
@@ -227,12 +311,22 @@ export function inspectAgentGenerationBypass(file, content) {
       token: `${match[1]}.${match[2]}.${match[3]}`,
     })
   }
-  for (const match of codeOnly.matchAll(protectedDelegateAliasPattern())) {
+  for (const match of codeOnly.matchAll(protectedDelegateAssignmentPattern())) {
     violations.push({
       file: normalizedFile,
       line: lineForOffset(content, match.index),
       token: `${match[1]}.${match[2]}`,
     })
+  }
+  for (const match of codeOnly.matchAll(protectedDelegateDestructurePattern())) {
+    for (const model of PROTECTED_PRISMA_MODELS) {
+      if (!new RegExp(`(?:^|,)\\s*${model}\\b`).test(match[1])) continue
+      violations.push({
+        file: normalizedFile,
+        line: lineForOffset(content, match.index),
+        token: `${match[2]}.${model}`,
+      })
+    }
   }
   for (const match of withoutComments.matchAll(protectedBracketDelegatePattern())) {
     violations.push({
@@ -241,12 +335,13 @@ export function inspectAgentGenerationBypass(file, content) {
       token: `${match[1]}['${match[3]}']`,
     })
   }
-  const rawWriteMatch = /\$executeRaw(?:Unsafe)?\b/.exec(codeOnly)
-  if (rawWriteMatch) {
+  const rawExecutionPattern = /\$(?:executeRaw(?:Unsafe)?|queryRaw(?:Unsafe)?)\b/g
+  for (const match of codeOnly.matchAll(rawExecutionPattern)) {
+    if (isSafeRawSelect(withoutComments, match.index, match[0])) continue
     violations.push({
       file: normalizedFile,
-      line: lineForOffset(content, rawWriteMatch.index),
-      token: rawWriteMatch[0],
+      line: lineForOffset(content, match.index),
+      token: match[0],
     })
   }
   for (const legacyRoute of LEGACY_ROUTE_PATTERNS) {
