@@ -22,6 +22,13 @@ function hash(value) {
   return `sha256:${createHash('sha256').update(Buffer.isBuffer(value) || typeof value === 'string' ? value : canonicalJson(value)).digest('hex')}`
 }
 
+function ruleSetHash(rules) {
+  const pinned = { ...rules }
+  delete pinned.contentHash
+  delete pinned.contractsData
+  return hash(pinned)
+}
+
 async function json(file) {
   return JSON.parse(await readFile(file, 'utf8'))
 }
@@ -195,8 +202,8 @@ test('rejects forbidden generation configuration at any depth', async (t) => {
 test('rejects a tampered definition and forbidden configuration inside an Artifact', async (t) => {
   await t.test('definition', async (t) => {
     const runDir = await tempRun(t)
-    await mutateJson(runDir, 'definition.json', (definitions) => { definitions[0].name = '篡改后的分集' })
-    await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'story' }), /definition\.json.*hash|definitionHash/i)
+    await mutateJson(runDir, 'definition.json', (definitions) => { definitions[0].sourceText = '篡改后的分集原文' })
+    await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'story' }), /definition\.json.*sourceHash/i)
   })
   await t.test('artifact field', async (t) => {
     const { runDir } = await makeFinalizeRun(t)
@@ -218,6 +225,15 @@ test('rejects image escapes, symlinks, byte hash mismatches and missing upload r
     await writeFile(real, await readFile(target))
     await rm(target)
     await symlink(real, target)
+    await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'images' }), /symlink/i)
+  })
+  await t.test('symlinked images directory', async (t) => {
+    const { runDir } = await makeFinalizeRun(t)
+    const imageDir = path.join(runDir, 'images')
+    const externalDir = path.join(path.dirname(runDir), 'outside-images')
+    await cp(imageDir, externalDir, { recursive: true })
+    await rm(imageDir, { recursive: true })
+    await symlink(externalDir, imageDir)
     await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'images' }), /symlink/i)
   })
   await t.test('hash', async (t) => {
@@ -246,4 +262,43 @@ test('rejects committed hash drift and a manifest status not proven by the lates
     await mutateJson(runDir, 'receipts.json', (receipts) => { receipts.finalize.serverStateRequestSeq = 5 })
     await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'finalize' }), /serverStateAppliedSeq.*latest.*receipt/i)
   })
+  await t.test('current stage', async (t) => {
+    const { runDir } = await makeFinalizeRun(t)
+    await mutateJson(runDir, 'receipts.json', (receipts) => { receipts.finalize.data.currentStage = 'assets' })
+    await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'finalize' }), /currentStage.*latest.*receipt/i)
+  })
+})
+
+test('rejects a recomputed rules hash when contracts or rule content are incomplete', async (t) => {
+  await t.test('empty contracts', async (t) => {
+    const runDir = await tempRun(t)
+    await mutateJson(runDir, 'rules.json', (rules) => {
+      rules.contracts = []
+      rules.contentHash = ruleSetHash(rules)
+    })
+    await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'preflight' }), /contracts.*non-empty/i)
+  })
+  await t.test('empty rule content', async (t) => {
+    const runDir = await tempRun(t)
+    await mutateJson(runDir, 'rules.json', (rules) => {
+      rules.rules[0].content = ''
+      rules.rules[0].hash = hash('')
+      rules.contentHash = ruleSetHash(rules)
+    })
+    await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'preflight' }), /rules\/0\/content.*non-empty/i)
+  })
+})
+
+test('rejects forbidden fields in every pinned non-artifact document', async (t) => {
+  for (const name of ['run-request.json', 'create-run-response.json', 'definition.json', 'receipts.json']) {
+    await t.test(name, async (t) => {
+      const runDir = await tempRun(t)
+      await mutateJson(runDir, name, (value) => {
+        const target = Array.isArray(value) ? value[0] : value
+        target.nested = { provider: 'forbidden' }
+      })
+      const index = Array.isArray(await json(path.join(runDir, name))) ? '/0' : ''
+      await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'preflight' }), new RegExp(`/${name.replace('.', '\\.')}${index}/nested/provider`))
+    })
+  }
 })

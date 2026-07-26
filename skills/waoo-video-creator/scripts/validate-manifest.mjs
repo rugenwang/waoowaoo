@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { lstat, readFile } from 'node:fs/promises'
+import { lstat, readFile, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -26,6 +26,10 @@ function sha256Prefixed(value) {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
 }
 
+function normalizeSourceText(value) {
+  return String(value).replace(/\r\n?/g, '\n').trim()
+}
+
 function without(value, keys) {
   return Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)))
 }
@@ -47,6 +51,15 @@ async function readJson(runDir, name) {
   }
 }
 
+async function maybeReadJson(runDir, name) {
+  try {
+    return JSON.parse(await readFile(path.join(runDir, name), 'utf8'))
+  } catch (error) {
+    if (error.code === 'ENOENT') return undefined
+    fail(`/${name}`, `invalid JSON: ${error.message}`)
+  }
+}
+
 function loadAjv(projectRoot) {
   try {
     const requireFromProject = createRequire(path.resolve(projectRoot, 'package.json'))
@@ -58,17 +71,24 @@ function loadAjv(projectRoot) {
 
 function validateRules(rules) {
   if (rules?.schemaVersion !== 1 || !rules.ruleSetVersion || !SHA256_PATTERN.test(rules.contentHash ?? '')) fail('/rules.json', 'rules snapshot is incomplete')
+  if (!Array.isArray(rules.rules) || rules.rules.length === 0) fail('/rules.json/rules', 'must be a non-empty array')
   for (const [index, rule] of (rules.rules ?? []).entries()) {
+    if (typeof rule.content !== 'string' || !rule.content.trim()) fail(`/rules.json/rules/${index}/content`, 'must be non-empty', rule.id)
     if (!rule.id || sha256Prefixed(rule.content) !== rule.hash) fail(`/rules.json/rules/${index}/hash`, 'rule content hash mismatch', rule.id)
   }
   if (sha256Prefixed(without(rules, ['contentHash', 'contractsData'])) !== rules.contentHash) fail('/rules.json/contentHash', 'rule set content hash mismatch')
+  if (!Array.isArray(rules.contracts) || rules.contracts.length === 0) fail('/rules.json/contracts', 'must be a non-empty array')
+  const contractIds = new Set()
   for (const [index, contract] of (rules.contracts ?? []).entries()) {
     const downloaded = rules.contractsData?.[contract.id]
+    if (typeof contract.id !== 'string' || !contract.id || !SHA256_PATTERN.test(contract.hash ?? '') || contractIds.has(contract.id)) fail(`/rules.json/contracts/${index}`, 'id and hash must be complete and unique', contract.id)
+    contractIds.add(contract.id)
     if (!downloaded) fail(`/rules.json/contracts/${index}`, 'contract snapshot is missing', contract.id)
-    if (downloaded.id !== contract.id || downloaded.hash !== contract.hash || sha256Prefixed(downloaded.jsonSchema) !== contract.hash) {
+    if (!downloaded.jsonSchema || typeof downloaded.jsonSchema !== 'object' || downloaded.id !== contract.id || downloaded.hash !== contract.hash || sha256Prefixed(downloaded.jsonSchema) !== contract.hash) {
       fail(`/rules.json/contracts/${index}/hash`, 'contract hash mismatch', contract.id)
     }
   }
+  if (!rules.contractsData || Object.keys(rules.contractsData).length !== contractIds.size || Object.keys(rules.contractsData).some((id) => !contractIds.has(id))) fail('/rules.json/contractsData', 'must exactly match complete contracts')
 }
 
 function same(left, right) {
@@ -102,13 +122,16 @@ function validateFormalManifest(manifest, request, response, rules, sourceText, 
   }
   if (!same(manifest.episodeMap, responseEpisodeMap(response))) fail('/manifest.json/episodeMap', 'does not match create-run response')
   if (manifest.ruleSetVersion !== rules.ruleSetVersion || manifest.ruleSetHash !== rules.contentHash) fail('/manifest.json/ruleSetHash', 'does not match rules.json')
-  if (manifest.sourceHash !== sha256Prefixed(String(sourceText).replace(/\r\n?/g, '\n').trim())) fail('/manifest.json/sourceHash', 'does not match source.md')
+  if (manifest.sourceHash !== sha256Prefixed(normalizeSourceText(sourceText))) fail('/manifest.json/sourceHash', 'does not match source.md')
   for (const key of ['sourceHash', 'runFingerprint', 'ruleSetVersion', 'ruleSetHash', 'effectiveOptions']) {
     if (!same(manifest[key], request[key])) fail(`/manifest.json/${key}`, 'does not match run-request.json')
   }
   if (!same(manifest.episodeDefinitions, request.episodes)) fail('/manifest.json/episodeDefinitions', 'does not match run-request episodes')
   if (!Array.isArray(definitions)) fail('/definition.json', 'must be an array')
   const pinnedDefinitions = definitions.map((definition) => {
+    if (!definition || typeof definition !== 'object' || typeof definition.sourceText !== 'string' || !SHA256_PATTERN.test(definition.sourceHash ?? '') || sha256Prefixed(normalizeSourceText(definition.sourceText)) !== definition.sourceHash) {
+      fail('/definition.json/sourceHash', 'does not match normalized sourceText', definition?.episodeKey)
+    }
     const pinned = { ...definition }
     delete pinned.sourceText
     return pinned
@@ -122,6 +145,7 @@ function validateFormalManifest(manifest, request, response, rules, sourceText, 
     const latest = latestStateReceipt(receipts)
     if (!latest || latest.sequence !== applied) fail('/manifest.json/clientState/serverStateAppliedSeq', 'is not proven by the latest receipt')
     if (manifest.status !== latest.receipt.data.status) fail('/manifest.json/status', `does not match latest ${latest.kind} receipt`)
+    if (latest.receipt.data.currentStage !== undefined && manifest.currentStage !== latest.receipt.data.currentStage) fail('/manifest.json/currentStage', `does not match latest ${latest.kind} receipt`)
   } else if (manifest.status !== response.status || manifest.currentStage !== response.status) {
     fail('/manifest.json/status', 'is not backed by create-run-response.json')
   }
@@ -243,11 +267,26 @@ async function validateImages(runDir, manifest, receipts) {
     for (const key of ['targetType', 'targetKey', 'variantIndex', 'contentSha256', 'localPath']) if (image[key] === undefined) fail(`${pointer}/${key}`, 'required field is missing')
     if (!SHA256_PATTERN.test(image.contentSha256)) fail(`${pointer}/contentSha256`, 'must be sha256')
     const filePath = path.resolve(runDir, image.localPath)
-    if (filePath !== runDir && !filePath.startsWith(`${runDir}${path.sep}`)) fail(`${pointer}/localPath`, 'image path escapes outside run directory', image.targetKey)
+    const relativePath = path.relative(runDir, filePath)
+    if (!relativePath || relativePath.startsWith(`..${path.sep}`) || relativePath === '..' || path.isAbsolute(relativePath)) fail(`${pointer}/localPath`, 'image path escapes outside run directory', image.targetKey)
     let stat
-    try { stat = await lstat(filePath) } catch { fail(`${pointer}/localPath`, 'image file is missing', image.targetKey) }
-    if (stat.isSymbolicLink()) fail(`${pointer}/localPath`, 'image path must not be a symlink', image.targetKey)
+    let currentPath = runDir
+    try {
+      const rootStat = await lstat(currentPath)
+      if (rootStat.isSymbolicLink()) fail(`${pointer}/localPath`, 'run directory must not be a symlink', image.targetKey)
+      for (const segment of relativePath.split(path.sep)) {
+        currentPath = path.join(currentPath, segment)
+        stat = await lstat(currentPath)
+        if (stat.isSymbolicLink()) fail(`${pointer}/localPath`, 'image path must not contain a symlink', image.targetKey)
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith(`${pointer}/localPath:`)) throw error
+      fail(`${pointer}/localPath`, 'image file is missing', image.targetKey)
+    }
     if (!stat.isFile()) fail(`${pointer}/localPath`, 'image path must be a regular file', image.targetKey)
+    const [realRunDir, realFilePath] = await Promise.all([realpath(runDir), realpath(filePath)])
+    const realRelativePath = path.relative(realRunDir, realFilePath)
+    if (!realRelativePath || realRelativePath.startsWith(`..${path.sep}`) || realRelativePath === '..' || path.isAbsolute(realRelativePath)) fail(`${pointer}/localPath`, 'resolved image path escapes outside run directory', image.targetKey)
     if (sha256Prefixed(await readFile(filePath)) !== image.contentSha256) fail(`${pointer}/contentSha256`, 'does not match image bytes', image.targetKey)
     const identity = { targetType: image.targetType, targetKey: image.targetKey, variantIndex: image.variantIndex, contentSha256: image.contentSha256 }
     const receipt = receipts.uploads?.[canonicalJson(identity)]
@@ -285,19 +324,25 @@ export async function validateManifest({ projectRoot, runDir, stage }) {
   const resolvedRunDir = path.resolve(runDir)
   if (!STAGES.includes(stage)) fail('/stage', `must be one of ${STAGES.join(', ')}`)
   const Ajv = loadAjv(resolvedProjectRoot)
-  const [manifest, rules, request, response, sourceText, definitions, receipts] = await Promise.all([
+  const [manifest, rules, request, response, sourceText, definitions, receipts, ...existingArtifactValues] = await Promise.all([
     readJson(resolvedRunDir, 'manifest.json'), readJson(resolvedRunDir, 'rules.json'), readJson(resolvedRunDir, 'run-request.json'),
     readJson(resolvedRunDir, 'create-run-response.json'), readFile(path.join(resolvedRunDir, 'source.md'), 'utf8'), readJson(resolvedRunDir, 'definition.json'), readJson(resolvedRunDir, 'receipts.json'),
+    ...STAGE_FILES.map(([, file]) => maybeReadJson(resolvedRunDir, file)),
   ])
-  validateRules(rules)
-  validateFormalManifest(manifest, request, response, rules, sourceText, definitions, receipts)
   validateForbidden(manifest, '/manifest.json')
   validateForbidden(rules, '/rules.json')
+  validateForbidden(request, '/run-request.json')
+  validateForbidden(response, '/create-run-response.json')
+  validateForbidden(definitions, '/definition.json')
+  validateForbidden(receipts, '/receipts.json')
+  const existingArtifacts = Object.fromEntries(STAGE_FILES.map(([, file], index) => [file, existingArtifactValues[index]]))
+  for (const [file, aggregate] of Object.entries(existingArtifacts)) if (aggregate !== undefined) validateForbidden(aggregate, `/${file}`)
+  validateRules(rules)
+  validateFormalManifest(manifest, request, response, rules, sourceText, definitions, receipts)
   const artifacts = {}
   for (const [requiredStage, file, contractId] of STAGE_FILES) {
     if (!stageAtLeast(stage, requiredStage)) continue
-    const aggregate = await readJson(resolvedRunDir, file)
-    validateForbidden(aggregate, `/${file}`)
+    const aggregate = existingArtifacts[file] ?? await readJson(resolvedRunDir, file)
     artifacts[requiredStage === 'story' ? 'stories' : requiredStage] = aggregate
     if (requiredStage === 'assets') validateArtifact(Ajv, rules, contractId, aggregate, `/${file}`)
     else for (const [episodeKey, artifact] of Object.entries(aggregate)) {
