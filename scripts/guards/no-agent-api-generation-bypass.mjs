@@ -29,6 +29,10 @@ const IMPORT_PREFIXES = [
   '@/lib/workers',
   '@/lib/run-runtime',
   '@/lib/config-service',
+  '@/lib/task',
+  '@/lib/task-queue',
+  '@/lib/ai-runtime',
+  '@/lib/llm-observe',
 ]
 
 const PROTECTED_PRISMA_MODELS = [
@@ -175,6 +179,22 @@ function protectedPrismaWritePattern() {
   )
 }
 
+function protectedDelegateAliasPattern() {
+  const models = PROTECTED_PRISMA_MODELS.join('|')
+  return new RegExp(
+    `\\b(?:const|let|var)\\s+[A-Za-z_$][\\w$]*\\s*=\\s*([A-Za-z_$][\\w$]*)\\s*\\.\\s*(${models})\\b`,
+    'g',
+  )
+}
+
+function protectedBracketDelegatePattern() {
+  const models = PROTECTED_PRISMA_MODELS.join('|')
+  return new RegExp(
+    `\\b([A-Za-z_$][\\w$]*)\\s*\\[\\s*(['\"])(${models})\\2\\s*\\]`,
+    'g',
+  )
+}
+
 export function inspectAgentGenerationBypass(file, content) {
   const normalizedFile = normalizeRepoPath(file)
   if (!isAgentSource(normalizedFile)) return []
@@ -205,6 +225,20 @@ export function inspectAgentGenerationBypass(file, content) {
       file: normalizedFile,
       line: lineForOffset(content, match.index),
       token: `${match[1]}.${match[2]}.${match[3]}`,
+    })
+  }
+  for (const match of codeOnly.matchAll(protectedDelegateAliasPattern())) {
+    violations.push({
+      file: normalizedFile,
+      line: lineForOffset(content, match.index),
+      token: `${match[1]}.${match[2]}`,
+    })
+  }
+  for (const match of withoutComments.matchAll(protectedBracketDelegatePattern())) {
+    violations.push({
+      file: normalizedFile,
+      line: lineForOffset(content, match.index),
+      token: `${match[1]}['${match[3]}']`,
     })
   }
   const rawWriteMatch = /\$executeRaw(?:Unsafe)?\b/.exec(codeOnly)

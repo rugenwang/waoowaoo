@@ -628,6 +628,7 @@ async function commitCharacters(
           description: appearance.visualDescription,
           descriptions: JSON.stringify([appearance.visualDescription]),
           imageUrls: JSON.stringify(['']),
+          previousImageUrls: JSON.stringify([]),
         },
         select: {
           id: true,

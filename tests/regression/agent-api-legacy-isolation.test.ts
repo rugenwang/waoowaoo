@@ -14,11 +14,13 @@ import {
 
 const legacyAuthMock = vi.hoisted(() => ({
   requireUserAuth: vi.fn(),
+  requireProjectAuth: vi.fn(),
   requireProjectAuthLight: vi.fn(),
 }))
 
 vi.mock('@/lib/api-auth', () => ({
   requireUserAuth: legacyAuthMock.requireUserAuth,
+  requireProjectAuth: legacyAuthMock.requireProjectAuth,
   requireProjectAuthLight: legacyAuthMock.requireProjectAuthLight,
   isErrorResponse: (value: unknown) => value instanceof Response,
 }))
@@ -131,12 +133,39 @@ async function generationSideEffectCounts() {
   return { tasks, taskEvents, graphRuns, usageCosts }
 }
 
+export function assertIsolatedAgentTestDatabase(databaseUrl: string | undefined) {
+  let parsed: URL
+  try {
+    parsed = new URL(databaseUrl ?? '')
+  } catch {
+    throw new Error('Refusing to reset: DATABASE_URL is not the isolated Agent test database')
+  }
+  if (
+    parsed.protocol !== 'mysql:'
+    || parsed.hostname !== '127.0.0.1'
+    || parsed.port !== '3307'
+    || parsed.pathname !== '/waoowaoo_test'
+  ) {
+    throw new Error('Refusing to reset: DATABASE_URL is not the isolated Agent test database')
+  }
+}
+
+export async function resetIsolatedAgentTestState(
+  databaseUrl = process.env.DATABASE_URL,
+  reset: () => Promise<void> = resetSystemState,
+) {
+  assertIsolatedAgentTestDatabase(databaseUrl)
+  await reset()
+}
+
 describe('Agent API legacy isolation regression', () => {
   beforeEach(async () => {
-    await resetSystemState()
+    await resetIsolatedAgentTestState()
     legacyAuthMock.requireUserAuth.mockReset()
+    legacyAuthMock.requireProjectAuth.mockReset()
     legacyAuthMock.requireProjectAuthLight.mockReset()
     legacyAuthMock.requireUserAuth.mockResolvedValue(unauthorized())
+    legacyAuthMock.requireProjectAuth.mockResolvedValue(unauthorized())
     legacyAuthMock.requireProjectAuthLight.mockResolvedValue(unauthorized())
   })
 
@@ -172,6 +201,21 @@ describe('Agent API legacy isolation regression', () => {
     expect(novelResponse.status).toBe(401)
     expect(legacyAuthMock.requireUserAuth).toHaveBeenCalledTimes(1)
     expect(legacyAuthMock.requireProjectAuthLight).toHaveBeenCalledWith('project-1')
+  })
+
+  it.each([
+    ['localhost alias', 'mysql://root:secret@localhost:3307/waoowaoo_test'],
+    ['production port', 'mysql://root:secret@127.0.0.1:3306/waoowaoo_test'],
+    ['production database', 'mysql://root:secret@127.0.0.1:3307/waoowaoo'],
+    ['non-MySQL protocol', 'postgresql://root:secret@127.0.0.1:3307/waoowaoo_test'],
+    ['malformed URL', 'not-a-database-url'],
+  ])('rejects a non-isolated DATABASE_URL (%s) before invoking any reset callback', async (_case, databaseUrl) => {
+    const reset = vi.fn(async () => undefined)
+    await expect(resetIsolatedAgentTestState(
+      databaseUrl,
+      reset,
+    )).rejects.toThrow('isolated Agent test database')
+    expect(reset).not.toHaveBeenCalled()
   })
 
   it('commits a full data-only creation fixture without touching tasks, costs, workers or legacy prompts', async () => {
@@ -228,6 +272,7 @@ describe('Agent API legacy isolation regression', () => {
       runBody.runFingerprint,
     )
     const runId = runResult.data.runId as string
+    const episodeId = (runResult.data.episodes as Array<{ episodeId: string }>)[0].episodeId
 
     const storyData: StoryCommitRequest['data'] = {
       episodeKey: 'episode-001',
@@ -429,6 +474,72 @@ describe('Agent API legacy isolation regression', () => {
 
     expect(await generationSideEffectCounts()).toEqual(beforeCounts)
     expect(legacySurfaceSnapshot()).toEqual(legacyBefore)
+
+    const novelProject = await prisma.novelPromotionProject.findUniqueOrThrow({
+      where: { projectId: project.id },
+      select: { id: true },
+    })
+    const legacyAuthResult = {
+      session: { user: { id: user.id } },
+      project: { id: project.id, userId: user.id },
+    }
+    legacyAuthMock.requireProjectAuthLight.mockResolvedValue(legacyAuthResult)
+    legacyAuthMock.requireProjectAuth.mockResolvedValue({
+      ...legacyAuthResult,
+      novelData: { id: novelProject.id },
+    })
+
+    const { GET: episodesGet } = await import('@/app/api/novel-promotion/[projectId]/episodes/route')
+    const { GET: assetsGet } = await import('@/app/api/novel-promotion/[projectId]/assets/route')
+    const { GET: storyboardsGet } = await import('@/app/api/novel-promotion/[projectId]/storyboards/route')
+    const routeContext = { params: Promise.resolve({ projectId: project.id }) }
+    const [episodesResponse, assetsResponse, storyboardsResponse] = await Promise.all([
+      episodesGet(new NextRequest(
+        `http://localhost/api/novel-promotion/${project.id}/episodes`,
+      ), routeContext),
+      assetsGet(new NextRequest(
+        `http://localhost/api/novel-promotion/${project.id}/assets`,
+      ), routeContext),
+      storyboardsGet(new NextRequest(
+        `http://localhost/api/novel-promotion/${project.id}/storyboards?episodeId=${episodeId}`,
+      ), routeContext),
+    ])
+    expect([
+      episodesResponse.status,
+      assetsResponse.status,
+      storyboardsResponse.status,
+    ]).toEqual([200, 200, 200])
+    const episodesPayload = await episodesResponse.json() as {
+      episodes: Array<{ name: string; novelText: string }>
+    }
+    const assetsPayload = await assetsResponse.json() as {
+      characters: Array<{ name: string }>
+      locations: Array<{ name: string }>
+      props: Array<{ name: string }>
+    }
+    const storyboardsPayload = await storyboardsResponse.json() as {
+      storyboards: Array<{
+        panels: Array<{
+          description: string
+          videoUrl: string | null
+          frames: Array<{ imagePrompt: string }>
+        }>
+      }>
+    }
+    expect(episodesPayload.episodes[0]).toMatchObject({
+      name: '第一集',
+      novelText: NOVEL_TEXT,
+    })
+    expect(assetsPayload.characters.map((entry) => entry.name)).toContain('林晓')
+    expect(assetsPayload.locations.map((entry) => entry.name)).toContain('新闻编辑室')
+    expect(assetsPayload.props.map((entry) => entry.name)).toContain('银色发夹')
+    expect(storyboardsPayload.storyboards[0].panels[0]).toMatchObject({
+      description: '林晓在冷光下端详发夹',
+      videoUrl: null,
+    })
+    expect(storyboardsPayload.storyboards[0].panels[0].frames[0]).toMatchObject({
+      imagePrompt: '冷色编辑室中，短发女记者端详银色发夹',
+    })
 
     const pageModel = await prisma.project.findUniqueOrThrow({
       where: { id: project.id },

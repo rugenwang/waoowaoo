@@ -17,6 +17,10 @@ describe('no Agent API generation bypass guard', () => {
     ['worker import', "import { worker } from '@/lib/workers/image.worker'", '@/lib/workers'],
     ['run runtime import', "import { runtime } from '@/lib/run-runtime'", '@/lib/run-runtime'],
     ['config service import', "import { config } from '@/lib/config-service'", '@/lib/config-service'],
+    ['task module import', "import { addTaskJob } from '@/lib/task/queues'", '@/lib/task'],
+    ['task queue import', "import { schedule } from '@/lib/task-queue/scheduler'", '@/lib/task-queue'],
+    ['AI runtime import', "import { execute } from '@/lib/ai-runtime'", '@/lib/ai-runtime'],
+    ['LLM observe import', "import { observe } from '@/lib/llm-observe/route-task'", '@/lib/llm-observe'],
     ['LLM key access', 'const key = config.llmApiKey', 'llmApiKey'],
     ['Fal key access', 'const key = config.falApiKey', 'falApiKey'],
     ['Google AI key access', 'const key = config.googleAiKey', 'googleAiKey'],
@@ -30,13 +34,13 @@ describe('no Agent API generation bypass guard', () => {
     expect(inspectAgentGenerationBypass(
       'src/lib/agent-api/services/bad-service.ts',
       `const safe = true\n${content}\n`,
-    )).toEqual([
+    )).toEqual(expect.arrayContaining([
       expect.objectContaining({
         file: 'src/lib/agent-api/services/bad-service.ts',
         line: 2,
         token,
       }),
-    ])
+    ]))
   })
 
   it('allows Prisma reads, storage, Sharp and prompt-only rule loading', () => {
@@ -99,6 +103,20 @@ describe('no Agent API generation bypass guard', () => {
     ])
   })
 
+  it.each([
+    ['prisma alias', 'const delegate = prisma.task\nawait delegate.create({ data: {} })', 'prisma.task'],
+    ['transaction alias', 'const taskStore = tx.taskEvent\nawait taskStore.update({ where: {} })', 'tx.taskEvent'],
+    ['bracket delegate', "await prisma['graphRun'].create({ data: {} })", "prisma['graphRun']"],
+    ['bracket read', "await db['usageCost'].findMany({})", "db['usageCost']"],
+  ])('blocks protected delegate bypass through %s', (_name, content, token) => {
+    expect(inspectAgentGenerationBypass(
+      'src/lib/agent-api/services/delegate-bypass.ts',
+      content,
+    )).toEqual([
+      expect.objectContaining({ token }),
+    ])
+  })
+
   it('ignores protected write syntax that appears only in comments or strings', () => {
     const content = `
       // await prisma.task.create({ data: {} })
@@ -107,6 +125,9 @@ describe('no Agent API generation bypass guard', () => {
       const template = \`prisma.taskEvent.upsert({ where: {} })\`
       const packageExample = '@/lib/llm/chat'
       const helperExample = 'submitTask(input)'
+      // const hidden = prisma.task
+      const safeTransaction = prisma.$transaction
+      const taskRows = await db.task.findMany({})
     `
     expect(inspectAgentGenerationBypass(
       'src/lib/agent-api/services/documented-example.ts',
