@@ -36,6 +36,12 @@ const envFor = (baseUrl) => ({
   WAOO_AGENT_USER_ID: 'user-1',
 })
 
+function deferred() {
+  let resolve
+  const promise = new Promise((done) => { resolve = done })
+  return { promise, resolve }
+}
+
 async function pathExistsForTest(target) {
   try {
     await readFile(target)
@@ -814,6 +820,117 @@ test('concurrent receipt updates keep every key and file locks recover stale loc
   await writeFile(lockPath, '{"token":"live"}')
   await assert.rejects(runCli(['snapshot', ...common], { env }), /lock.*timeout/i)
   await rm(lockPath, { force: true })
+})
+
+test('late run reads cannot roll a completed or higher-stage manifest backward', async (t) => {
+  const root = await tempProject(t)
+  const sourceHash = 'sha256:' + 'b'.repeat(64)
+  const runFingerprint = 'sha256:' + 'c'.repeat(64)
+  const ruleSetHash = 'sha256:' + 'd'.repeat(64)
+  const assetHash = 'sha256:' + 'e'.repeat(64)
+  const createdRun = (runId) => ({
+    runId,
+    projectId: 'project-1',
+    status: 'created',
+    currentStage: 'created',
+    sourceHash,
+    runFingerprint,
+    ruleSetVersion: 'v1',
+    ruleSetHash,
+    episodes: [],
+  })
+  const writeRun = async (runId) => {
+    const runDir = path.join(root, `.waoo-agent/runs/${runId}`)
+    await mkdir(runDir, { recursive: true })
+    await atomicWriteJson(path.join(runDir, 'manifest.json'), {
+      manifestVersion: 1,
+      ...createdRun(runId),
+    })
+    await atomicWriteJson(path.join(runDir, 'receipts.json'), {
+      receiptVersion: 1,
+      runId,
+      projectId: 'project-1',
+      artifacts: { assets: { artifactHash: assetHash }, stories: {}, screenplays: {}, storyboards: {} },
+      uploads: {},
+    })
+    return runDir
+  }
+
+  const runOneReadStarted = deferred()
+  const releaseRunOneRead = deferred()
+  const runTwoReadStarted = deferred()
+  const releaseRunTwoRead = deferred()
+  let runTwoReads = 0
+  const completedAt = '2026-07-26T10:00:00.000Z'
+  const mock = await startMockWaooServer(async (request) => {
+    const success = (data, requestId) => ({ body: { success: true, requestId, data } })
+    if (request.url === '/api/agent/v1/runs/run-1' && request.method === 'GET') {
+      runOneReadStarted.resolve()
+      await releaseRunOneRead.promise
+      return success(createdRun('run-1'), 'stale-created')
+    }
+    if (request.url === '/api/agent/v1/runs/run-1/finalize') {
+      return success({ runId: 'run-1', status: 'completed', completedAt, counts: {} }, 'finalized')
+    }
+    if (request.url === '/api/agent/v1/runs/run-1/snapshot') {
+      return success({ runId: 'run-1', status: 'incomplete', committedArtifactHashes: { stories: {}, screenplays: {}, storyboards: {} }, uploads: [], missing: [{ code: 'FRAME_IMAGE_MISSING', targetType: 'panel-frame', targetKey: 'frame-1', message: 'missing' }] }, 'later-incomplete')
+    }
+    if (request.url === '/api/agent/v1/runs/run-2' && request.method === 'GET') {
+      runTwoReads += 1
+      if (runTwoReads === 1) {
+        runTwoReadStarted.resolve()
+        await releaseRunTwoRead.promise
+        return success(createdRun('run-2'), 'older-created')
+      }
+      return success({ ...createdRun('run-2'), status: 'storyboards_committed', currentStage: 'storyboards_committed' }, 'newer-storyboards')
+    }
+    throw new Error(`unexpected request: ${request.method} ${request.url}`)
+  })
+  t.after(mock.close)
+  const env = envFor(mock.baseUrl)
+
+  const runOneDir = await writeRun('run-1')
+  const runOneCommon = ['--project-root', root, '--run-id', 'run-1', '--run-dir', runOneDir]
+  const staleRunOneRead = runCli(['get-run', ...runOneCommon], { env })
+  await runOneReadStarted.promise
+  await runCli(['finalize', ...runOneCommon], { env })
+  releaseRunOneRead.resolve()
+  await staleRunOneRead
+  const completedManifest = await readJson(path.join(runOneDir, 'manifest.json'))
+  assert.deepEqual(
+    { status: completedManifest.status, currentStage: completedManifest.currentStage, completedAt: completedManifest.completedAt },
+    { status: 'completed', currentStage: 'completed', completedAt },
+  )
+  const completedReceipts = await readJson(path.join(runOneDir, 'receipts.json'))
+  assert.equal(completedReceipts.finalize.data.status, 'completed')
+  assert.equal(completedReceipts.serverRun.data.status, 'created')
+  assert.equal(completedReceipts.artifacts.assets.artifactHash, assetHash)
+
+  await runCli(['snapshot', ...runOneCommon], { env })
+  const laterIncompleteManifest = await readJson(path.join(runOneDir, 'manifest.json'))
+  assert.deepEqual(
+    {
+      status: laterIncompleteManifest.status,
+      currentStage: laterIncompleteManifest.currentStage,
+      completedAt: laterIncompleteManifest.completedAt,
+      requestSeq: laterIncompleteManifest.clientState.serverStateRequestSeq,
+      appliedSeq: laterIncompleteManifest.clientState.serverStateAppliedSeq,
+    },
+    { status: 'incomplete', currentStage: 'completed', completedAt, requestSeq: 3, appliedSeq: 3 },
+  )
+
+  const runTwoDir = await writeRun('run-2')
+  const runTwoCommon = ['--project-root', root, '--run-id', 'run-2', '--run-dir', runTwoDir]
+  const staleRunTwoRead = runCli(['get-run', ...runTwoCommon], { env })
+  await runTwoReadStarted.promise
+  await runCli(['get-run', ...runTwoCommon], { env })
+  releaseRunTwoRead.resolve()
+  await staleRunTwoRead
+  const higherManifest = await readJson(path.join(runTwoDir, 'manifest.json'))
+  assert.deepEqual(
+    { status: higherManifest.status, currentStage: higherManifest.currentStage },
+    { status: 'storyboards_committed', currentStage: 'storyboards_committed' },
+  )
 })
 
 test('retry policy covers network, 5xx and retryable failures but not ordinary 4xx', async (t) => {

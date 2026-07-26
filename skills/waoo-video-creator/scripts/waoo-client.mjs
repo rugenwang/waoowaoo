@@ -917,13 +917,38 @@ async function loadBoundManifest(projectRoot, runDir, runId) {
   return validateManifestRunId(await readJson(path.join(runDir, 'manifest.json')), runId)
 }
 
-async function updateManifest(projectRoot, runDir, current, patch) {
+function serverStateSequence(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0
+}
+
+async function reserveServerStateRequest(projectRoot, runDir, current) {
   const manifestPath = path.join(runDir, 'manifest.json')
   return withFileLock(projectRoot, manifestPath, async () => {
     await secureWriteTarget(projectRoot, manifestPath)
     const latest = await readJson(manifestPath)
     if (latest.runId !== current.runId || latest.projectId !== current.projectId) throw new Error('manifest identity changed while waiting for lock')
-    const updated = { ...latest, ...patch }
+    const clientState = { ...(latest.clientState ?? {}) }
+    const requestSeq = serverStateSequence(clientState.serverStateRequestSeq) + 1
+    clientState.serverStateRequestSeq = requestSeq
+    clientState.serverStateAppliedSeq = serverStateSequence(clientState.serverStateAppliedSeq)
+    const updated = { ...latest, clientState }
+    await atomicWriteProjectJson(projectRoot, manifestPath, updated)
+    return requestSeq
+  })
+}
+
+async function updateManifest(projectRoot, runDir, current, patch, requestSeq) {
+  const manifestPath = path.join(runDir, 'manifest.json')
+  return withFileLock(projectRoot, manifestPath, async () => {
+    await secureWriteTarget(projectRoot, manifestPath)
+    const latest = await readJson(manifestPath)
+    if (latest.runId !== current.runId || latest.projectId !== current.projectId) throw new Error('manifest identity changed while waiting for lock')
+    const clientState = { ...(latest.clientState ?? {}) }
+    const appliedSeq = serverStateSequence(clientState.serverStateAppliedSeq)
+    if (requestSeq < appliedSeq) return latest
+    clientState.serverStateRequestSeq = Math.max(serverStateSequence(clientState.serverStateRequestSeq), requestSeq)
+    clientState.serverStateAppliedSeq = requestSeq
+    const updated = { ...latest, ...patch, clientState }
     await atomicWriteProjectJson(projectRoot, manifestPath, updated)
     return updated
   })
@@ -934,10 +959,15 @@ async function commandGetRun(config, projectRoot, options) {
   assertSafeIdentifier('runId', runId)
   const runDir = insideProject(projectRoot, required(options, 'run-dir'))
   const manifest = await loadBoundManifest(projectRoot, runDir, runId)
+  const requestSeq = await reserveServerStateRequest(projectRoot, runDir, manifest)
   const server = await requestJson(config, endpoint('runs', runId))
   validateRunPins(manifest, server)
-  await saveReceipt(projectRoot, runDir, manifest, (receipts) => { receipts.serverRun = { data: server, receivedAt: new Date().toISOString() } })
-  await updateManifest(projectRoot, runDir, manifest, { status: server.status, currentStage: server.currentStage })
+  await saveReceipt(projectRoot, runDir, manifest, (receipts) => {
+    if (requestSeq >= serverStateSequence(receipts.serverRun?.serverStateRequestSeq)) {
+      receipts.serverRun = { data: server, receivedAt: new Date().toISOString(), serverStateRequestSeq: requestSeq }
+    }
+  })
+  await updateManifest(projectRoot, runDir, manifest, { status: server.status, currentStage: server.currentStage }, requestSeq)
   return server
 }
 
@@ -1046,10 +1076,15 @@ async function commandSnapshot(config, projectRoot, options) {
   assertSafeIdentifier('runId', runId)
   const runDir = insideProject(projectRoot, required(options, 'run-dir'))
   const manifest = await loadBoundManifest(projectRoot, runDir, runId)
+  const requestSeq = await reserveServerStateRequest(projectRoot, runDir, manifest)
   const envelope = await requestJson(config, endpoint('runs', runId, 'snapshot'), { returnEnvelope: true })
   if (envelope.data?.runId !== runId) throw new Error('snapshot response runId mismatch')
-  await saveReceipt(projectRoot, runDir, manifest, (receipts) => { receipts.snapshot = { data: envelope.data, requestId: envelope.requestId, receivedAt: new Date().toISOString() } })
-  await updateManifest(projectRoot, runDir, manifest, { status: envelope.data.status })
+  await saveReceipt(projectRoot, runDir, manifest, (receipts) => {
+    if (requestSeq >= serverStateSequence(receipts.snapshot?.serverStateRequestSeq)) {
+      receipts.snapshot = { data: envelope.data, requestId: envelope.requestId, receivedAt: new Date().toISOString(), serverStateRequestSeq: requestSeq }
+    }
+  })
+  await updateManifest(projectRoot, runDir, manifest, { status: envelope.data.status }, requestSeq)
   return envelope.data
 }
 
@@ -1079,11 +1114,12 @@ async function commandFinalize(config, projectRoot, options) {
       storyboards: receiptHashMap(receipts.artifacts?.storyboards),
     },
   }
+  const requestSeq = await reserveServerStateRequest(projectRoot, runDir, manifest)
   const idempotencyKey = sha256Prefixed(body)
   const envelope = await requestJson(config, endpoint('runs', runId, 'finalize'), { method: 'POST', body, idempotencyKey, returnEnvelope: true })
   if (envelope.data?.runId !== runId || envelope.data?.status !== COMPLETE_STATUS) throw new Error('finalize response runId/status mismatch')
-  await saveReceipt(projectRoot, runDir, manifest, (current) => { current.finalize = { expected: body.expected, data: envelope.data, requestId: envelope.requestId, finalizedAt: new Date().toISOString() } })
-  await updateManifest(projectRoot, runDir, manifest, { status: COMPLETE_STATUS, currentStage: COMPLETE_STATUS, completedAt: envelope.data.completedAt })
+  await saveReceipt(projectRoot, runDir, manifest, (current) => { current.finalize = { expected: body.expected, data: envelope.data, requestId: envelope.requestId, finalizedAt: new Date().toISOString(), serverStateRequestSeq: requestSeq } })
+  await updateManifest(projectRoot, runDir, manifest, { status: COMPLETE_STATUS, currentStage: COMPLETE_STATUS, completedAt: envelope.data.completedAt }, requestSeq)
   return envelope.data
 }
 
