@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -51,6 +53,18 @@ async function pathExistsForTest(target) {
     if (error.code === 'ENOENT') return false
     throw error
   }
+}
+
+async function runNode(args, env) {
+  const child = spawn(process.execPath, args, { env, stdio: ['ignore', 'pipe', 'pipe'] })
+  let stdout = ''
+  let stderr = ''
+  child.stdout.setEncoding('utf8')
+  child.stderr.setEncoding('utf8')
+  child.stdout.on('data', (chunk) => { stdout += chunk })
+  child.stderr.on('data', (chunk) => { stderr += chunk })
+  const [code] = await once(child, 'close')
+  return { code, stdout, stderr }
 }
 
 async function writeRulesSnapshot(root, version, content = version) {
@@ -248,13 +262,33 @@ test('requestJson never follows redirects, including to an external or non-agent
 })
 
 test('failure metadata and CLI-safe errors redact token and user id from every field', async (t) => {
-  const mock = await startMockWaooServer(() => ({ status: 422, body: { success: false, requestId: 'user-1', error: { code: 'top-secret-token', message: 'top-secret-token user-1', field: '/top-secret-token/user-1', retryable: false } } }))
+  const root = await tempProject(t)
+  const details = {
+    'top-secret-token': 'top-secret-token user-1',
+    'user-1': 'Bearer top-secret-token',
+    nested: [{ 'Bearer top-secret-token': { 'user-1': 'top-secret-token' } }],
+  }
+  const mock = await startMockWaooServer(() => ({ status: 422, body: { success: false, requestId: 'user-1', error: { code: 'top-secret-token', message: 'top-secret-token user-1', field: '/top-secret-token/user-1', retryable: false, details } } }))
   t.after(mock.close)
   const config = resolveConfig(envFor(mock.baseUrl), { retries: 0 })
   await assert.rejects(requestJson(config, '/api/agent/v1/contracts/x'), (error) => {
-    const serialized = JSON.stringify({ message: error.message, code: error.code, field: error.field, requestId: error.requestId })
-    return !serialized.includes('top-secret-token') && !serialized.includes('user-1')
+    const serialized = JSON.stringify({ message: error.message, code: error.code, field: error.field, requestId: error.requestId, details: error.details })
+    return !serialized.includes('top-secret-token')
+      && !serialized.includes('user-1')
+      && Object.keys(error.details ?? {}).length === 3
+      && Object.hasOwn(error.details ?? {}, '[REDACTED]')
+      && Object.hasOwn(error.details ?? {}, '[REDACTED]#2')
+      && Object.keys(error.details?.nested?.[0] ?? {}).length === 1
   })
+  const cli = await runNode([
+    path.join(REPO_ROOT, 'skills/waoo-video-creator/scripts/waoo-client.mjs'),
+    'doctor', '--project-root', root,
+  ], { ...process.env, ...envFor(mock.baseUrl) })
+  assert.notEqual(cli.code, 0)
+  assert.equal(cli.stdout, '')
+  assert.ok(cli.stderr.includes('"details"'))
+  assert.equal(cli.stderr.includes('top-secret-token'), false)
+  assert.equal(cli.stderr.includes('user-1'), false)
 })
 
 test('successful response data is returned byte-for-byte semantically unchanged even when it contains credential text', async (t) => {

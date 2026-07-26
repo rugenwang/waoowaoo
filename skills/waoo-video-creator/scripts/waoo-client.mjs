@@ -113,7 +113,15 @@ function sanitizeErrorDetails(value, ...secrets) {
   if (value === null || typeof value === 'number' || typeof value === 'boolean') return value
   if (Array.isArray(value)) return value.map((entry) => sanitizeErrorDetails(entry, ...secrets))
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, sanitizeErrorDetails(entry, ...secrets)]))
+    const usedKeys = new Set()
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => {
+      const baseKey = sanitizeMessage(key, ...secrets)
+      let safeKey = baseKey
+      let suffix = 2
+      while (usedKeys.has(safeKey)) safeKey = `${baseKey}#${suffix++}`
+      usedKeys.add(safeKey)
+      return [safeKey, sanitizeErrorDetails(entry, ...secrets)]
+    }))
   }
   return undefined
 }
