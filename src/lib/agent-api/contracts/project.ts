@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { ART_STYLES, ASPECT_RATIO_CONFIGS } from '@/lib/constants'
+
 import {
   createSuccessSchema,
   DescriptionSchema,
@@ -15,10 +17,28 @@ import {
   UrlSchema,
 } from './common'
 
+const InitialVideoRatioSchema = z.enum(
+  Object.keys(ASPECT_RATIO_CONFIGS) as [string, ...string[]],
+)
+const InitialArtStyleSchema = z.enum(
+  ART_STYLES.map((style) => style.value) as [string, ...string[]],
+)
+
 export const ResolveProjectRequestSchema = z.object({
   name: NameSchema,
   description: IntroductionSchema.optional(),
-}).strict()
+  initialVideoRatio: InitialVideoRatioSchema.optional(),
+  initialArtStyle: InitialArtStyleSchema.optional(),
+}).strict().superRefine((value, context) => {
+  const hasRatio = value.initialVideoRatio !== undefined
+  const hasStyle = value.initialArtStyle !== undefined
+  if (hasRatio === hasStyle) return
+  context.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: 'initialVideoRatio and initialArtStyle must be provided together',
+    path: hasRatio ? ['initialArtStyle'] : ['initialVideoRatio'],
+  })
+})
 
 export const ResolveProjectResponseSchema = createSuccessSchema(z.object({
   projectId: IdSchema,

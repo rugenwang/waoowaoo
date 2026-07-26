@@ -288,6 +288,50 @@ describe('resolveCreatorProject', () => {
       }),
     })
   })
+
+  it('uses a complete initial visual-settings pair for a newly created project', async () => {
+    txMock.userPreference.findUnique.mockResolvedValue({
+      videoRatio: '9:16',
+      artStyle: 'realistic',
+    })
+
+    await resolveCreatorProject({
+      userId: 'user-1',
+      name: 'Exact Project',
+      initialVideoRatio: '16:9',
+      initialArtStyle: 'chinese-xianxia',
+    })
+
+    expect(txMock.novelPromotionProject.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: 'project-created',
+        videoRatio: '16:9',
+        artStyle: 'chinese-xianxia',
+      }),
+    })
+  })
+
+  it('returns an exact existing project without writing initial visual settings', async () => {
+    txMock.project.findMany.mockResolvedValue([
+      { id: 'existing-project', name: 'Exact Project' },
+    ])
+
+    await expect(resolveCreatorProject({
+      userId: 'user-1',
+      name: 'Exact Project',
+      initialVideoRatio: '16:9',
+      initialArtStyle: 'chinese-xianxia',
+    })).resolves.toEqual({
+      projectId: 'existing-project',
+      name: 'Exact Project',
+      created: false,
+    })
+
+    expect(txMock.userPreference.findUnique).not.toHaveBeenCalled()
+    expect(txMock.novelPromotionProject.create).not.toHaveBeenCalled()
+    expect(txMock.novelPromotionProject.update).not.toHaveBeenCalled()
+    expect(txMock.novelPromotionProject.updateMany).not.toHaveBeenCalled()
+  })
 })
 
 describe('POST /api/agent/v1/projects/resolve', () => {
@@ -336,6 +380,30 @@ describe('POST /api/agent/v1/projects/resolve', () => {
         created: true,
       },
     })
+  })
+
+  it('accepts only a complete valid initial visual-settings pair', async () => {
+    const valid = {
+      name: 'Exact Project',
+      initialVideoRatio: '16:9',
+      initialArtStyle: 'chinese-xianxia',
+    }
+    const validResponse = await POST(
+      routeRequest(valid, resolveProjectIdempotencyKey(valid.name, valid)),
+      { params: Promise.resolve({}) },
+    )
+    expect(validResponse.status).toBe(200)
+
+    for (const body of [
+      { name: 'Exact Project', initialVideoRatio: '16:9' },
+      { name: 'Exact Project', initialArtStyle: 'chinese-xianxia' },
+      { name: 'Exact Project', initialVideoRatio: 'unknown', initialArtStyle: 'chinese-xianxia' },
+      { name: 'Exact Project', initialVideoRatio: '16:9', initialArtStyle: 'unknown' },
+    ]) {
+      const response = await POST(routeRequest(body), { params: Promise.resolve({}) })
+      expect(response.status).toBe(400)
+      expect((await response.json()).error.code).toBe('CONTRACT_INVALID')
+    }
   })
 
   it.each([

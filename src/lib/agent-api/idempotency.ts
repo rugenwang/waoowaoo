@@ -39,8 +39,31 @@ export function requireIdempotencyKey(
   return key
 }
 
-export function resolveProjectIdempotencyKey(normalizedName: string): string {
-  return sha256Prefixed(`resolve-project:${normalizedName.trim()}`)
+export type ResolveProjectInitialVisualSettings = {
+  description?: string
+  initialVideoRatio?: string
+  initialArtStyle?: string
+}
+
+export function resolveProjectIdempotencyKey(
+  normalizedName: string,
+  initialSettings: ResolveProjectInitialVisualSettings = {},
+): string {
+  const name = normalizedName.trim()
+  const { initialVideoRatio, initialArtStyle } = initialSettings
+  if (initialVideoRatio === undefined && initialArtStyle === undefined) {
+    return sha256Prefixed(`resolve-project:${name}`)
+  }
+  if (initialVideoRatio === undefined || initialArtStyle === undefined) {
+    throw new TypeError('initialVideoRatio and initialArtStyle must be provided together')
+  }
+  const description = initialSettings.description?.trim()
+  return sha256Prefixed(canonicalJson({
+    name,
+    ...(description ? { description } : {}),
+    initialVideoRatio,
+    initialArtStyle,
+  }))
 }
 
 export function uploadIdempotencyKey(input: UploadIdempotencyInput): string {

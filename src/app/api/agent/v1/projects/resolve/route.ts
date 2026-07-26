@@ -16,13 +16,15 @@ export const POST = agentRoute(async (request, _context, requestId) => {
   const body = await parseAgentJson(request, ResolveProjectRequestSchema)
   requireIdempotencyKey(
     request,
-    resolveProjectIdempotencyKey(body.name),
+    resolveProjectIdempotencyKey(body.name, body),
   )
 
   const data = await resolveCreatorProject({
     userId: auth.userId,
     name: body.name,
     description: body.description,
+    initialVideoRatio: body.initialVideoRatio,
+    initialArtStyle: body.initialArtStyle,
   })
   return agentSuccess(requestId, data)
 })

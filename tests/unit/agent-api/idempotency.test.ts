@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { sha256Prefixed } from '@/lib/agent-api/canonical-json'
+import { canonicalJson, sha256Prefixed } from '@/lib/agent-api/canonical-json'
 import {
   finalizeIdempotencyKey,
   requireIdempotencyKey,
@@ -59,6 +59,19 @@ describe('Agent API idempotency materials', () => {
     expect(resolveProjectIdempotencyKey('  Demo Project  ')).toBe(
       sha256Prefixed('resolve-project:Demo Project'),
     )
+  })
+
+  it('hashes a complete initial visual-settings pair with the shared canonical material', () => {
+    expect(resolveProjectIdempotencyKey('  Demo Project  ', {
+      description: '  A new project  ',
+      initialVideoRatio: '16:9',
+      initialArtStyle: 'chinese-xianxia',
+    })).toBe(sha256Prefixed(canonicalJson({
+      name: 'Demo Project',
+      description: 'A new project',
+      initialVideoRatio: '16:9',
+      initialArtStyle: 'chinese-xianxia',
+    })))
   })
 
   it('uses the caller-computed runFingerprint and artifactHash without rehashing', () => {

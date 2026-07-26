@@ -34,6 +34,8 @@ export type ResolveCreatorProjectInput = {
   userId: string
   name: string
   description?: string
+  initialVideoRatio?: string
+  initialArtStyle?: string
 }
 
 export type ResolveCreatorProjectResult = {
@@ -100,6 +102,10 @@ export async function resolveCreatorProject(
           artStyle: isArtStyleValue(userPreference.artStyle)
             ? userPreference.artStyle
             : 'american-comic',
+        }),
+        ...(input.initialVideoRatio && input.initialArtStyle && {
+          videoRatio: input.initialVideoRatio,
+          artStyle: input.initialArtStyle,
         }),
       },
     })
