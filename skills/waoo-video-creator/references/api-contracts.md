@@ -24,6 +24,7 @@ WAOO_PROJECT_ROOT=/absolute/path/to/waoowaoo
 | `fetch-rules` | `GET /api/agent/v1/projects/{projectId}/creator-rules` | 下载完整规则包 |
 | `fetch-rules` | `GET /api/agent/v1/contracts/{contractId}` | 下载规则包列出的 contract |
 | `create-run` | `POST /api/agent/v1/projects/{projectId}/runs` | 创建或按 fingerprint 恢复运行 |
+| `set-visual-bible` | 无 HTTP | 仅在正式 run 内校验、原子写入并固定 `visual-bible.json` 与 manifest hash |
 | `get-run` | `GET /api/agent/v1/runs/{runId}` | 读取服务端运行状态 |
 | `commit-assets` | `PUT /api/agent/v1/runs/{runId}/assets` | 提交资产 Artifact |
 | `commit-story` | `PUT /api/agent/v1/runs/{runId}/episodes/{episodeKey}/story` | 提交单集故事 |
@@ -34,6 +35,8 @@ WAOO_PROJECT_ROOT=/absolute/path/to/waoowaoo
 | `finalize` | `POST /api/agent/v1/runs/{runId}/finalize` | 校验并完成运行 |
 
 `find-local-run` 仅扫描本地；不发送请求。规范 shape 必须从上述 contract 下载，本文不手抄 Schema。
+
+`set-visual-bible --run-dir --visual-bible-file` 只读取 formal run 内的本地 JSON；要求完整的 manifest/rules pins，拒绝模型、provider、API key、task、video 或 audio 字段，canonical hash 后在 manifest lock 内写入。它不读取凭证、不建 HTTP 请求、不调用 WAOO 模型。`--art-style-override`、`--video-ratio-override` 与 `--episode-split-hint` 等 client flags 仅用于高级手动/恢复；`$waoo-video-creator` skill 绝不向用户索取或使用这些 flags。
 
 ## 信封、幂等与 dry-run
 

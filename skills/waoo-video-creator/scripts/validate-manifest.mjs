@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url'
 
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/
 const STAGES = ['preflight', 'story', 'assets', 'screenplay', 'storyboards', 'images', 'finalize']
+const VISUAL_BIBLE_REQUIRED_FIELDS = ['artStyle', 'colorPalette', 'videoRatio', 'eraRegion', 'negativeConstraints']
+const VISUAL_BIBLE_OPTIONAL_FIELDS = new Set(['characterAppearanceGuidance', 'locationGuidance', 'propGuidance', 'continuityNotes', 'shotLanguage', 'lighting', 'composition', 'referenceBindings'])
 const STAGE_FILES = [
   ['story', 'story.json', 'waoo-agent-story.v1'],
   ['assets', 'assets.json', 'waoo-agent-assets.v1'],
@@ -169,6 +171,35 @@ function validateForbidden(value, pointer = '') {
     if (/^(model|provider|apiKey|task|tasks|video|audio|videoTasks?|audioTasks?)$/i.test(key)) fail(`${pointer}/${key}`, 'forbidden generation field')
     validateForbidden(entry, `${pointer}/${key}`)
   }
+}
+
+function validateVisualBibleValue(value, pointer, key) {
+  if (typeof value === 'string' && value.trim()) return
+  if (Array.isArray(value) && value.length > 0 && value.every((entry) => typeof entry === 'string' && entry.trim())) return
+  fail(`${pointer}/${key}`, 'must be a nonempty string or string array')
+}
+
+function validateVisualBibleShape(bible, pointer) {
+  if (!bible || typeof bible !== 'object' || Array.isArray(bible) || Object.keys(bible).length === 0) fail(pointer, 'must be a nonempty object')
+  for (const key of VISUAL_BIBLE_REQUIRED_FIELDS) {
+    if (!(key in bible)) fail(`${pointer}/${key}`, 'required field is missing')
+    validateVisualBibleValue(bible[key], pointer, key)
+  }
+  for (const key of Object.keys(bible)) {
+    if (!VISUAL_BIBLE_REQUIRED_FIELDS.includes(key) && !VISUAL_BIBLE_OPTIONAL_FIELDS.has(key)) fail(`${pointer}/${key}`, 'is not an allowed visual bible field')
+  }
+}
+
+async function validateVisualBiblePin(runDir, manifest) {
+  const manifestPointer = '/manifest.json/visualBible'
+  if (!SHA256_PATTERN.test(manifest.visualBibleHash ?? '')) fail('/manifest.json/visualBibleHash', 'must be a sha256 hash')
+  validateForbidden(manifest.visualBible, manifestPointer)
+  validateVisualBibleShape(manifest.visualBible, manifestPointer)
+  const bible = await readJson(runDir, 'visual-bible.json')
+  validateForbidden(bible, '/visual-bible.json')
+  validateVisualBibleShape(bible, '/visual-bible.json')
+  if (manifest.visualBibleHash !== sha256Prefixed(bible)) fail('/manifest.json/visualBibleHash', 'does not match visual-bible.json')
+  if (!same(manifest.visualBible, bible)) fail(manifestPointer, 'does not match visual-bible.json')
 }
 
 function validateArtifact(Ajv, rules, contractId, artifact, pointer) {
@@ -362,7 +393,10 @@ export async function validateManifest({ projectRoot, runDir, stage }) {
     }
   }
   if (stageAtLeast(stage, 'storyboards')) validateArtifactGraphs({ assets: artifacts.assets, screenplay: artifacts.screenplay, storyboards: artifacts.storyboards })
-  if (stageAtLeast(stage, 'images')) await validateImages(resolvedRunDir, manifest, receipts)
+  if (stageAtLeast(stage, 'images')) {
+    await validateVisualBiblePin(resolvedRunDir, manifest)
+    await validateImages(resolvedRunDir, manifest, receipts)
+  }
   if (stage === 'finalize') validateReceipts(manifest, receipts, artifacts)
   return { message: 'manifest valid' }
 }

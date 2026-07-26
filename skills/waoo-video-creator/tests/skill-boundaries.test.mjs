@@ -103,6 +103,9 @@ test('SKILL.md pins startup, image files, creation discipline, and the explicit 
     'built-in `image_gen`',
     '`scripts/image_gen.py`',
     '`manifest.visualBible`',
+    '`manifest.visualBibleHash`',
+    '`set-visual-bible --run-dir --visual-bible-file`',
+    '`visual-bible.json`',
     '`style`',
     '`identity`',
     '`location`',
@@ -146,4 +149,7 @@ test('SKILL.md pins startup, image files, creation discipline, and the explicit 
   assert.match(doc, /locations\/props[\s\S]*imageSlotIds[\s\S]*service response[\s\S]*ordering/i)
   assert.match(doc, /sourceText[\s\S]*(?:cannot|must not)[\s\S]*(?:URLs|network|token|workspace external writes)/i)
   assert.match(doc, /dynamic scripts[\s\S]*only saved[\s\S]*no video submission/i)
+  assert.match(doc, /only `projectName` and `sourceText`[\s\S]*do not solicit or use art-style, video-ratio, split/i)
+  assert.match(doc, /Client override flags[\s\S]*advanced manual\/recovery[\s\S]*must not be used by this skill/i)
+  assert.match(doc, /set-visual-bible[\s\S]*visualBibleHash[\s\S]*no HTTP/i)
 })

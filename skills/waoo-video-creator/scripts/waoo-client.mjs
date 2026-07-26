@@ -21,6 +21,9 @@ const API_ROOT = '/api/agent/v1'
 const DEFAULT_BASE_URL = 'http://127.0.0.1:3000'
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/
 const COMPLETE_STATUS = 'completed'
+const VISUAL_BIBLE_REQUIRED_FIELDS = ['artStyle', 'colorPalette', 'videoRatio', 'eraRegion', 'negativeConstraints']
+const VISUAL_BIBLE_OPTIONAL_FIELDS = new Set(['characterAppearanceGuidance', 'locationGuidance', 'propGuidance', 'continuityNotes', 'shotLanguage', 'lighting', 'composition', 'referenceBindings'])
+const FORBIDDEN_GENERATION_FIELD = /^(model|provider|apiKey|task|tasks|video|audio|videoTasks?|audioTasks?)$/i
 
 function compareUnicodeCodePoints(left, right) {
   const leftPoints = Array.from(left, (character) => character.codePointAt(0))
@@ -66,6 +69,36 @@ export function sha256Prefixed(value) {
 
 export function normalizeSourceText(value) {
   return String(value).replace(/\r\n?/g, '\n').trim()
+}
+
+function assertNonemptyVisualBibleValue(key, value) {
+  if (typeof value === 'string' && value.trim()) return
+  if (Array.isArray(value) && value.length > 0 && value.every((entry) => typeof entry === 'string' && entry.trim())) return
+  throw new Error(`visual bible ${key} must be a nonempty string or string array`)
+}
+
+function rejectForbiddenGenerationFields(value, pointer = 'visual bible') {
+  if (Array.isArray(value)) return value.forEach((entry, index) => rejectForbiddenGenerationFields(entry, `${pointer}/${index}`))
+  if (!value || typeof value !== 'object') return
+  for (const [key, entry] of Object.entries(value)) {
+    if (FORBIDDEN_GENERATION_FIELD.test(key)) throw new Error(`${pointer}/${key} is a forbidden generation field`)
+    rejectForbiddenGenerationFields(entry, `${pointer}/${key}`)
+  }
+}
+
+export function validateVisualBible(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('visual bible must be a nonempty JSON object')
+  const keys = Object.keys(value)
+  if (keys.length === 0) throw new Error('visual bible must be a nonempty JSON object')
+  for (const key of VISUAL_BIBLE_REQUIRED_FIELDS) {
+    if (!(key in value)) throw new Error(`visual bible ${key} is required`)
+    assertNonemptyVisualBibleValue(key, value[key])
+  }
+  for (const key of keys) {
+    if (!VISUAL_BIBLE_REQUIRED_FIELDS.includes(key) && !VISUAL_BIBLE_OPTIONAL_FIELDS.has(key)) throw new Error(`visual bible ${key} is not an allowed field`)
+  }
+  rejectForbiddenGenerationFields(value)
+  return value
 }
 
 function sanitizeMessage(message, ...secrets) {
@@ -917,6 +950,53 @@ async function loadBoundManifest(projectRoot, runDir, runId) {
   return validateManifestRunId(await readJson(path.join(runDir, 'manifest.json')), runId)
 }
 
+async function assertFormalRunPath(projectRoot, runDir, runId) {
+  const formalRunDir = safeChildPath(path.join(projectRoot, '.waoo-agent', 'runs'), 'runId', runId)
+  if (await realpath(runDir) !== await realpath(formalRunDir)) throw new Error('run-dir must be inside the formal run directory')
+}
+
+async function commandSetVisualBible(projectRoot, options) {
+  const runDir = insideProject(projectRoot, required(options, 'run-dir'))
+  await secureReadPath(projectRoot, runDir, { regularFile: false })
+  await secureReadPath(projectRoot, path.join(runDir, 'manifest.json'))
+  const manifest = validateManifestRunId(await readJson(path.join(runDir, 'manifest.json')), path.basename(runDir))
+  await assertFormalRunPath(projectRoot, runDir, manifest.runId)
+  if (manifest.manifestVersion !== 1 || manifest.schemaVersion !== 1 || !manifest.ruleSetVersion || !SHA256_PATTERN.test(manifest.ruleSetHash ?? '')) {
+    throw new Error('formal run manifest and pins are required before setting visual bible')
+  }
+  const rulesPath = path.join(runDir, 'rules.json')
+  await secureReadPath(projectRoot, rulesPath)
+  const rules = validateRuleSnapshot(await readJson(rulesPath))
+  if (rules.ruleSetVersion !== manifest.ruleSetVersion || rules.contentHash !== manifest.ruleSetHash) throw new Error('formal run rules.json does not match manifest pins')
+
+  const inputPath = insideProject(projectRoot, required(options, 'visual-bible-file'))
+  const inputRelative = path.relative(runDir, inputPath)
+  if (!inputRelative || inputRelative.startsWith(`..${path.sep}`) || inputRelative === '..' || path.isAbsolute(inputRelative)) {
+    throw new Error('visual-bible-file must be inside the formal run directory')
+  }
+  await secureReadPath(projectRoot, inputPath)
+  const bible = validateVisualBible(await readJson(inputPath))
+  const visualBibleHash = sha256Prefixed(bible)
+  const manifestPath = path.join(runDir, 'manifest.json')
+  const outputPath = path.join(runDir, 'visual-bible.json')
+
+  return withFileLock(projectRoot, manifestPath, async () => {
+    await secureWriteTarget(projectRoot, manifestPath)
+    const latest = validateManifestRunId(await readJson(manifestPath), manifest.runId)
+    if (latest.ruleSetVersion !== manifest.ruleSetVersion || latest.ruleSetHash !== manifest.ruleSetHash) throw new Error('manifest pins changed while waiting for visual bible lock')
+    if (latest.visualBibleHash && latest.visualBibleHash !== visualBibleHash) throw new Error('visual bible is already pinned with a different hash')
+    if (latest.visualBible && Object.keys(latest.visualBible).length > 0 && !sameCanonical(latest.visualBible, bible)) throw new Error('visual bible is already pinned with different content')
+    if (await pathExists(outputPath)) {
+      await secureReadPath(projectRoot, outputPath)
+      if (!sameCanonical(validateVisualBible(await readJson(outputPath)), bible)) throw new Error('visual-bible.json is already pinned with different content')
+    } else {
+      await atomicWriteProjectJson(projectRoot, outputPath, bible)
+    }
+    await atomicWriteProjectJson(projectRoot, manifestPath, { ...latest, visualBible: bible, visualBibleHash })
+    return { runId: latest.runId, visualBibleHash, visualBiblePath: outputPath }
+  })
+}
+
 function serverStateSequenceOrNull(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : null
 }
@@ -1180,6 +1260,7 @@ async function runCliUnsafe(argv = process.argv.slice(2), context = {}) {
     case 'fetch-rules': result = await commandFetchRules(config, projectRoot, options); break
     case 'find-local-run': result = await commandFindLocalRun(projectRoot, options); break
     case 'create-run': result = await commandCreateRun(config, projectRoot, options); break
+    case 'set-visual-bible': result = await commandSetVisualBible(projectRoot, options); break
     case 'get-run': result = await commandGetRun(config, projectRoot, options); break
     case 'commit-story':
     case 'commit-assets':

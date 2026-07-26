@@ -23,6 +23,8 @@ test('reference 文档定义受限的 Agent API 与运行时规则边界', async
   assert.match(docs['api-contracts.md'], /dry-run[\s\S]*--commit/i)
   assert.match(docs['api-contracts.md'], /幂等|Idempotency-Key/i)
   assert.match(docs['api-contracts.md'], /rules\.json[\s\S]*(权威|唯一规则源)/i)
+  assert.match(docs['api-contracts.md'], /set-visual-bible[\s\S]*(manifest|hash)[\s\S]*(无 HTTP|不建 HTTP)/i)
+  assert.match(docs['api-contracts.md'], /art-style-override[\s\S]*(高级手动|恢复)[\s\S]*skill/i)
   for (const command of ['doctor', 'resolve-project', 'fetch-rules', 'find-local-run', 'create-run', 'get-run', 'commit-story', 'commit-assets', 'commit-screenplay', 'commit-storyboards', 'upload', 'snapshot', 'finalize']) {
     assert.match(docs['api-contracts.md'], new RegExp(command), `缺少命令 ${command}`)
   }
@@ -46,6 +48,8 @@ test('pipeline 固定阶段、恢复候选与 Artifact 引用规则', async () =
   for (const stage of ['阶段 0', '阶段 1', '阶段 2', '阶段 3', '阶段 4', '阶段 5', '阶段 6']) assert.match(pipeline, new RegExp(stage))
   assert.match(pipeline, /阶段 0[\s\S]*(分集|episode split)[\s\S]*(名称|name)[\s\S]*(简介|description)/i)
   assert.match(pipeline, /正式 run[\s\S]*intake[\s\S]*(当前规则|fetch-rules)/i)
+  assert.match(pipeline, /projectName\/sourceText[\s\S]*(不向用户索取|不.*使用)[\s\S]*(art-style|video-ratio|split)/i)
+  assert.match(pipeline, /set-visual-bible[\s\S]*visual-bible\.json[\s\S]*hash/i)
   assert.match(pipeline, /pending-create[\s\S]*(原样重放[\s\S]*run-request\.json|run-request\.json[\s\S]*(完全相同|原样重放))/i)
   assert.match(pipeline, /多个候选|歧义[\s\S]*停止/i)
   assert.match(pipeline, /pinned rules|固定规则[\s\S]*(不可变|不覆盖)/i)

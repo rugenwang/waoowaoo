@@ -61,6 +61,97 @@ async function writeRulesSnapshot(root, version, content = version) {
   return file
 }
 
+async function pinnedFormalRun(t) {
+  const root = await tempProject(t)
+  const runDir = path.join(root, '.waoo-agent/runs/run-visual-bible')
+  await mkdir(runDir, { recursive: true })
+  const rulesFile = await writeRulesSnapshot(root, 'v1', 'visual-bible-rules')
+  const rules = await readJson(rulesFile)
+  await atomicWriteJson(path.join(runDir, 'rules.json'), rules)
+  await atomicWriteJson(path.join(runDir, 'manifest.json'), {
+    manifestVersion: 1,
+    schemaVersion: 1,
+    runId: 'run-visual-bible',
+    projectId: 'project-1',
+    ruleSetVersion: rules.ruleSetVersion,
+    ruleSetHash: rules.contentHash,
+    visualBible: {},
+    images: {},
+  })
+  return { root, runDir }
+}
+
+function visualBible() {
+  return {
+    artStyle: 'ink wash',
+    colorPalette: ['indigo', 'vermilion'],
+    videoRatio: '16:9',
+    eraRegion: 'Tang-inspired Chang’an',
+    negativeConstraints: ['no watermark', 'no text'],
+  }
+}
+
+test('set-visual-bible pins a canonical local bible without HTTP and serializes concurrent same-content calls', async (t) => {
+  const { root, runDir } = await pinnedFormalRun(t)
+  const input = path.join(runDir, 'visual-bible-input.json')
+  const bible = visualBible()
+  await atomicWriteJson(input, bible)
+  const originalFetch = globalThis.fetch
+  let fetchCalled = false
+  globalThis.fetch = async () => { fetchCalled = true; throw new Error('set-visual-bible must not use HTTP') }
+  t.after(() => { globalThis.fetch = originalFetch })
+
+  const args = ['set-visual-bible', '--project-root', root, '--run-dir', runDir, '--visual-bible-file', input]
+  const [first, second] = await Promise.all([runCli(args), runCli(args)])
+  const pinned = await readJson(path.join(runDir, 'visual-bible.json'))
+  const manifest = await readJson(path.join(runDir, 'manifest.json'))
+  assert.equal(fetchCalled, false)
+  assert.deepEqual(pinned, bible)
+  assert.equal(first.visualBibleHash, sha256Prefixed(bible))
+  assert.equal(second.visualBibleHash, sha256Prefixed(bible))
+  assert.equal(first.visualBiblePath, path.join(runDir, 'visual-bible.json'))
+  assert.deepEqual(manifest.visualBible, bible)
+  assert.equal(manifest.visualBibleHash, sha256Prefixed(bible))
+  assert.equal(await pathExistsForTest(path.join(runDir, 'manifest.json.lock')), false)
+})
+
+test('set-visual-bible rejects incomplete, forbidden, unsafe, and unpinned inputs before writing', async (t) => {
+  await t.test('invalid schema', async (t) => {
+    const { root, runDir } = await pinnedFormalRun(t)
+    const input = path.join(runDir, 'invalid.json')
+    await atomicWriteJson(input, { artStyle: 'ink' })
+    await assert.rejects(runCli(['set-visual-bible', '--project-root', root, '--run-dir', runDir, '--visual-bible-file', input]), /colorPalette|visual bible/i)
+    assert.equal(await pathExistsForTest(path.join(runDir, 'visual-bible.json')), false)
+  })
+  await t.test('forbidden recursive field', async (t) => {
+    const { root, runDir } = await pinnedFormalRun(t)
+    const input = path.join(runDir, 'forbidden.json')
+    await atomicWriteJson(input, { ...visualBible(), continuityNotes: { provider: 'forbidden' } })
+    await assert.rejects(runCli(['set-visual-bible', '--project-root', root, '--run-dir', runDir, '--visual-bible-file', input]), /provider.*forbidden/i)
+  })
+  await t.test('outside formal run', async (t) => {
+    const { root, runDir } = await pinnedFormalRun(t)
+    const input = path.join(root, 'outside.json')
+    await atomicWriteJson(input, visualBible())
+    await assert.rejects(runCli(['set-visual-bible', '--project-root', root, '--run-dir', runDir, '--visual-bible-file', input]), /inside.*formal run|outside/i)
+  })
+  await t.test('symlinked input', async (t) => {
+    const { root, runDir } = await pinnedFormalRun(t)
+    const target = path.join(root, 'target.json')
+    const input = path.join(runDir, 'linked.json')
+    await atomicWriteJson(target, visualBible())
+    await symlink(target, input)
+    await assert.rejects(runCli(['set-visual-bible', '--project-root', root, '--run-dir', runDir, '--visual-bible-file', input]), /symlink/i)
+  })
+  await t.test('missing rule pin', async (t) => {
+    const { root, runDir } = await pinnedFormalRun(t)
+    const input = path.join(runDir, 'input.json')
+    await atomicWriteJson(input, visualBible())
+    await rm(path.join(runDir, 'rules.json'))
+    await assert.rejects(runCli(['set-visual-bible', '--project-root', root, '--run-dir', runDir, '--visual-bible-file', input]), /rules\.json|pin/i)
+  })
+})
+
 test('canonical JSON, source normalization, and hashes match shared backend vectors', () => {
   for (const vector of HASH_VECTORS.canonical) {
     assert.equal(canonicalJson(vector.input), vector.canonical)

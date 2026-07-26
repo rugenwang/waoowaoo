@@ -151,7 +151,9 @@ async function makeFinalizeRun(t) {
     storyboards: { 'episode-001': hash(storyboards['episode-001']) },
   }
   const manifest = await json(path.join(runDir, 'manifest.json'))
-  Object.assign(manifest, { status: 'completed', currentStage: 'completed', images, clientState: { serverStateRequestSeq: 7, serverStateAppliedSeq: 7 } })
+  const visualBible = { artStyle: 'ink wash', colorPalette: ['indigo'], videoRatio: '16:9', eraRegion: 'Tang-inspired Chang’an', negativeConstraints: ['no watermark'] }
+  await writeJson(path.join(runDir, 'visual-bible.json'), visualBible)
+  Object.assign(manifest, { status: 'completed', currentStage: 'completed', visualBible, visualBibleHash: hash(visualBible), images, clientState: { serverStateRequestSeq: 7, serverStateAppliedSeq: 7 } })
   await writeJson(path.join(runDir, 'manifest.json'), manifest)
   await writeJson(path.join(runDir, 'receipts.json'), {
     receiptVersion: 1, runId: 'run-001', projectId: 'project-001',
@@ -174,6 +176,30 @@ test('validates all artifact graphs, four image target types, receipts and final
   assert.equal((await validateManifest({ projectRoot, runDir, stage: 'finalize' })).message, 'manifest valid')
   const after = await lstat(path.join(runDir, 'manifest.json'))
   assert.equal(after.mtimeMs, before.mtimeMs)
+})
+
+test('images require a pinned canonical visual bible and reject recursive forbidden values with pointers', async (t) => {
+  const { runDir } = await makeFinalizeRun(t)
+  await rm(path.join(runDir, 'visual-bible.json'))
+  await mutateJson(runDir, 'manifest.json', (manifest) => {
+    delete manifest.visualBible
+    delete manifest.visualBibleHash
+  })
+  await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'images' }), /visualBible|visual-bible\.json/i)
+
+  const bible = { artStyle: 'ink wash', colorPalette: ['indigo'], videoRatio: '16:9', eraRegion: 'Tang-inspired Chang’an', negativeConstraints: ['no watermark'] }
+  await writeJson(path.join(runDir, 'visual-bible.json'), bible)
+  await mutateJson(runDir, 'manifest.json', (manifest) => {
+    manifest.visualBible = bible
+    manifest.visualBibleHash = hash(bible)
+  })
+  assert.equal((await validateManifest({ projectRoot, runDir, stage: 'images' })).message, 'manifest valid')
+
+  await mutateJson(runDir, 'manifest.json', (manifest) => { manifest.visualBibleHash = 'sha256:' + 'a'.repeat(64) })
+  await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'images' }), /\/manifest\.json\/visualBibleHash.*visual-bible\.json/i)
+  await mutateJson(runDir, 'manifest.json', (manifest) => { manifest.visualBibleHash = hash(bible) })
+  await mutateJson(runDir, 'visual-bible.json', (value) => { value.continuityNotes = { model: 'forbidden' } })
+  await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'images' }), /\/visual-bible\.json\/continuityNotes\/model.*forbidden/i)
 })
 
 test('rejects unresolved screenplay and storyboard references, duplicate keys and frame DAG errors', async (t) => {
