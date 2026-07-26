@@ -47,14 +47,69 @@ describe('no Agent API generation bypass guard', () => {
       import { loadCreatorRuleBundle } from '@/lib/agent-api/rules/load-rule-bundle'
 
       const [tasks, graphRuns, costs] = await Promise.all([
+        prisma.task.findUnique({ where: { id: taskId } }),
+        prisma.taskEvent.findFirst({ where: { projectId } }),
         prisma.task.findMany({ where: { projectId } }),
         prisma.graphRun.findMany({ where: { projectId } }),
         prisma.usageCost.findMany({ where: { projectId } }),
+        prisma.task.count({ where: { projectId } }),
+        prisma.taskEvent.aggregate({ _max: { id: true } }),
+        prisma.usageCost.groupBy({ by: ['projectId'] }),
       ])
     `
 
     expect(inspectAgentGenerationBypass(
       'src/lib/agent-api/services/integrity-service.ts',
+      content,
+    )).toEqual([])
+  })
+
+  it.each([
+    'create',
+    'createMany',
+    'createManyAndReturn',
+    'update',
+    'updateMany',
+    'updateManyAndReturn',
+    'upsert',
+    'delete',
+    'deleteMany',
+  ])('blocks protected generation-table %s writes for every delegate', (writeMethod) => {
+    for (const model of ['task', 'taskEvent', 'graphRun', 'usageCost']) {
+      const token = `prisma.${model}.${writeMethod}`
+      expect(inspectAgentGenerationBypass(
+        'src/lib/agent-api/services/bad-write.ts',
+        `const before = 1\nawait ${token}({ where: {} })\n`,
+      )).toEqual([
+        expect.objectContaining({
+          file: 'src/lib/agent-api/services/bad-write.ts',
+          line: 2,
+          token,
+        }),
+      ])
+    }
+  })
+
+  it('blocks raw Prisma write execution as an obvious data-only bypass', () => {
+    expect(inspectAgentGenerationBypass(
+      'src/lib/agent-api/services/raw-write.ts',
+      'await tx.$executeRaw`DELETE FROM tasks`',
+    )).toEqual([
+      expect.objectContaining({ token: '$executeRaw' }),
+    ])
+  })
+
+  it('ignores protected write syntax that appears only in comments or strings', () => {
+    const content = `
+      // await prisma.task.create({ data: {} })
+      const example = 'prisma.graphRun.update({ where: {} })'
+      /* prisma.usageCost.deleteMany({}) */
+      const template = \`prisma.taskEvent.upsert({ where: {} })\`
+      const packageExample = '@/lib/llm/chat'
+      const helperExample = 'submitTask(input)'
+    `
+    expect(inspectAgentGenerationBypass(
+      'src/lib/agent-api/services/documented-example.ts',
       content,
     )).toEqual([])
   })

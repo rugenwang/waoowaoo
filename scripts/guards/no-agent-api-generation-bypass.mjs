@@ -9,23 +9,45 @@ const AGENT_ROOTS = [
   'src/lib/agent-api',
 ]
 
-const EXACT_TOKENS = [
+const CODE_TOKENS = [
   'maybeSubmitLLMTask',
   'executeAiTextStep',
   'createTask',
   'submitTaskWithBilling',
   'submitTask',
+  'llmApiKey',
+  'falApiKey',
+  'googleAiKey',
+  'arkApiKey',
+  'qwenApiKey',
+]
+
+const IMPORT_PREFIXES = [
   '@/lib/model-gateway',
   '@/lib/llm',
   '@/lib/providers',
   '@/lib/workers',
   '@/lib/run-runtime',
   '@/lib/config-service',
-  'llmApiKey',
-  'falApiKey',
-  'googleAiKey',
-  'arkApiKey',
-  'qwenApiKey',
+]
+
+const PROTECTED_PRISMA_MODELS = [
+  'task',
+  'taskEvent',
+  'graphRun',
+  'usageCost',
+]
+
+const PRISMA_WRITE_METHODS = [
+  'create',
+  'createMany',
+  'createManyAndReturn',
+  'update',
+  'updateMany',
+  'updateManyAndReturn',
+  'upsert',
+  'delete',
+  'deleteMany',
 ]
 
 const LEGACY_ROUTE_PATTERNS = [
@@ -65,19 +87,103 @@ function lineForOffset(content, offset) {
 }
 
 function tokenPattern(token) {
-  if (token.startsWith('@/')) {
-    return new RegExp(`${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:/|['\"])`)
-  }
   return new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
+}
+
+function importPrefixPattern(prefix) {
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(
+    `(?:\\bfrom\\s*|\\bimport\\s*(?:\\(\\s*)?|\\brequire\\s*\\(\\s*)['\"]${escaped}(?:/|['\"])`,
+  )
+}
+
+function maskIgnoredSyntax(content, maskStrings) {
+  const chars = content.split('')
+  let state = 'code'
+  let escaped = false
+
+  const mask = (index) => {
+    if (chars[index] !== '\n' && chars[index] !== '\r') chars[index] = ' '
+  }
+
+  for (let index = 0; index < chars.length; index += 1) {
+    const current = chars[index]
+    const next = chars[index + 1]
+
+    if (state === 'line-comment') {
+      if (current === '\n' || current === '\r') state = 'code'
+      else mask(index)
+      continue
+    }
+    if (state === 'block-comment') {
+      if (current === '*' && next === '/') {
+        mask(index)
+        mask(index + 1)
+        index += 1
+        state = 'code'
+      } else {
+        mask(index)
+      }
+      continue
+    }
+    if (state !== 'code') {
+      const closing = state === 'single-string'
+        ? "'"
+        : state === 'double-string'
+          ? '"'
+          : '`'
+      if (maskStrings) mask(index)
+      if (escaped) {
+        escaped = false
+      } else if (current === '\\') {
+        escaped = true
+      } else if (current === closing) {
+        state = 'code'
+      }
+      continue
+    }
+
+    if (current === '/' && next === '/') {
+      mask(index)
+      mask(index + 1)
+      index += 1
+      state = 'line-comment'
+    } else if (current === '/' && next === '*') {
+      mask(index)
+      mask(index + 1)
+      index += 1
+      state = 'block-comment'
+    } else if (current === "'" || current === '"' || current === '`') {
+      state = current === "'"
+        ? 'single-string'
+        : current === '"'
+          ? 'double-string'
+          : 'template-string'
+      if (maskStrings) mask(index)
+    }
+  }
+
+  return chars.join('')
+}
+
+function protectedPrismaWritePattern() {
+  const models = PROTECTED_PRISMA_MODELS.join('|')
+  const methods = PRISMA_WRITE_METHODS.join('|')
+  return new RegExp(
+    `\\b([A-Za-z_$][\\w$]*)\\s*\\.\\s*(${models})\\s*\\.\\s*(${methods})\\s*\\(`,
+    'g',
+  )
 }
 
 export function inspectAgentGenerationBypass(file, content) {
   const normalizedFile = normalizeRepoPath(file)
   if (!isAgentSource(normalizedFile)) return []
 
+  const codeOnly = maskIgnoredSyntax(content, true)
+  const withoutComments = maskIgnoredSyntax(content, false)
   const violations = []
-  for (const token of EXACT_TOKENS) {
-    const match = tokenPattern(token).exec(content)
+  for (const token of CODE_TOKENS) {
+    const match = tokenPattern(token).exec(codeOnly)
     if (!match) continue
     violations.push({
       file: normalizedFile,
@@ -85,8 +191,32 @@ export function inspectAgentGenerationBypass(file, content) {
       token,
     })
   }
+  for (const token of IMPORT_PREFIXES) {
+    const match = importPrefixPattern(token).exec(withoutComments)
+    if (!match) continue
+    violations.push({
+      file: normalizedFile,
+      line: lineForOffset(content, match.index),
+      token,
+    })
+  }
+  for (const match of codeOnly.matchAll(protectedPrismaWritePattern())) {
+    violations.push({
+      file: normalizedFile,
+      line: lineForOffset(content, match.index),
+      token: `${match[1]}.${match[2]}.${match[3]}`,
+    })
+  }
+  const rawWriteMatch = /\$executeRaw(?:Unsafe)?\b/.exec(codeOnly)
+  if (rawWriteMatch) {
+    violations.push({
+      file: normalizedFile,
+      line: lineForOffset(content, rawWriteMatch.index),
+      token: rawWriteMatch[0],
+    })
+  }
   for (const legacyRoute of LEGACY_ROUTE_PATTERNS) {
-    const match = legacyRoute.pattern.exec(content)
+    const match = legacyRoute.pattern.exec(withoutComments)
     if (!match) continue
     violations.push({
       file: normalizedFile,
