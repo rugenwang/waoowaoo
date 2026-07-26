@@ -970,11 +970,12 @@ async function commandSetVisualBible(projectRoot, options) {
   if (rules.ruleSetVersion !== manifest.ruleSetVersion || rules.contentHash !== manifest.ruleSetHash) throw new Error('formal run rules.json does not match manifest pins')
 
   const inputPath = insideProject(projectRoot, required(options, 'visual-bible-file'))
-  const inputRelative = path.relative(runDir, inputPath)
+  await secureReadPath(projectRoot, inputPath)
+  const [canonicalRunDir, canonicalInputPath] = await Promise.all([realpath(runDir), realpath(inputPath)])
+  const inputRelative = path.relative(canonicalRunDir, canonicalInputPath)
   if (!inputRelative || inputRelative.startsWith(`..${path.sep}`) || inputRelative === '..' || path.isAbsolute(inputRelative)) {
     throw new Error('visual-bible-file must be inside the formal run directory')
   }
-  await secureReadPath(projectRoot, inputPath)
   const bible = validateVisualBible(await readJson(inputPath))
   const visualBibleHash = sha256Prefixed(bible)
   const manifestPath = path.join(runDir, 'manifest.json')

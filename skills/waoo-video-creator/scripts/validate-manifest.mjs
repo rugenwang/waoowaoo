@@ -17,10 +17,19 @@ const STAGE_FILES = [
   ['storyboards', 'storyboards.json', 'waoo-agent-storyboards.v1'],
 ]
 
+function compareUnicodeCodePoints(left, right) {
+  const leftPoints = Array.from(left, (character) => character.codePointAt(0))
+  const rightPoints = Array.from(right, (character) => character.codePointAt(0))
+  for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index += 1) {
+    if (leftPoints[index] !== rightPoints[index]) return leftPoints[index] - rightPoints[index]
+  }
+  return leftPoints.length - rightPoints.length
+}
+
 function canonicalJson(value) {
   if (value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
+  return `{${Object.keys(value).sort(compareUnicodeCodePoints).map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
 }
 
 function sha256Prefixed(value) {

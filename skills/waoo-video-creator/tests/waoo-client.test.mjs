@@ -115,6 +115,16 @@ test('set-visual-bible pins a canonical local bible without HTTP and serializes 
   assert.equal(await pathExistsForTest(path.join(runDir, 'manifest.json.lock')), false)
 })
 
+test('set-visual-bible accepts a canonical /private/var input path for an alias run directory', async (t) => {
+  const { root, runDir } = await pinnedFormalRun(t)
+  const canonicalRunDir = await realpath(runDir)
+  if (canonicalRunDir === path.resolve(runDir)) return t.skip('filesystem has no /var to /private/var alias')
+  const input = path.join(canonicalRunDir, 'canonical-alias-input.json')
+  await atomicWriteJson(input, visualBible())
+  const result = await runCli(['set-visual-bible', '--project-root', root, '--run-dir', runDir, '--visual-bible-file', input])
+  assert.equal(result.visualBibleHash, sha256Prefixed(visualBible()))
+})
+
 test('set-visual-bible rejects incomplete, forbidden, unsafe, and unpinned inputs before writing', async (t) => {
   await t.test('invalid schema', async (t) => {
     const { root, runDir } = await pinnedFormalRun(t)

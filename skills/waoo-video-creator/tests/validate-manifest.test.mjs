@@ -12,10 +12,19 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(here, '../../../..')
 const validRun = path.join(here, 'fixtures/valid-run')
 
+function compareUnicodeCodePoints(left, right) {
+  const leftPoints = Array.from(left, (character) => character.codePointAt(0))
+  const rightPoints = Array.from(right, (character) => character.codePointAt(0))
+  for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index += 1) {
+    if (leftPoints[index] !== rightPoints[index]) return leftPoints[index] - rightPoints[index]
+  }
+  return leftPoints.length - rightPoints.length
+}
+
 function canonicalJson(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
+  return `{${Object.keys(value).sort(compareUnicodeCodePoints).map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
 }
 
 function hash(value) {
@@ -195,9 +204,17 @@ test('images require a pinned canonical visual bible and reject recursive forbid
   })
   assert.equal((await validateManifest({ projectRoot, runDir, stage: 'images' })).message, 'manifest valid')
 
+  const astralBible = { ...bible, continuityNotes: { '\uE000': 'bmp', '\u{10000}': 'astral' } }
+  await writeJson(path.join(runDir, 'visual-bible.json'), astralBible)
+  await mutateJson(runDir, 'manifest.json', (manifest) => {
+    manifest.visualBible = astralBible
+    manifest.visualBibleHash = hash(astralBible)
+  })
+  assert.equal((await validateManifest({ projectRoot, runDir, stage: 'finalize' })).message, 'manifest valid')
+
   await mutateJson(runDir, 'manifest.json', (manifest) => { manifest.visualBibleHash = 'sha256:' + 'a'.repeat(64) })
   await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'images' }), /\/manifest\.json\/visualBibleHash.*visual-bible\.json/i)
-  await mutateJson(runDir, 'manifest.json', (manifest) => { manifest.visualBibleHash = hash(bible) })
+  await mutateJson(runDir, 'manifest.json', (manifest) => { manifest.visualBibleHash = hash(astralBible) })
   await mutateJson(runDir, 'visual-bible.json', (value) => { value.continuityNotes = { model: 'forbidden' } })
   await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'images' }), /\/visual-bible\.json\/continuityNotes\/model.*forbidden/i)
 })
