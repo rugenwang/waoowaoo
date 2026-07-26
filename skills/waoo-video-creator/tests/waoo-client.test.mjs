@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -79,6 +79,20 @@ test('configuration defaults to loopback and rejects missing credentials or unsa
   assert.throws(() => resolveConfig({ ...envFor('http://example.com'), WAOO_ALLOW_REMOTE_AGENT_API: 'true' }), /HTTPS/i)
 })
 
+test('configuration strictly validates all numeric limits', () => {
+  const cases = [
+    ['WAOO_HTTP_RETRIES', ['-1', '11', '1.5', 'NaN', 'Infinity']],
+    ['WAOO_HTTP_RETRY_DELAY_MS', ['-1', '60001', '1.5', 'NaN', 'Infinity']],
+    ['WAOO_HTTP_TIMEOUT_MS', ['99', '300001', '1.5', 'NaN', 'Infinity']],
+    ['WAOO_AGENT_UPLOAD_MAX_BYTES', ['0', '1073741825', '1.5', 'NaN', 'Infinity']],
+  ]
+  for (const [key, values] of cases) {
+    for (const value of values) assert.throws(() => resolveConfig({ ...envFor('http://127.0.0.1:3000'), [key]: value }), new RegExp(key))
+  }
+  const config = resolveConfig(envFor('http://127.0.0.1:3000'))
+  assert.deepEqual({ retries: config.retries, retryDelayMs: config.retryDelayMs, timeoutMs: config.timeoutMs, uploadMaxBytes: config.uploadMaxBytes }, { retries: 2, retryDelayMs: 150, timeoutMs: 30000, uploadMaxBytes: 10485760 })
+})
+
 test('request auth, envelopes, retry, stable idempotency, and redacted failures', async (t) => {
   const mock = await startMockWaooServer((request, attempt) => {
     if (request.url === '/api/agent/v1/test/retry' && attempt < 3) return { status: 503, body: { success: false, requestId: 'req-retry', error: { code: 'BUSY', message: 'try again', retryable: true } } }
@@ -111,6 +125,19 @@ test('requestJson rejects same-request credential exfiltration through absolute 
   await assert.rejects(requestJson(config, '//example.com/api/agent/v1/contracts/x'), /same-origin|origin|unsafe/i)
   await assert.rejects(requestJson(config, '/api/agent/v1/../../escape'), /Agent API path|unsafe/i)
   assert.equal(mock.requests.length, 0)
+})
+
+test('requestJson never follows redirects, including to an external or non-agent target', async (t) => {
+  const target = await startMockWaooServer(() => ({ body: { success: true, requestId: 'stolen', data: {} } }))
+  t.after(target.close)
+  const source = await startMockWaooServer((request) => ({ status: 302, headers: { location: request.url.endsWith('/external') ? `${target.baseUrl}/api/agent/v1/stolen` : '/not-agent' }, body: { success: false, requestId: 'redirect', error: { code: 'REDIRECT', message: 'redirect', retryable: false } } }))
+  t.after(source.close)
+  const config = resolveConfig(envFor(source.baseUrl), { retries: 2, retryDelayMs: 1 })
+  await assert.rejects(requestJson(config, '/api/agent/v1/test/external'), (error) => error.status === 302)
+  await assert.rejects(requestJson(config, '/api/agent/v1/test/non-agent'), (error) => error.status === 302)
+  assert.equal(source.requests.length, 2)
+  assert.equal(target.requests.length, 0)
+  assert.ok(source.requests.every((request) => request.headers.authorization === 'Bearer top-secret-token'))
 })
 
 test('failure metadata and CLI-safe errors redact token and user id from every field', async (t) => {
@@ -152,15 +179,47 @@ test('project root resolution honors explicit/env/cwd/nested order and rejects z
     await mkdir(root)
     await writeFile(path.join(root, 'package.json'), '{"name":"waoowaoo"}')
   }
-  assert.equal(await resolveProjectRoot({ explicitRoot: explicit, env: { WAOO_PROJECT_ROOT: envRoot }, cwd }), explicit)
-  assert.equal(await resolveProjectRoot({ env: { WAOO_PROJECT_ROOT: envRoot }, cwd }), envRoot)
-  assert.equal(await resolveProjectRoot({ env: {}, cwd }), cwd)
+  assert.equal(await resolveProjectRoot({ explicitRoot: explicit, env: { WAOO_PROJECT_ROOT: envRoot }, cwd }), await realpath(explicit))
+  assert.equal(await resolveProjectRoot({ env: { WAOO_PROJECT_ROOT: envRoot }, cwd }), await realpath(envRoot))
+  assert.equal(await resolveProjectRoot({ env: {}, cwd }), await realpath(cwd))
   const parent = path.join(outer, 'parent')
   await mkdir(path.join(parent, 'waoowaoo'), { recursive: true })
   await writeFile(path.join(parent, 'waoowaoo/package.json'), '{"name":"waoowaoo"}')
-  assert.equal(await resolveProjectRoot({ env: {}, cwd: parent }), path.join(parent, 'waoowaoo'))
+  assert.equal(await resolveProjectRoot({ env: {}, cwd: parent }), await realpath(path.join(parent, 'waoowaoo')))
   await assert.rejects(resolveProjectRoot({ env: {}, cwd: path.join(outer, 'missing') }), /locate/i)
   await assert.rejects(resolveProjectRoot({ explicitRoot: explicit, env: { WAOO_PROJECT_ROOT: envRoot }, cwd, strictUnique: true }), /multiple/i)
+})
+
+test('project paths reject symlink traversal for reads and write roots before HTTP', async (t) => {
+  const root = await tempProject(t)
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'waoo-outside-'))
+  t.after(() => import('node:fs/promises').then(({ rm: remove }) => remove(outside, { recursive: true, force: true })))
+  const outsideSource = path.join(outside, 'source.md')
+  const outsideArtifact = path.join(outside, 'story.json')
+  const outsideImage = path.join(outside, 'image.png')
+  await writeFile(outsideSource, 'secret source')
+  await writeFile(outsideArtifact, '{}')
+  await writeFile(outsideImage, Buffer.from([137, 80, 78, 71]))
+  const linkedSource = path.join(root, 'linked-source.md')
+  const linkedArtifact = path.join(root, 'linked-story.json')
+  const linkedImage = path.join(root, 'linked-image.png')
+  await symlink(outsideSource, linkedSource)
+  await symlink(outsideArtifact, linkedArtifact)
+  await symlink(outsideImage, linkedImage)
+  await assert.rejects(runCli(['find-local-run', '--project-root', root, '--project-id', 'project-1', '--source-file', linkedSource]), /symlink|outside project root/i)
+
+  const runDir = path.join(root, '.waoo-agent/runs/run-1')
+  await mkdir(runDir, { recursive: true })
+  await atomicWriteJson(path.join(runDir, 'manifest.json'), { manifestVersion: 1, runId: 'run-1', projectId: 'project-1', ruleSetVersion: 'v1', ruleSetHash: 'sha256:' + 'a'.repeat(64) })
+  await atomicWriteJson(path.join(runDir, 'receipts.json'), { receiptVersion: 1, runId: 'run-1', projectId: 'project-1', artifacts: {}, uploads: {} })
+  const mock = await startMockWaooServer(() => ({ body: { success: true, requestId: 'unexpected', data: {} } }))
+  t.after(mock.close)
+  await assert.rejects(runCli(['commit-assets', '--project-root', root, '--run-id', 'run-1', '--run-dir', runDir, '--artifact-file', linkedArtifact], { env: envFor(mock.baseUrl) }), /symlink|outside project root/i)
+  await assert.rejects(runCli(['upload', '--project-root', root, '--run-id', 'run-1', '--run-dir', runDir, '--file', linkedImage, '--target-type', 'character-appearance', '--target-key', 'hero.base'], { env: envFor(mock.baseUrl) }), /symlink|outside project root/i)
+  await mkdir(path.join(root, '.waoo-agent'), { recursive: true })
+  await symlink(outside, path.join(root, '.waoo-agent/preflight'))
+  await assert.rejects(runCli(['fetch-rules', '--project-root', root, '--project-id', 'project-1', '--source-hash', 'sha256:' + 'b'.repeat(64)], { env: envFor(mock.baseUrl) }), /symlink|outside project root/i)
+  assert.equal(mock.requests.length, 0)
 })
 
 test('CLI covers doctor, project/rules/run, dry-run commits, upload, snapshot and finalize', async (t) => {
@@ -511,6 +570,24 @@ test('find-local-run reports ambiguous formal and pending candidates instead of 
   assert.equal(pendingResult.status, 'ambiguous')
   assert.equal(pendingResult.candidates.length, 2)
   assert.ok(pendingResult.candidates.every((candidate) => candidate.status === 'pending-create'))
+
+  const mixedRoot = await tempProject(t)
+  const mixedSource = path.join(mixedRoot, 'source.md')
+  const mixedDefinition = path.join(mixedRoot, 'definition.json')
+  await writeFile(mixedSource, '正文')
+  await writeFile(mixedDefinition, JSON.stringify([{ episodeKey: 'episode-001', ordinal: 1, sourceText: '正文', name: '第一集' }]))
+  const mixedRules1 = await writeRulesSnapshot(mixedRoot, 'v1')
+  const mixedRules2 = await writeRulesSnapshot(mixedRoot, 'v2')
+  const mixedMock = await startMockWaooServer((request) => request.json.ruleSetVersion === 'v1'
+    ? { body: { success: true, requestId: 'created', data: { runId: 'run-formal', resumed: false, status: 'created', projectId: 'project-1', sourceHash: request.json.sourceHash, runFingerprint: request.json.runFingerprint, episodes: [{ episodeKey: 'episode-001', episodeId: 'ep-1', episodeNumber: 1, name: '第一集' }] } } }
+    : { status: 409, body: { success: false, requestId: 'pending', error: { code: 'AGENT_RULE_MISMATCH', message: 'pending', retryable: false } } })
+  t.after(mixedMock.close)
+  const mixedCommon = ['create-run', '--project-root', mixedRoot, '--project-id', 'project-1', '--source-file', mixedSource, '--definition-file', mixedDefinition]
+  await runCli([...mixedCommon, '--rules-file', mixedRules1], { env: envFor(mixedMock.baseUrl) })
+  await assert.rejects(runCli([...mixedCommon, '--rules-file', mixedRules2], { env: envFor(mixedMock.baseUrl) }))
+  const mixedResult = await runCli(['find-local-run', '--project-root', mixedRoot, '--project-id', 'project-1', '--source-file', mixedSource], { env: envFor(mixedMock.baseUrl) })
+  assert.equal(mixedResult.status, 'ambiguous')
+  assert.deepEqual(mixedResult.candidates.map((candidate) => candidate.status).sort(), ['pending-create', 'resume'])
 })
 
 test('find-local-run detects pinned formal rules and pending fingerprint tampering', async (t) => {
@@ -523,6 +600,11 @@ test('find-local-run detects pinned formal rules and pending fingerprint tamperi
   const mock = await startMockWaooServer((request) => ({ body: { success: true, requestId: 'created', data: { runId: 'run-1', resumed: false, status: 'created', projectId: 'project-1', sourceHash: request.json.sourceHash, runFingerprint: request.json.runFingerprint, episodes: [{ episodeKey: 'episode-001', episodeId: 'ep-1', episodeNumber: 1, name: '第一集' }] } } }))
   t.after(mock.close)
   const created = await runCli(['create-run', '--project-root', formalRoot, '--project-id', 'project-1', '--source-file', sourceFile, '--definition-file', definitionFile, '--rules-file', rulesFile], { env: envFor(mock.baseUrl) })
+  const formalDefinitionPath = path.join(created.runDir, 'definition.json')
+  const originalDefinitions = await readJson(formalDefinitionPath)
+  await atomicWriteJson(formalDefinitionPath, [{ ...originalDefinitions[0], sourceText: '篡改正文' }])
+  await assert.rejects(runCli(['find-local-run', '--project-root', formalRoot, '--project-id', 'project-1', '--source-file', sourceFile]), /episode sourceHash|source hash mismatch/i)
+  await atomicWriteJson(formalDefinitionPath, originalDefinitions)
   const originalManifest = await readJson(path.join(created.runDir, 'manifest.json'))
   await atomicWriteJson(path.join(created.runDir, 'manifest.json'), { ...originalManifest, runFingerprint: 'sha256:' + 'e'.repeat(64) })
   await assert.rejects(runCli(['find-local-run', '--project-root', formalRoot, '--project-id', 'project-1', '--source-file', sourceFile]), /fingerprint mismatch/)
@@ -542,6 +624,11 @@ test('find-local-run detects pinned formal rules and pending fingerprint tamperi
   t.after(pendingMock.close)
   await assert.rejects(runCli(['create-run', '--project-root', pendingRoot, '--project-id', 'project-1', '--source-file', pendingSource, '--definition-file', pendingDefinition, '--rules-file', pendingRules], { env: envFor(pendingMock.baseUrl) }))
   const [fingerprint] = await readdir(path.join(pendingRoot, '.waoo-agent/intake'))
+  const pendingDefinitionPath = path.join(pendingRoot, '.waoo-agent/intake', fingerprint, 'definition.json')
+  const originalPendingDefinitions = await readJson(pendingDefinitionPath)
+  await atomicWriteJson(pendingDefinitionPath, [{ ...originalPendingDefinitions[0], sourceText: '篡改正文' }])
+  await assert.rejects(runCli(['find-local-run', '--project-root', pendingRoot, '--project-id', 'project-1', '--source-file', pendingSource]), /episode sourceHash|source hash mismatch/i)
+  await atomicWriteJson(pendingDefinitionPath, originalPendingDefinitions)
   const requestPath = path.join(pendingRoot, '.waoo-agent/intake', fingerprint, 'run-request.json')
   const request = await readJson(requestPath)
   request.runFingerprint = 'sha256:' + 'f'.repeat(64)
@@ -656,6 +743,77 @@ test('upload network retry keeps one idempotency key and writes one receipt', as
   assert.equal(mock.requests[0].headers['idempotency-key'], mock.requests[1].headers['idempotency-key'])
   assert.equal(result.idempotencyKey, mock.requests[0].headers['idempotency-key'])
   assert.equal(Object.keys((await readJson(path.join(runDir, 'receipts.json'))).uploads).length, 1)
+})
+
+test('upload rejects non-regular and oversized files before HTTP', async (t) => {
+  const root = await tempProject(t)
+  const runDir = path.join(root, '.waoo-agent/runs/run-1')
+  await mkdir(runDir, { recursive: true })
+  await atomicWriteJson(path.join(runDir, 'manifest.json'), { manifestVersion: 1, runId: 'run-1', projectId: 'project-1' })
+  await atomicWriteJson(path.join(runDir, 'receipts.json'), { receiptVersion: 1, runId: 'run-1', projectId: 'project-1', artifacts: {}, uploads: {} })
+  const oversized = path.join(runDir, 'oversized.png')
+  await writeFile(oversized, Buffer.alloc(5, 1))
+  const mock = await startMockWaooServer(() => ({ body: { success: true, requestId: 'unexpected', data: {} } }))
+  t.after(mock.close)
+  const common = ['upload', '--project-root', root, '--run-id', 'run-1', '--run-dir', runDir, '--target-type', 'character-appearance', '--target-key', 'hero.base']
+  await assert.rejects(runCli([...common, '--file', oversized], { env: { ...envFor(mock.baseUrl), WAOO_AGENT_UPLOAD_MAX_BYTES: '4' } }), /maximum|too large|bytes/i)
+  await assert.rejects(runCli([...common, '--file', runDir], { env: envFor(mock.baseUrl) }), /regular file/i)
+  assert.equal(mock.requests.length, 0)
+})
+
+test('concurrent receipt updates keep every key and file locks recover stale locks but time out live locks', async (t) => {
+  const root = await tempProject(t)
+  const runDir = path.join(root, '.waoo-agent/runs/run-1')
+  await mkdir(runDir, { recursive: true })
+  const ruleSetHash = 'sha256:' + 'a'.repeat(64)
+  await atomicWriteJson(path.join(runDir, 'manifest.json'), { manifestVersion: 1, runId: 'run-1', projectId: 'project-1', ruleSetVersion: 'v1', ruleSetHash, status: 'created', currentStage: 'created' })
+  await atomicWriteJson(path.join(runDir, 'receipts.json'), { receiptVersion: 1, runId: 'run-1', projectId: 'project-1', artifacts: {}, uploads: {} })
+  const storyFile = path.join(runDir, 'story.json')
+  const assetsFile = path.join(runDir, 'assets.json')
+  const imageFile = path.join(runDir, 'image.png')
+  const story = { episodeKey: 'episode-001', value: 'story' }
+  const assets = { characters: [], locations: [], props: [] }
+  await atomicWriteJson(storyFile, { 'episode-001': story })
+  await atomicWriteJson(assetsFile, assets)
+  await writeFile(imageFile, Buffer.from([137, 80, 78, 71, 9]))
+  const mock = await startMockWaooServer(async (request) => {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const success = (data) => ({ body: { success: true, requestId: `req-${request.url}`, data } })
+    if (request.url.endsWith('/story')) return success({ dryRun: false, episodeKey: 'episode-001', episodeId: 'ep-1', episodeNumber: 1, artifactHash: request.json.artifactHash })
+    if (request.url.endsWith('/assets')) return success({ dryRun: false, artifactHash: request.json.artifactHash })
+    if (request.url.endsWith('/uploads')) {
+      const multipart = parseMultipartRequest(request)
+      return success({ runId: 'run-1', targetType: multipart.fields.targetType, targetKey: multipart.fields.targetKey, variantIndex: Number(multipart.fields.variantIndex), contentSha256: multipart.fields.contentSha256, mediaId: `media-${multipart.fields.targetKey}`, storageKey: `x/${multipart.fields.targetKey}`, url: `/x/${multipart.fields.targetKey}.png`, reused: false })
+    }
+    if (request.url.endsWith('/snapshot')) return success({ runId: 'run-1', status: 'images_in_progress', committedArtifactHashes: { stories: {}, screenplays: {}, storyboards: {} }, uploads: [], missing: [] })
+    return success({})
+  })
+  t.after(mock.close)
+  const env = envFor(mock.baseUrl)
+  const common = ['--project-root', root, '--run-id', 'run-1', '--run-dir', runDir]
+  await Promise.all([
+    runCli(['commit-story', ...common, '--artifact-file', storyFile, '--episode-key', 'episode-001', '--commit'], { env }),
+    runCli(['commit-assets', ...common, '--artifact-file', assetsFile, '--commit'], { env }),
+    runCli(['upload', ...common, '--file', imageFile, '--target-type', 'character-appearance', '--target-key', 'hero.base'], { env }),
+    runCli(['upload', ...common, '--file', imageFile, '--target-type', 'character-appearance', '--target-key', 'villain.base'], { env }),
+    runCli(['snapshot', ...common], { env }),
+  ])
+  const concurrentReceipts = await readJson(path.join(runDir, 'receipts.json'))
+  assert.equal(concurrentReceipts.artifacts.stories['episode-001'].artifactHash, sha256Prefixed(story))
+  assert.equal(concurrentReceipts.artifacts.assets.artifactHash, sha256Prefixed(assets))
+  assert.equal(Object.keys(concurrentReceipts.uploads).length, 2)
+  assert.equal(concurrentReceipts.snapshot.data.status, 'images_in_progress')
+
+  const lockPath = path.join(runDir, 'receipts.json.lock')
+  await writeFile(lockPath, '{"token":"stale"}')
+  const staleTime = new Date(Date.now() - 120_000)
+  await utimes(lockPath, staleTime, staleTime)
+  await runCli(['snapshot', ...common], { env })
+  assert.equal(await pathExistsForTest(lockPath), false)
+
+  await writeFile(lockPath, '{"token":"live"}')
+  await assert.rejects(runCli(['snapshot', ...common], { env }), /lock.*timeout/i)
+  await rm(lockPath, { force: true })
 })
 
 test('retry policy covers network, 5xx and retryable failures but not ordinary 4xx', async (t) => {

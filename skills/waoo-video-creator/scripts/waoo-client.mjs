@@ -5,9 +5,11 @@ import { constants as fsConstants } from 'node:fs'
 import {
   access,
   mkdir,
+  lstat,
   open,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   stat,
@@ -103,6 +105,81 @@ function safeChildPath(root, label, ...segments) {
   return resolved
 }
 
+function assertLexicallyContained(root, target, label) {
+  const resolvedRoot = path.resolve(root)
+  const resolvedTarget = path.resolve(target)
+  const relative = path.relative(resolvedRoot, resolvedTarget)
+  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`${label} is outside project root`)
+  return { resolvedRoot, resolvedTarget, relative }
+}
+
+async function assertNoSymlinkPath(projectRoot, target, { mustExist }) {
+  const rootReal = await realpath(projectRoot)
+  const resolvedTarget = path.resolve(target)
+  let aliasRoot
+  let cursor = resolvedTarget
+  while (true) {
+    try {
+      if (await realpath(cursor) === rootReal) {
+        aliasRoot = cursor
+        break
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error
+    }
+    const parent = path.dirname(cursor)
+    if (parent === cursor) break
+    cursor = parent
+  }
+  if (!aliasRoot) throw new Error(`path is outside project root: ${resolvedTarget}`)
+  const relative = path.relative(aliasRoot, resolvedTarget)
+  let current = aliasRoot
+  let nearestExisting = aliasRoot
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment)
+    try {
+      const info = await lstat(current)
+      if (info.isSymbolicLink()) throw new Error(`symlink paths are forbidden: ${current}`)
+      nearestExisting = current
+    } catch (error) {
+      if (error.code === 'ENOENT') break
+      throw error
+    }
+  }
+  if (mustExist && !await pathExists(resolvedTarget)) throw new Error(`required path does not exist: ${resolvedTarget}`)
+  const ancestorReal = await realpath(nearestExisting)
+  assertLexicallyContained(rootReal, ancestorReal, 'resolved path ancestor')
+  if (mustExist) {
+    const targetReal = await realpath(resolvedTarget)
+    assertLexicallyContained(rootReal, targetReal, 'resolved path')
+  }
+  return resolvedTarget
+}
+
+async function secureReadPath(projectRoot, target, options = {}) {
+  const resolved = await assertNoSymlinkPath(projectRoot, target, { mustExist: true })
+  if (options.regularFile !== false && !(await lstat(resolved)).isFile()) throw new Error(`path must be a regular file: ${resolved}`)
+  return resolved
+}
+
+async function secureWriteTarget(projectRoot, target) {
+  return assertNoSymlinkPath(projectRoot, target, { mustExist: false })
+}
+
+async function atomicWriteProjectJson(projectRoot, target, value) {
+  await secureWriteTarget(projectRoot, target)
+  await atomicWriteJson(target, value)
+}
+
+function numericConfig(name, value, fallback, minimum, maximum) {
+  const resolved = value ?? fallback
+  const number = typeof resolved === 'number' ? resolved : Number(resolved)
+  if (!Number.isFinite(number) || !Number.isInteger(number) || number < minimum || number > maximum) {
+    throw new Error(`${name} must be a finite integer from ${minimum} to ${maximum}`)
+  }
+  return number
+}
+
 export function resolveConfig(env = process.env, overrides = {}) {
   const token = overrides.token ?? env.WAOO_AGENT_TOKEN
   const userId = overrides.userId ?? env.WAOO_AGENT_USER_ID
@@ -128,9 +205,10 @@ export function resolveConfig(env = process.env, overrides = {}) {
     baseUrl,
     token,
     userId,
-    retries: Number(overrides.retries ?? env.WAOO_HTTP_RETRIES ?? 2),
-    retryDelayMs: Number(overrides.retryDelayMs ?? env.WAOO_HTTP_RETRY_DELAY_MS ?? 150),
-    timeoutMs: Number(overrides.timeoutMs ?? env.WAOO_HTTP_TIMEOUT_MS ?? 30_000),
+    retries: numericConfig('WAOO_HTTP_RETRIES', overrides.retries ?? env.WAOO_HTTP_RETRIES, 2, 0, 10),
+    retryDelayMs: numericConfig('WAOO_HTTP_RETRY_DELAY_MS', overrides.retryDelayMs ?? env.WAOO_HTTP_RETRY_DELAY_MS, 150, 0, 60_000),
+    timeoutMs: numericConfig('WAOO_HTTP_TIMEOUT_MS', overrides.timeoutMs ?? env.WAOO_HTTP_TIMEOUT_MS, 30_000, 100, 300_000),
+    uploadMaxBytes: numericConfig('WAOO_AGENT_UPLOAD_MAX_BYTES', overrides.uploadMaxBytes ?? env.WAOO_AGENT_UPLOAD_MAX_BYTES, 10_485_760, 1, 1_073_741_824),
   }
 }
 
@@ -176,6 +254,7 @@ export async function requestJson(config, requestPath, options = {}) {
         headers,
         body,
         signal: controller.signal,
+        redirect: 'manual',
       })
       let envelope
       try {
@@ -256,19 +335,19 @@ export async function resolveProjectRoot({ explicitRoot, env = process.env, cwd 
   if (explicitRoot) {
     const candidate = path.resolve(explicitRoot)
     if (!await isProjectRoot(candidate)) throw new Error(`explicit --project-root is not the waoowaoo root: ${candidate}`)
-    return candidate
+    return realpath(candidate)
   }
   if (env.WAOO_PROJECT_ROOT) {
     const candidate = path.resolve(env.WAOO_PROJECT_ROOT)
     if (!await isProjectRoot(candidate)) throw new Error(`WAOO_PROJECT_ROOT is not the waoowaoo root: ${candidate}`)
-    return candidate
+    return realpath(candidate)
   }
   const candidates = [path.resolve(cwd), path.resolve(cwd, 'waoowaoo')]
   const matches = []
   for (const candidate of candidates) if (await isProjectRoot(candidate)) matches.push(candidate)
   if (matches.length === 0) throw new Error('unable to locate waoowaoo project root; pass --project-root or WAOO_PROJECT_ROOT')
   if (matches.length > 1) throw new Error(`multiple project-root candidates found: ${matches.join(', ')}`)
-  return matches[0]
+  return realpath(matches[0])
 }
 
 function parseArgs(argv) {
@@ -295,10 +374,7 @@ function required(options, key) {
 }
 
 function insideProject(projectRoot, value, fallback) {
-  const resolved = path.resolve(projectRoot, value ?? fallback)
-  const relative = path.relative(projectRoot, resolved)
-  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`path must stay inside project root: ${resolved}`)
-  return resolved
+  return path.resolve(projectRoot, value ?? fallback)
 }
 
 function without(object, keys) {
@@ -307,6 +383,13 @@ function without(object, keys) {
 
 function stripEpisodeSourceText(episode) {
   return without(episode, ['sourceText'])
+}
+
+function validateDefinitionSourceHashes(definitions, label) {
+  for (const definition of definitions) {
+    const computed = sha256Prefixed(normalizeSourceText(definition.sourceText))
+    if (computed !== definition.sourceHash) throw new Error(`${label} episode sourceHash mismatch: ${definition.episodeKey}`)
+  }
 }
 
 function validateRuleSnapshot(rules) {
@@ -340,12 +423,73 @@ async function writeTextExclusiveOrReplace(target, content) {
   await rename(temp, target)
 }
 
+async function writeProjectText(projectRoot, target, content) {
+  await secureWriteTarget(projectRoot, target)
+  await writeTextExclusiveOrReplace(target, content)
+}
+
 async function pathExists(target) {
   try {
     await access(target, fsConstants.F_OK)
     return true
   } catch {
     return false
+  }
+}
+
+const FILE_LOCK_TIMEOUT_MS = 750
+const FILE_LOCK_RETRY_MS = 20
+const FILE_LOCK_STALE_MS = 60_000
+
+async function removeStaleLock(lockPath) {
+  let before
+  try {
+    before = await lstat(lockPath)
+  } catch (error) {
+    if (error.code === 'ENOENT') return true
+    throw error
+  }
+  if (before.isSymbolicLink() || !before.isFile()) throw new Error(`unsafe lock file: ${lockPath}`)
+  if (Date.now() - before.mtimeMs <= FILE_LOCK_STALE_MS) return false
+  const after = await lstat(lockPath).catch((error) => error.code === 'ENOENT' ? null : Promise.reject(error))
+  if (!after) return true
+  if (after.ino !== before.ino || after.mtimeMs !== before.mtimeMs || after.size !== before.size) return false
+  await rm(lockPath, { force: true })
+  return true
+}
+
+async function withFileLock(projectRoot, targetPath, operation) {
+  const lockPath = `${targetPath}.lock`
+  await secureWriteTarget(projectRoot, lockPath)
+  const deadline = Date.now() + FILE_LOCK_TIMEOUT_MS
+  const token = `${process.pid}-${randomUUID()}`
+  let acquired = false
+  while (!acquired) {
+    try {
+      const handle = await open(lockPath, 'wx', 0o600)
+      try {
+        await handle.writeFile(JSON.stringify({ token, pid: process.pid, createdAt: new Date().toISOString() }), 'utf8')
+        await handle.sync()
+      } finally {
+        await handle.close()
+      }
+      acquired = true
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+      if (await removeStaleLock(lockPath)) continue
+      if (Date.now() >= deadline) throw new Error(`file lock timeout: ${path.basename(targetPath)}`)
+      await delay(FILE_LOCK_RETRY_MS)
+    }
+  }
+  try {
+    return await operation()
+  } finally {
+    try {
+      const lock = JSON.parse(await readFile(lockPath, 'utf8'))
+      if (lock.token === token) await rm(lockPath, { force: true })
+    } catch (error) {
+      if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
+    }
   }
 }
 
@@ -375,11 +519,15 @@ async function loadReceipts(runDir, manifest) {
   return receipts
 }
 
-async function saveReceipt(runDir, manifest, updater) {
-  const receipts = await loadReceipts(runDir, manifest)
-  await updater(receipts)
-  await atomicWriteJson(path.join(runDir, 'receipts.json'), receipts)
-  return receipts
+async function saveReceipt(projectRoot, runDir, manifest, updater) {
+  const receiptPath = path.join(runDir, 'receipts.json')
+  return withFileLock(projectRoot, receiptPath, async () => {
+    await secureWriteTarget(projectRoot, receiptPath)
+    const receipts = await loadReceipts(runDir, manifest)
+    await updater(receipts)
+    await atomicWriteProjectJson(projectRoot, receiptPath, receipts)
+    return receipts
+  })
 }
 
 function endpoint(...segments) {
@@ -411,6 +559,8 @@ async function commandFetchRules(config, projectRoot, options) {
   assertSafeIdentifier('projectId', projectId)
   const sourceHash = required(options, 'source-hash')
   if (!SHA256_PATTERN.test(sourceHash)) throw new Error('--source-hash must be a sha256: value')
+  const root = insideProject(projectRoot, options['preflight-root'], '.waoo-agent/preflight')
+  await secureWriteTarget(projectRoot, root)
   const locale = options.locale ?? 'zh'
   const rules = await requestJson(config, `${endpoint('projects', projectId, 'creator-rules')}?locale=${encodeURIComponent(locale)}`)
   for (const rule of rules.rules ?? []) {
@@ -434,13 +584,14 @@ async function commandFetchRules(config, projectRoot, options) {
   }
   const snapshot = { ...rules, contractsData }
   validateRuleSnapshot(snapshot)
-  const root = insideProject(projectRoot, options['preflight-root'], '.waoo-agent/preflight')
   const projectCache = safeChildPath(root, 'rules cache projectId', projectId)
   const sourceCache = safeChildPath(projectCache, 'rules cache sourceHash', sourceHash)
   const ruleCache = safeChildPath(sourceCache, 'rules cache ruleSetHash', rules.contentHash)
   const rulesPath = path.join(ruleCache, 'rules.json')
-  if (await pathExists(rulesPath)) assertEqual('existing rules snapshot', await readJson(rulesPath), snapshot)
-  else await atomicWriteJson(rulesPath, snapshot)
+  if (await pathExists(rulesPath)) {
+    await secureReadPath(projectRoot, rulesPath)
+    assertEqual('existing rules snapshot', await readJson(rulesPath), snapshot)
+  } else await atomicWriteProjectJson(projectRoot, rulesPath, snapshot)
   return { rulesPath, ruleSetVersion: rules.ruleSetVersion, ruleSetHash: rules.contentHash, contractCount: Object.keys(contractsData).length }
 }
 
@@ -453,16 +604,19 @@ function optionFilterMatches(manifest, options) {
     && (!options['video-ratio-override'] || effective.videoRatio === options['video-ratio-override'])
 }
 
-async function validateFormalRunDirectory(runDir, manifest, options = {}) {
+async function validateFormalRunDirectory(projectRoot, runDir, manifest, options = {}) {
   const requireCreateResponse = options.requireCreateResponse !== false
   const requireEpisodeMap = options.requireEpisodeMap !== false
   assertSafeIdentifier('formal manifest runId', manifest?.runId)
   assertSafeIdentifier('formal manifest projectId', manifest?.projectId)
   if (!manifest.runId || path.basename(runDir) !== manifest.runId) throw new Error(`formal run directory/runId mismatch: ${runDir}`)
+  await secureReadPath(projectRoot, runDir, { regularFile: false })
+  for (const name of ['source.md', 'definition.json', 'rules.json', 'run-request.json']) await secureReadPath(projectRoot, path.join(runDir, name))
   const source = normalizeSourceText(await readFile(path.join(runDir, 'source.md'), 'utf8'))
   if (sha256Prefixed(source) !== manifest.sourceHash) throw new Error(`formal run source hash mismatch: ${manifest.runId}`)
   const definitions = await readJson(path.join(runDir, 'definition.json'))
   for (const definition of definitions) assertSafeIdentifier('formal definition episodeKey', definition.episodeKey)
+  validateDefinitionSourceHashes(definitions, 'formal definition')
   const episodes = definitions.map(stripEpisodeSourceText)
   if (sha256Prefixed(episodes) !== manifest.definitionHash || !sameCanonical(episodes, manifest.episodeDefinitions)) {
     throw new Error(`formal run definition hash mismatch: ${manifest.runId}`)
@@ -487,6 +641,7 @@ async function validateFormalRunDirectory(runDir, manifest, options = {}) {
   let response
   let createdManifest
   if (await pathExists(responsePath)) {
+    await secureReadPath(projectRoot, responsePath)
     response = await readJson(responsePath)
     createdManifest = buildManifest(response, request, definitions, manifest.projectId)
     if (manifest.episodeMap !== undefined) assertEqual('formal run episode map', manifest.episodeMap, createdManifest.episodeMap)
@@ -507,10 +662,14 @@ async function validateFormalRunDirectory(runDir, manifest, options = {}) {
 async function commandFindLocalRun(projectRoot, options) {
   const projectId = required(options, 'project-id')
   assertSafeIdentifier('projectId', projectId)
-  const source = normalizeSourceText(await readFile(insideProject(projectRoot, required(options, 'source-file')), 'utf8'))
+  const sourcePath = insideProject(projectRoot, required(options, 'source-file'))
+  await secureReadPath(projectRoot, sourcePath)
+  const source = normalizeSourceText(await readFile(sourcePath, 'utf8'))
   const sourceHash = sha256Prefixed(source)
   const runsRoot = insideProject(projectRoot, options['runs-root'], '.waoo-agent/runs')
   const intakeRoot = insideProject(projectRoot, options['intake-root'], '.waoo-agent/intake')
+  await secureWriteTarget(projectRoot, runsRoot)
+  await secureWriteTarget(projectRoot, intakeRoot)
   const formal = []
   if (await pathExists(runsRoot)) {
     for (const name of await readdir(runsRoot)) {
@@ -519,9 +678,11 @@ async function commandFindLocalRun(projectRoot, options) {
       if (!await stat(runDir).then((value) => value.isDirectory()).catch(() => false)) continue
       const manifestPath = path.join(runDir, 'manifest.json')
       if (!await pathExists(manifestPath)) continue
+      await secureReadPath(projectRoot, manifestPath)
       const manifest = await readJson(manifestPath)
       if (manifest.projectId === projectId && manifest.sourceHash === sourceHash && optionFilterMatches(manifest, options)) {
-        await validateFormalRunDirectory(runDir, manifest)
+        await validateFormalRunDirectory(projectRoot, runDir, manifest)
+        if (await pathExists(path.join(runDir, 'receipts.json'))) await secureReadPath(projectRoot, path.join(runDir, 'receipts.json'))
         const receipts = await loadReceipts(runDir, manifest)
         const latestStatus = receipts.finalize?.data?.status ?? receipts.serverRun?.data?.status ?? receipts.snapshot?.data?.status ?? manifest.status
         if (latestStatus === COMPLETE_STATUS) continue
@@ -536,6 +697,7 @@ async function commandFindLocalRun(projectRoot, options) {
       const intakeDir = safeChildPath(intakeRoot, 'intake fingerprint', name)
       const requestPath = path.join(intakeDir, 'run-request.json')
       if (!await pathExists(requestPath)) continue
+      for (const fileName of ['run-request.json', 'intake.json', 'source.md', 'definition.json', 'rules.json']) await secureReadPath(projectRoot, path.join(intakeDir, fileName))
       const request = await readJson(requestPath)
       for (const episode of request.episodes ?? []) assertSafeIdentifier('pending request episodeKey', episode.episodeKey)
       if (request.projectId !== undefined) throw new Error(`pending request contains forbidden projectId field: ${name}`)
@@ -545,6 +707,7 @@ async function commandFindLocalRun(projectRoot, options) {
       const pinnedSource = normalizeSourceText(await readFile(path.join(intakeDir, 'source.md'), 'utf8'))
       if (sha256Prefixed(pinnedSource) !== request.sourceHash) throw new Error(`pending intake source hash mismatch: ${name}`)
       const definitions = await readJson(path.join(intakeDir, 'definition.json'))
+      validateDefinitionSourceHashes(definitions, 'pending definition')
       const requestEpisodes = definitions.map(stripEpisodeSourceText)
       if (sha256Prefixed(requestEpisodes) !== request.definitionHash || !sameCanonical(requestEpisodes, request.episodes)) throw new Error(`pending intake definition hash mismatch: ${name}`)
       const rules = validateRuleSnapshot(await readJson(path.join(intakeDir, 'rules.json')))
@@ -561,7 +724,7 @@ async function commandFindLocalRun(projectRoot, options) {
       pending.push({ status: 'pending-create', runFingerprint: request.runFingerprint, intakeDir, requestPath })
     }
   }
-  const candidates = formal.length ? formal : pending
+  const candidates = [...formal, ...pending]
   if (candidates.length === 0) return { status: 'not-found', projectId, sourceHash }
   if (candidates.length > 1) return { status: 'ambiguous', projectId, sourceHash, candidates }
   return candidates[0]
@@ -629,8 +792,10 @@ function buildManifest(response, request, definitions, expectedProjectId) {
   }
 }
 
-async function prepareIntake({ intakeDir, source, definitions, rules, request, projectId }) {
+async function prepareIntake({ projectRoot, intakeDir, source, definitions, rules, request, projectId }) {
+  await secureWriteTarget(projectRoot, intakeDir)
   if (await pathExists(intakeDir)) {
+    for (const fileName of ['run-request.json', 'definition.json', 'rules.json', 'source.md']) await secureReadPath(projectRoot, path.join(intakeDir, fileName))
     assertEqual('pending run request', await readJson(path.join(intakeDir, 'run-request.json')), request)
     assertEqual('pending definitions', await readJson(path.join(intakeDir, 'definition.json')), definitions)
     assertEqual('pending rules', await readJson(path.join(intakeDir, 'rules.json')), rules)
@@ -640,13 +805,14 @@ async function prepareIntake({ intakeDir, source, definitions, rules, request, p
   }
   await mkdir(path.dirname(intakeDir), { recursive: true })
   const temporaryDir = path.join(path.dirname(intakeDir), `.${path.basename(intakeDir)}.${process.pid}.${randomUUID()}.tmp`)
+  await secureWriteTarget(projectRoot, temporaryDir)
   await mkdir(temporaryDir, { recursive: false })
   try {
-    await writeTextExclusiveOrReplace(path.join(temporaryDir, 'source.md'), source)
-    await atomicWriteJson(path.join(temporaryDir, 'definition.json'), definitions)
-    await atomicWriteJson(path.join(temporaryDir, 'rules.json'), rules)
-    await atomicWriteJson(path.join(temporaryDir, 'run-request.json'), request)
-    await atomicWriteJson(path.join(temporaryDir, 'intake.json'), {
+    await writeProjectText(projectRoot, path.join(temporaryDir, 'source.md'), source)
+    await atomicWriteProjectJson(projectRoot, path.join(temporaryDir, 'definition.json'), definitions)
+    await atomicWriteProjectJson(projectRoot, path.join(temporaryDir, 'rules.json'), rules)
+    await atomicWriteProjectJson(projectRoot, path.join(temporaryDir, 'run-request.json'), request)
+    await atomicWriteProjectJson(projectRoot, path.join(temporaryDir, 'intake.json'), {
       intakeVersion: 1,
       projectId,
       sourceHash: request.sourceHash,
@@ -667,9 +833,15 @@ async function prepareIntake({ intakeDir, source, definitions, rules, request, p
 async function commandCreateRun(config, projectRoot, options) {
   const projectId = required(options, 'project-id')
   assertSafeIdentifier('projectId', projectId)
-  const source = normalizeSourceText(await readFile(insideProject(projectRoot, required(options, 'source-file')), 'utf8'))
-  const definitions = normalizeDefinitions(await readJson(insideProject(projectRoot, required(options, 'definition-file'))))
-  const rules = validateRuleSnapshot(await readJson(insideProject(projectRoot, required(options, 'rules-file'))))
+  const sourcePath = insideProject(projectRoot, required(options, 'source-file'))
+  const definitionPath = insideProject(projectRoot, required(options, 'definition-file'))
+  const rulesPath = insideProject(projectRoot, required(options, 'rules-file'))
+  await secureReadPath(projectRoot, sourcePath)
+  await secureReadPath(projectRoot, definitionPath)
+  await secureReadPath(projectRoot, rulesPath)
+  const source = normalizeSourceText(await readFile(sourcePath, 'utf8'))
+  const definitions = normalizeDefinitions(await readJson(definitionPath))
+  const rules = validateRuleSnapshot(await readJson(rulesPath))
   const inputKindHint = options['input-kind-hint'] ?? 'auto'
   const locale = options.locale ?? 'zh'
   const effectiveOptions = {
@@ -684,8 +856,10 @@ async function commandCreateRun(config, projectRoot, options) {
   const request = { schemaVersion: 1, sourceHash, runFingerprint, inputKindHint, locale, effectiveOptions, ruleSetVersion: rules.ruleSetVersion, ruleSetHash: rules.contentHash, definitionHash, episodes }
   const intakeRoot = insideProject(projectRoot, options['intake-root'], '.waoo-agent/intake')
   const runsRoot = insideProject(projectRoot, options['runs-root'], '.waoo-agent/runs')
+  await secureWriteTarget(projectRoot, intakeRoot)
+  await secureWriteTarget(projectRoot, runsRoot)
   const intakeDir = safeChildPath(intakeRoot, 'runFingerprint', runFingerprint)
-  const createdIntake = await prepareIntake({ intakeDir, source, definitions, rules, request, projectId })
+  const createdIntake = await prepareIntake({ projectRoot, intakeDir, source, definitions, rules, request, projectId })
   let response
   try {
     response = await requestJson(config, endpoint('projects', projectId, 'runs'), { method: 'POST', body: await readJson(path.join(intakeDir, 'run-request.json')), idempotencyKey: runFingerprint })
@@ -695,18 +869,19 @@ async function commandCreateRun(config, projectRoot, options) {
     }
     throw error
   }
-  await atomicWriteJson(path.join(intakeDir, 'create-run-response.json'), response)
+  await atomicWriteProjectJson(projectRoot, path.join(intakeDir, 'create-run-response.json'), response)
   const manifest = buildManifest(response, request, definitions, projectId)
-  await atomicWriteJson(path.join(intakeDir, 'manifest.json'), manifest)
+  await atomicWriteProjectJson(projectRoot, path.join(intakeDir, 'manifest.json'), manifest)
   const roundTripManifest = await readJson(path.join(intakeDir, 'manifest.json'))
   assertEqual('preflight manifest', roundTripManifest, manifest)
   const runDir = safeChildPath(runsRoot, 'runId', response.runId)
+  await secureWriteTarget(projectRoot, runDir)
   await mkdir(runsRoot, { recursive: true })
   if (!await pathExists(runDir)) {
     await rename(intakeDir, runDir)
   } else {
     const existing = await readJson(path.join(runDir, 'manifest.json'))
-    await validateFormalRunDirectory(runDir, existing, { requireCreateResponse: false, requireEpisodeMap: false })
+    await validateFormalRunDirectory(projectRoot, runDir, existing, { requireCreateResponse: false, requireEpisodeMap: false })
     for (const key of ['runId', 'projectId', 'sourceHash', 'runFingerprint', 'ruleSetVersion', 'ruleSetHash', 'definitionHash']) {
       if (existing[key] !== manifest[key]) throw new Error(`existing run manifest ${key} mismatch; refusing to overwrite`)
     }
@@ -714,12 +889,12 @@ async function commandCreateRun(config, projectRoot, options) {
     assertEqual('existing run definitions', existing.episodeDefinitions, manifest.episodeDefinitions)
     assertEqual('existing run rules', await readJson(path.join(runDir, 'rules.json')), rules)
     const responsePath = path.join(runDir, 'create-run-response.json')
-    if (!await pathExists(responsePath)) await atomicWriteJson(responsePath, response)
-    if (existing.episodeMap === undefined) await atomicWriteJson(path.join(runDir, 'manifest.json'), { ...existing, episodeMap: manifest.episodeMap })
-    await validateFormalRunDirectory(runDir, await readJson(path.join(runDir, 'manifest.json')))
+    if (!await pathExists(responsePath)) await atomicWriteProjectJson(projectRoot, responsePath, response)
+    if (existing.episodeMap === undefined) await atomicWriteProjectJson(projectRoot, path.join(runDir, 'manifest.json'), { ...existing, episodeMap: manifest.episodeMap })
+    await validateFormalRunDirectory(projectRoot, runDir, await readJson(path.join(runDir, 'manifest.json')))
     if (createdIntake) await rm(intakeDir, { recursive: true, force: true })
   }
-  if (!await pathExists(path.join(runDir, 'receipts.json'))) await atomicWriteJson(path.join(runDir, 'receipts.json'), { receiptVersion: 1, runId: response.runId, projectId: response.projectId, artifacts: {}, uploads: {} })
+  if (!await pathExists(path.join(runDir, 'receipts.json'))) await atomicWriteProjectJson(projectRoot, path.join(runDir, 'receipts.json'), { receiptVersion: 1, runId: response.runId, projectId: response.projectId, artifacts: {}, uploads: {} })
   return { runId: response.runId, resumed: response.resumed, runFingerprint, runDir, episodeMap: manifest.episodeMap }
 }
 
@@ -735,26 +910,34 @@ function validateRunPins(manifest, server) {
   }
 }
 
-async function loadBoundManifest(runDir, runId) {
+async function loadBoundManifest(projectRoot, runDir, runId) {
   if (path.basename(runDir) !== runId) throw new Error('run-id does not match run-dir basename')
+  await secureReadPath(projectRoot, runDir, { regularFile: false })
+  await secureReadPath(projectRoot, path.join(runDir, 'manifest.json'))
   return validateManifestRunId(await readJson(path.join(runDir, 'manifest.json')), runId)
 }
 
-async function updateManifest(runDir, current, patch) {
-  const updated = { ...current, ...patch }
-  await atomicWriteJson(path.join(runDir, 'manifest.json'), updated)
-  return updated
+async function updateManifest(projectRoot, runDir, current, patch) {
+  const manifestPath = path.join(runDir, 'manifest.json')
+  return withFileLock(projectRoot, manifestPath, async () => {
+    await secureWriteTarget(projectRoot, manifestPath)
+    const latest = await readJson(manifestPath)
+    if (latest.runId !== current.runId || latest.projectId !== current.projectId) throw new Error('manifest identity changed while waiting for lock')
+    const updated = { ...latest, ...patch }
+    await atomicWriteProjectJson(projectRoot, manifestPath, updated)
+    return updated
+  })
 }
 
 async function commandGetRun(config, projectRoot, options) {
   const runId = required(options, 'run-id')
   assertSafeIdentifier('runId', runId)
   const runDir = insideProject(projectRoot, required(options, 'run-dir'))
-  const manifest = await loadBoundManifest(runDir, runId)
+  const manifest = await loadBoundManifest(projectRoot, runDir, runId)
   const server = await requestJson(config, endpoint('runs', runId))
   validateRunPins(manifest, server)
-  await saveReceipt(runDir, manifest, (receipts) => { receipts.serverRun = { data: server, receivedAt: new Date().toISOString() } })
-  await updateManifest(runDir, manifest, { status: server.status, currentStage: server.currentStage })
+  await saveReceipt(projectRoot, runDir, manifest, (receipts) => { receipts.serverRun = { data: server, receivedAt: new Date().toISOString() } })
+  await updateManifest(projectRoot, runDir, manifest, { status: server.status, currentStage: server.currentStage })
   return server
 }
 
@@ -784,8 +967,9 @@ async function commandCommit(config, projectRoot, command, options) {
   const runId = required(options, 'run-id')
   assertSafeIdentifier('runId', runId)
   const runDir = insideProject(projectRoot, required(options, 'run-dir'))
-  const manifest = await loadBoundManifest(runDir, runId)
+  const manifest = await loadBoundManifest(projectRoot, runDir, runId)
   const artifactPath = insideProject(projectRoot, required(options, 'artifact-file'))
+  await secureReadPath(projectRoot, artifactPath)
   if (options['episode-key']) assertSafeIdentifier('episodeKey', options['episode-key'])
   const artifact = artifactFor(command, await readJson(artifactPath), options['episode-key'])
   const artifactHash = sha256Prefixed(artifact)
@@ -794,7 +978,7 @@ async function commandCommit(config, projectRoot, command, options) {
   const envelope = await requestJson(config, COMMIT_PATH[command](runId, options['episode-key']), { method: 'PUT', body, idempotencyKey: artifactHash, returnEnvelope: true })
   if (envelope.data?.artifactHash !== artifactHash || envelope.data?.dryRun !== dryRun) throw new Error(`${command} response hash/dryRun mismatch`)
   if (!dryRun) {
-    await saveReceipt(runDir, manifest, (receipts) => {
+    await saveReceipt(projectRoot, runDir, manifest, (receipts) => {
       const collection = RECEIPT_COLLECTION[command]
       const value = { artifactHash, data: envelope.data, requestId: envelope.requestId, committedAt: new Date().toISOString() }
       if (command === 'commit-assets') receipts.artifacts.assets = value
@@ -821,15 +1005,20 @@ async function commandUpload(config, projectRoot, options) {
   const runId = required(options, 'run-id')
   assertSafeIdentifier('runId', runId)
   const runDir = insideProject(projectRoot, required(options, 'run-dir'))
-  const manifest = await loadBoundManifest(runDir, runId)
+  const manifest = await loadBoundManifest(projectRoot, runDir, runId)
   const filePath = insideProject(projectRoot, required(options, 'file'))
+  await secureReadPath(projectRoot, filePath)
   const targetType = required(options, 'target-type')
   if (!['character-appearance', 'location-image', 'prop-image', 'panel-frame'].includes(targetType)) throw new Error('--target-type is invalid')
   const targetKey = required(options, 'target-key')
   assertSafeIdentifier('targetKey', targetKey)
   const variantIndex = Number(options['variant-index'] ?? 0)
   if (!Number.isInteger(variantIndex) || variantIndex < 0) throw new Error('--variant-index must be a nonnegative integer')
+  const fileInfo = await stat(filePath)
+  if (!fileInfo.isFile()) throw new Error('upload path must be a regular file')
+  if (fileInfo.size > config.uploadMaxBytes) throw new Error(`upload exceeds maximum ${config.uploadMaxBytes} bytes`)
   const bytes = await readFile(filePath)
+  if (bytes.length > config.uploadMaxBytes) throw new Error(`upload exceeds maximum ${config.uploadMaxBytes} bytes after read`)
   const contentSha256 = sha256Prefixed(bytes)
   const idempotencyKey = sha256Prefixed({ runId, targetType, targetKey, variantIndex, contentSha256 })
   const form = new FormData()
@@ -843,7 +1032,7 @@ async function commandUpload(config, projectRoot, options) {
     if (envelope.data?.[key] !== expected) throw new Error(`upload response ${key} mismatch`)
   }
   const receiptKey = canonicalJson({ targetType, targetKey, variantIndex, contentSha256 })
-  await saveReceipt(runDir, manifest, (receipts) => {
+  await saveReceipt(projectRoot, runDir, manifest, (receipts) => {
     const existing = receipts.uploads[receiptKey]
     const value = { contentSha256, targetType, targetKey, variantIndex, data: envelope.data, requestId: envelope.requestId, uploadedAt: new Date().toISOString() }
     if (existing && !sameCanonical(existing.data, value.data)) throw new Error('upload receipt conflict')
@@ -856,11 +1045,11 @@ async function commandSnapshot(config, projectRoot, options) {
   const runId = required(options, 'run-id')
   assertSafeIdentifier('runId', runId)
   const runDir = insideProject(projectRoot, required(options, 'run-dir'))
-  const manifest = await loadBoundManifest(runDir, runId)
+  const manifest = await loadBoundManifest(projectRoot, runDir, runId)
   const envelope = await requestJson(config, endpoint('runs', runId, 'snapshot'), { returnEnvelope: true })
   if (envelope.data?.runId !== runId) throw new Error('snapshot response runId mismatch')
-  await saveReceipt(runDir, manifest, (receipts) => { receipts.snapshot = { data: envelope.data, requestId: envelope.requestId, receivedAt: new Date().toISOString() } })
-  await updateManifest(runDir, manifest, { status: envelope.data.status })
+  await saveReceipt(projectRoot, runDir, manifest, (receipts) => { receipts.snapshot = { data: envelope.data, requestId: envelope.requestId, receivedAt: new Date().toISOString() } })
+  await updateManifest(projectRoot, runDir, manifest, { status: envelope.data.status })
   return envelope.data
 }
 
@@ -876,7 +1065,7 @@ async function commandFinalize(config, projectRoot, options) {
   const runId = required(options, 'run-id')
   assertSafeIdentifier('runId', runId)
   const runDir = insideProject(projectRoot, required(options, 'run-dir'))
-  const manifest = await loadBoundManifest(runDir, runId)
+  const manifest = await loadBoundManifest(projectRoot, runDir, runId)
   const receipts = await loadReceipts(runDir, manifest)
   const assets = receipts.artifacts?.assets?.artifactHash
   if (!SHA256_PATTERN.test(assets ?? '')) throw new Error('assets committed receipt is required before finalize')
@@ -893,8 +1082,8 @@ async function commandFinalize(config, projectRoot, options) {
   const idempotencyKey = sha256Prefixed(body)
   const envelope = await requestJson(config, endpoint('runs', runId, 'finalize'), { method: 'POST', body, idempotencyKey, returnEnvelope: true })
   if (envelope.data?.runId !== runId || envelope.data?.status !== COMPLETE_STATUS) throw new Error('finalize response runId/status mismatch')
-  await saveReceipt(runDir, manifest, (current) => { current.finalize = { expected: body.expected, data: envelope.data, requestId: envelope.requestId, finalizedAt: new Date().toISOString() } })
-  await updateManifest(runDir, manifest, { status: COMPLETE_STATUS, currentStage: COMPLETE_STATUS, completedAt: envelope.data.completedAt })
+  await saveReceipt(projectRoot, runDir, manifest, (current) => { current.finalize = { expected: body.expected, data: envelope.data, requestId: envelope.requestId, finalizedAt: new Date().toISOString() } })
+  await updateManifest(projectRoot, runDir, manifest, { status: COMPLETE_STATUS, currentStage: COMPLETE_STATUS, completedAt: envelope.data.completedAt })
   return envelope.data
 }
 
