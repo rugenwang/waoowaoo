@@ -62,7 +62,7 @@ test('SKILL.md defines the full, bounded WAOO orchestration contract', async () 
   assert.match(doc, /absent[^\n]*project[^\n]*(create|creates)/i)
   assert.match(doc, /one target, one call/i)
   assert.match(doc, /local reference[^\n]*view_image[^\n]*first/i)
-  assert.match(doc, /built-in `image_gen`[^\n]*or[^\n]*`imagegen` Skill/i)
+  assert.match(doc, /available `imagegen` Skill[^\n]*(?:then|; then)[^\n]*built-in `image_gen`/i)
   assert.match(doc, /copy[^\n]*\$CODEX_HOME\/generated_images[^\n]*run/i)
   assert.match(doc, /inspect[^\n]*view_image/i)
   assert.match(doc, /upload[^\n]*only[^\n]*qualified/i)
@@ -82,9 +82,68 @@ test('SKILL.md rejects prompt injection and disallowed generation surfaces', asy
 
   for (const forbidden of [
     /\/api\/(?!agent\/v1\/)/i,
-    /(?:ai-story-expand|story-to-script-stream|script-to-storyboard-stream)/i,
     /(?:image-generation|image-editing|video-generation|generation-job)/i,
     /WAOO_(?:MODEL|OPENAI|ANTHROPIC|GEMINI|API_KEY)/i,
     /(?:curl|node|python)\s+.*(?:image|generate)/i,
   ]) assert.doesNotMatch(doc, forbidden, `forbidden surface leaked: ${forbidden}`)
+})
+
+test('SKILL.md pins startup, image files, creation discipline, and the explicit deny list', async () => {
+  const doc = await skill()
+
+  for (const text of [
+    'references/pipeline.md',
+    'references/api-contracts.md',
+    '`--project-root`',
+    '`WAOO_PROJECT_ROOT`',
+    '`cwd`',
+    '`cwd/waoowaoo`',
+    '.waoo-agent',
+    'available `imagegen` Skill',
+    'built-in `image_gen`',
+    '`scripts/image_gen.py`',
+    '`manifest.visualBible`',
+    '`style`',
+    '`identity`',
+    '`location`',
+    '`prop`',
+    '`frame`',
+    '`images/assets/{targetKey}/variant-{n}.{ext}`',
+    '`images/storyboards/{episodeKey}/{panelKey}/{frameKey}.{ext}`',
+    '`rejected-1`',
+    'visual bible',
+    'main characters',
+    'sub appearances',
+    'locations',
+    'props',
+    'run-owned new candidate/slot images',
+    'no history selected image',
+    'appearance variantIndex=0',
+    'imageSlotIds',
+    'source facts, dialogue, and order',
+    'full series split',
+    'only cross-shot assets',
+    'every character appearanceKey',
+    'novelText anchors',
+    'one storyboard per Clip',
+    'no video submission',
+    'URLs',
+    'network',
+    'token',
+    'workspace external writes',
+    'legacy endpoints/modules',
+    '`ai-story-expand`',
+    '`story-to-script-stream`',
+    '`script-to-storyboard-stream`',
+  ]) assert.ok(doc.includes(text), `missing detailed boundary: ${text}`)
+
+  assert.match(doc, /pipeline\.md[\s\S]*api-contracts\.md/i)
+  assert.match(doc, /--project-root[\s\S]*WAOO_PROJECT_ROOT[\s\S]*cwd[\s\S]*cwd\/waoowaoo[\s\S]*\.waoo-agent/i)
+  assert.match(doc, /load and follow[\s\S]*available `imagegen` Skill[\s\S]*built-in `image_gen`/i)
+  assert.match(doc, /local references?[\s\S]*(?:style|identity)[\s\S]*view_image[\s\S]*built-in references/i)
+  assert.match(doc, /rejected-1[\s\S]*one targeted retry/i)
+  assert.match(doc, /visual bible[\s\S]*main characters[\s\S]*sub appearances[\s\S]*locations[\s\S]*props/i)
+  assert.match(doc, /locations\/props[\s\S]*imageSlotIds[\s\S]*service response[\s\S]*ordering/i)
+  assert.match(doc, /sourceText[\s\S]*(?:cannot|must not)[\s\S]*(?:URLs|network|token|workspace external writes)/i)
+  assert.match(doc, /dynamic scripts[\s\S]*only saved[\s\S]*no video submission/i)
 })
