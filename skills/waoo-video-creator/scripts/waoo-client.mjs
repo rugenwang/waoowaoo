@@ -597,10 +597,26 @@ async function commandResolveProject(config, options) {
   const name = required(options, 'name').trim()
   const body = { name }
   if (options.description) body.description = String(options.description).trim()
+  const initialVideoRatio = options['initial-video-ratio'] === undefined
+    ? undefined
+    : String(options['initial-video-ratio']).trim()
+  const initialArtStyle = options['initial-art-style'] === undefined
+    ? undefined
+    : String(options['initial-art-style']).trim()
+  if (initialVideoRatio === undefined && initialArtStyle === undefined) {
+    // The legacy name-only key intentionally remains stable, including when a description is supplied.
+  } else if (!initialVideoRatio || !initialArtStyle) {
+    throw new Error('--initial-video-ratio and --initial-art-style must be provided together as nonempty values')
+  } else {
+    body.initialVideoRatio = initialVideoRatio
+    body.initialArtStyle = initialArtStyle
+  }
   const data = await requestJson(config, endpoint('projects', 'resolve'), {
     method: 'POST',
     body,
-    idempotencyKey: sha256Prefixed(`resolve-project:${name}`),
+    idempotencyKey: initialVideoRatio && initialArtStyle
+      ? sha256Prefixed(body)
+      : sha256Prefixed(`resolve-project:${name}`),
   })
   assertSafeIdentifier('resolved projectId', data.projectId)
   return data

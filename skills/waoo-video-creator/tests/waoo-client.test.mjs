@@ -105,6 +105,58 @@ function visualBible() {
   }
 }
 
+test('resolve-project sends a complete initial visual-settings pair with the canonical idempotency material', async (t) => {
+  const root = await tempProject(t)
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (url, init) => {
+    requests.push({
+      url: String(url),
+      headers: Object.fromEntries(new Headers(init.headers).entries()),
+      body: JSON.parse(init.body),
+    })
+    return new Response(JSON.stringify({
+      success: true,
+      requestId: 'resolve-settings',
+      data: { projectId: 'project-1', name: requests[0].body.name, created: true },
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  t.after(() => { globalThis.fetch = originalFetch })
+
+  await runCli([
+    'resolve-project', '--project-root', root,
+    '--name', '  New Xianxia Project  ',
+    '--description', '  A new project  ',
+    '--initial-video-ratio', '16:9',
+    '--initial-art-style', 'chinese-xianxia',
+  ], { env: envFor('http://127.0.0.1:3000') })
+
+  assert.deepEqual(requests[0].body, {
+    name: 'New Xianxia Project',
+    description: 'A new project',
+    initialVideoRatio: '16:9',
+    initialArtStyle: 'chinese-xianxia',
+  })
+  assert.equal(requests[0].headers['idempotency-key'], sha256Prefixed({
+    name: 'New Xianxia Project',
+    description: 'A new project',
+    initialVideoRatio: '16:9',
+    initialArtStyle: 'chinese-xianxia',
+  }))
+})
+
+test('resolve-project rejects a partial initial visual-settings pair before sending a request', async (t) => {
+  const root = await tempProject(t)
+  await assert.rejects(
+    runCli([
+      'resolve-project', '--project-root', root,
+      '--name', 'New Xianxia Project',
+      '--initial-video-ratio', '16:9',
+    ], { env: envFor('http://127.0.0.1:1') }),
+    /initial-video-ratio.*initial-art-style/i,
+  )
+})
+
 test('set-visual-bible pins a canonical local bible without HTTP and serializes concurrent same-content calls', async (t) => {
   const { root, runDir } = await pinnedFormalRun(t)
   const input = path.join(runDir, 'visual-bible-input.json')

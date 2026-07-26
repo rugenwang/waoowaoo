@@ -36,13 +36,13 @@ WAOO_PROJECT_ROOT=/absolute/path/to/waoowaoo
 
 `find-local-run` 仅扫描本地；不发送请求。规范 shape 必须从上述 contract 下载，本文不手抄 Schema。
 
-`set-visual-bible --run-dir --visual-bible-file` 只读取 formal run 内的本地 JSON；要求完整的 manifest/rules pins，拒绝模型、provider、API key、task、video 或 audio 字段，canonical hash 后在 manifest lock 内写入。它不读取凭证、不建 HTTP 请求、不调用 WAOO 模型。`--art-style-override`、`--video-ratio-override` 与 `--episode-split-hint` 等 client flags 仅用于高级手动/恢复；`$waoo-video-creator` skill 绝不向用户索取或使用这些 flags。
+`resolve-project` 可选且只能同时携带 `--initial-video-ratio` 与 `--initial-art-style`。该 pair 仅用于创建缺失项目时写入项目画幅/风格；精确同名已有项目返回 `created:false` 且不得写入设置。它不是 run override，禁止传给 `create-run`。`set-visual-bible --run-dir --visual-bible-file` 只读取 formal run 内的本地 JSON；要求完整的 manifest/rules pins，拒绝模型、provider、API key、task、video 或 audio 字段，canonical hash 后在 manifest lock 内写入。它不读取凭证、不建 HTTP 请求、不调用 WAOO 模型。`--art-style-override`、`--video-ratio-override` 与 `--episode-split-hint` 等 client flags 仅用于高级手动/恢复；`$waoo-video-creator` skill 绝不向用户索取或使用这些 flags。
 
 ## 信封、幂等与 dry-run
 
 成功 envelope 为 `success: true, requestId, data`；failure envelope 为 `success: false, requestId, error:{code,message,field,retryable,details}`。保留 `code`、`field` 和 `requestId`，让 Codex 只修正指明的本地内容。
 
-所有 POST/PUT 必带 `Idempotency-Key`：项目解析按规范化项目名；建 run 使用 `runFingerprint`；四类提交使用 `artifactHash`；上传使用 `runId + targetType + targetKey + variantIndex + contentSha256` 的 canonical hash；完成校验使用请求体 canonical hash。网络错误、5xx 或 `retryable:true` 才可重试，写请求重用原 key。
+所有 POST/PUT 必带 `Idempotency-Key`：未提供初始化 pair 的项目解析（即使有 description）按 `sha256('resolve-project:'+trim(name))`；完整初始化 pair 使用 `{ name, description?, initialVideoRatio, initialArtStyle }` 的 canonical JSON hash；建 run 使用 `runFingerprint`；四类提交使用 `artifactHash`；上传使用 `runId + targetType + targetKey + variantIndex + contentSha256` 的 canonical hash；完成校验使用请求体 canonical hash。网络错误、5xx 或 `retryable:true` 才可重试，写请求重用原 key。
 
 只有四个 `commit-*` 支持 `--dry-run`；默认 dry-run，只在显式 `--commit` 后写入。其他写接口禁止附加 dryRun 或未定义字段。
 

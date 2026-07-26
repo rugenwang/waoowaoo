@@ -4,7 +4,7 @@
 
 ## 开始前的恢复决策
 
-解析项目后，skill 只使用 `projectName/sourceText`，并以 `projectId/sourceHash` 扫描正式 run 与 intake，**再**获取当前规则。`inputKindHint=auto`、`locale=zh`、`episodeSplitHint=auto` 及 effective options 来自运行时规则，不向用户索取或使用 art-style、video-ratio、split 覆盖项。唯一正式候选：加载其固定规则、effective options、fingerprint 和 episode definitions，执行 `get-run`/`snapshot` 恢复。唯一 `pending-create`：只原样重放其 `run-request.json`，不得重新分析。多个候选即歧义，列出 runId/fingerprint 后停止。无候选才 fetch-rules 并新建指纹。客户端覆盖 flags 仅供高级手动/恢复操作，skill 不得使用。
+解析项目后，skill 使用 `projectName/sourceText`，以及仅允许成对提供的新项目初始化 `initialVideoRatio/initialArtStyle`。该 pair 只在 `resolve-project` 创建缺失项目时使用，精确同名项目绝不写入或覆盖当前设置；随后以 `projectId/sourceHash` 扫描正式 run 与 intake，**再**获取当前规则。`inputKindHint=auto`、`locale=zh`、`episodeSplitHint=auto` 及 effective options 来自运行时规则；不得把初始比例/风格或其他 art-style、video-ratio、split 字段作为 run 覆盖项。唯一正式候选：加载其固定规则、effective options、fingerprint 和 episode definitions，执行 `get-run`/`snapshot` 恢复。唯一 `pending-create`：只原样重放其 `run-request.json`，不得重新分析。多个候选即歧义，列出 runId/fingerprint 后停止。无候选才 fetch-rules 并新建指纹。客户端覆盖 flags 仅供高级手动/恢复操作，skill 不得使用。
 
 固定的 pinned rules 不可变、不可被当前规则覆盖；规则升级必须新建运行。
 

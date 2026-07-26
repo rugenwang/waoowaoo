@@ -15,7 +15,8 @@ test('SKILL.md defines the full, bounded WAOO orchestration contract', async () 
   const doc = await skill()
 
   for (const text of [
-    'only `projectName` and `sourceText`',
+    'optional complete new-project initialization pair',
+    '`initialVideoRatio` and `initialArtStyle`',
     '`inputKindHint=auto`, `locale=zh`, and `episodeSplitHint=auto`',
     'exact project-name match',
     'ambiguity',
@@ -60,6 +61,8 @@ test('SKILL.md defines the full, bounded WAOO orchestration contract', async () 
   ]) assert.ok(doc.includes(text), `missing required boundary: ${text}`)
 
   assert.match(doc, /absent[^\n]*project[^\n]*(create|creates)/i)
+  assert.match(doc, /(?:only|仅)[\s\S]*(?:new-project|创建缺失项目)[\s\S]*initial-video-ratio[\s\S]*initial-art-style/i)
+  assert.match(doc, /exact existing project[\s\S]*(?:never overwrite|no settings write)/i)
   assert.match(doc, /one target, one call/i)
   assert.match(doc, /local reference[^\n]*view_image[^\n]*first/i)
   assert.match(doc, /available `imagegen` Skill[^\n]*(?:then|; then)[^\n]*built-in `image_gen`/i)
@@ -149,7 +152,7 @@ test('SKILL.md pins startup, image files, creation discipline, and the explicit 
   assert.match(doc, /locations\/props[\s\S]*imageSlotIds[\s\S]*service response[\s\S]*ordering/i)
   assert.match(doc, /sourceText[\s\S]*(?:cannot|must not)[\s\S]*(?:URLs|network|token|workspace external writes)/i)
   assert.match(doc, /dynamic scripts[\s\S]*only saved[\s\S]*no video submission/i)
-  assert.match(doc, /only `projectName` and `sourceText`[\s\S]*do not solicit or use art-style, video-ratio, split/i)
+  assert.match(doc, /`projectName` and `sourceText`[\s\S]*initialVideoRatio[\s\S]*initialArtStyle[\s\S]*Do not solicit or use any other art-style, video-ratio, split/i)
   assert.match(doc, /Client override flags[\s\S]*advanced manual\/recovery[\s\S]*must not be used by this skill/i)
   assert.match(doc, /set-visual-bible[\s\S]*visualBibleHash[\s\S]*no HTTP/i)
 })
