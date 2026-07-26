@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "sourceHash": "sha256:413db58f2a57e40f68a35ea4cb1fca739779114e7ef562c47c6fd6272fc1dc9e",
+  "runFingerprint": "sha256:ab4d1700bb0354e2215b371e8d3d2eb83597ff27748b031eb56fae0d33939874",
+  "inputKindHint": "auto",
+  "locale": "zh",
+  "effectiveOptions": { "artStyle": "realistic", "videoRatio": "9:16", "episodeSplitHint": "auto" },
+  "ruleSetVersion": "fixture-v1",
+  "ruleSetHash": "sha256:5899df5416188708a4380b8cd57ce1f449887e190a6b40841f61d163c23a36e6",
+  "definitionHash": "sha256:a69e51b819f958cc26ea612d201ab0e1ba4772f1fee30798d5a5645d4499539f",
+  "episodes": [
+    { "episodeKey": "episode-001", "ordinal": 1, "sourceHash": "sha256:413db58f2a57e40f68a35ea4cb1fca739779114e7ef562c47c6fd6272fc1dc9e", "name": "第一集" }
+  ]
+}

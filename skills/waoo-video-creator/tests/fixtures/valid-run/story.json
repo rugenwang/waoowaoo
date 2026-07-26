@@ -1,0 +1,9 @@
+{
+  "episode-001": {
+    "episodeKey": "episode-001",
+    "sourceHash": "sha256:413db58f2a57e40f68a35ea4cb1fca739779114e7ef562c47c6fd6272fc1dc9e",
+    "inputKind": "story",
+    "name": "第一集",
+    "novelText": "第一集最终故事正文"
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "ruleSetVersion": "fixture-v1",
+  "contentHash": "sha256:5899df5416188708a4380b8cd57ce1f449887e190a6b40841f61d163c23a36e6",
+  "locale": "zh",
+  "projectSettings": {
+    "artStyle": "realistic",
+    "artStylePrompt": null,
+    "videoRatio": "9:16",
+    "imageResolution": "2K",
+    "forcedStoryboardDurationSec": null
+  },
+  "rules": [
+    { "id": "story-rule", "kind": "hard-and-creative", "content": "故事规则", "hash": "sha256:f19beb67c654375ddfc725048d7e669f1502a0f18a7a77ee5d69159ad6903221" }
+  ],
+  "contracts": [
+    { "id": "waoo-agent-story.v1", "url": "/api/agent/v1/contracts/waoo-agent-story.v1", "hash": "sha256:73aadfb2d441943a82c936746492acb01504d91812802b3e1a406af7a37186e0" },
+    { "id": "waoo-agent-assets.v1", "url": "/api/agent/v1/contracts/waoo-agent-assets.v1", "hash": "sha256:b4ef25feba3d7538f458779a29b7931c32adfe8009fe5782b37c8b8fe118e3d6" },
+    { "id": "waoo-agent-screenplay.v1", "url": "/api/agent/v1/contracts/waoo-agent-screenplay.v1", "hash": "sha256:b4ef25feba3d7538f458779a29b7931c32adfe8009fe5782b37c8b8fe118e3d6" },
+    { "id": "waoo-agent-storyboards.v1", "url": "/api/agent/v1/contracts/waoo-agent-storyboards.v1", "hash": "sha256:b4ef25feba3d7538f458779a29b7931c32adfe8009fe5782b37c8b8fe118e3d6" }
+  ],
+  "contractsData": {
+    "waoo-agent-story.v1": {
+      "id": "waoo-agent-story.v1",
+      "hash": "sha256:73aadfb2d441943a82c936746492acb01504d91812802b3e1a406af7a37186e0",
+      "jsonSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "required": ["schemaVersion", "ruleSetVersion", "ruleSetHash", "artifactHash", "dryRun", "data"],
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": { "const": 1 },
+          "ruleSetVersion": { "type": "string" },
+          "ruleSetHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "artifactHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "dryRun": { "type": "boolean" },
+          "data": {
+            "type": "object",
+            "required": ["episodeKey", "sourceHash", "inputKind", "name", "novelText"],
+            "additionalProperties": false,
+            "properties": {
+              "episodeKey": { "type": "string" },
+              "sourceHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+              "inputKind": { "enum": ["outline", "story", "screenplay"] },
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "novelText": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "waoo-agent-assets.v1": {
+      "id": "waoo-agent-assets.v1",
+      "hash": "sha256:b4ef25feba3d7538f458779a29b7931c32adfe8009fe5782b37c8b8fe118e3d6",
+      "jsonSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "required": ["schemaVersion", "ruleSetVersion", "ruleSetHash", "artifactHash", "dryRun", "data"],
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": { "const": 1 }, "ruleSetVersion": { "type": "string" },
+          "ruleSetHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "artifactHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "dryRun": { "type": "boolean" }, "data": { "type": "object" }
+        }
+      }
+    },
+    "waoo-agent-screenplay.v1": {
+      "id": "waoo-agent-screenplay.v1",
+      "hash": "sha256:b4ef25feba3d7538f458779a29b7931c32adfe8009fe5782b37c8b8fe118e3d6",
+      "jsonSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "required": ["schemaVersion", "ruleSetVersion", "ruleSetHash", "artifactHash", "dryRun", "data"],
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": { "const": 1 }, "ruleSetVersion": { "type": "string" },
+          "ruleSetHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "artifactHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "dryRun": { "type": "boolean" }, "data": { "type": "object" }
+        }
+      }
+    },
+    "waoo-agent-storyboards.v1": {
+      "id": "waoo-agent-storyboards.v1",
+      "hash": "sha256:b4ef25feba3d7538f458779a29b7931c32adfe8009fe5782b37c8b8fe118e3d6",
+      "jsonSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "required": ["schemaVersion", "ruleSetVersion", "ruleSetHash", "artifactHash", "dryRun", "data"],
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": { "const": 1 }, "ruleSetVersion": { "type": "string" },
+          "ruleSetHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "artifactHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "dryRun": { "type": "boolean" }, "data": { "type": "object" }
+        }
+      }
+    }
+  }
+}

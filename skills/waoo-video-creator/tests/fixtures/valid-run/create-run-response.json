@@ -1,0 +1,11 @@
+{
+  "runId": "run-001",
+  "resumed": false,
+  "status": "created",
+  "projectId": "project-001",
+  "sourceHash": "sha256:413db58f2a57e40f68a35ea4cb1fca739779114e7ef562c47c6fd6272fc1dc9e",
+  "runFingerprint": "sha256:ab4d1700bb0354e2215b371e8d3d2eb83597ff27748b031eb56fae0d33939874",
+  "episodes": [
+    { "episodeKey": "episode-001", "episodeId": "episode-id-001", "episodeNumber": 1, "name": "第一集" }
+  ]
+}
