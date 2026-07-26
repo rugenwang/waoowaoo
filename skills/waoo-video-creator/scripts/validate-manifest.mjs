@@ -102,13 +102,23 @@ function responseEpisodeMap(response) {
 
 function latestStateReceipt(receipts) {
   const candidates = [
-    ['finalize', receipts?.finalize],
-    ['serverRun', receipts?.serverRun],
-    ['snapshot', receipts?.snapshot],
-  ].map(([kind, receipt]) => ({ kind, receipt, sequence: receipt?.serverStateRequestSeq }))
+    ['finalize', receipts?.finalize, '/receipts.json/finalize'],
+    ['serverRun', receipts?.serverRun, '/receipts.json/serverRun'],
+    ['snapshot', receipts?.snapshot, '/receipts.json/snapshot'],
+  ].map(([kind, receipt, pointer]) => ({ kind, receipt, pointer, sequence: receipt?.serverStateRequestSeq }))
     .filter(({ receipt, sequence }) => typeof receipt?.data?.status === 'string' && Number.isSafeInteger(sequence) && sequence >= 0)
   if (!candidates.length) return undefined
-  return candidates.reduce((latest, current) => current.sequence > latest.sequence ? current : latest)
+  const maxSequence = Math.max(...candidates.map(({ sequence }) => sequence))
+  const latest = candidates.filter(({ sequence }) => sequence === maxSequence)
+  const expected = latest[0]
+  const expectedStage = expected.receipt.data.currentStage ?? expected.receipt.data.status
+  for (const candidate of latest.slice(1)) {
+    const candidateStage = candidate.receipt.data.currentStage ?? candidate.receipt.data.status
+    if (candidate.receipt.data.status !== expected.receipt.data.status || candidateStage !== expectedStage) {
+      fail(candidate.pointer, 'conflicts with another receipt at the latest server-state sequence', 'run/receipt')
+    }
+  }
+  return expected
 }
 
 function validateFormalManifest(manifest, request, response, rules, sourceText, definitions, receipts) {

@@ -274,6 +274,30 @@ test('rejects committed hash drift and a manifest status not proven by the lates
   })
 })
 
+test('rejects conflicting receipts at the same latest server-state sequence', async (t) => {
+  await t.test('status', async (t) => {
+    const { runDir } = await makeFinalizeRun(t)
+    await mutateJson(runDir, 'receipts.json', (receipts) => {
+      receipts.serverRun = { data: { runId: 'run-001', status: 'assets', currentStage: 'assets' }, serverStateRequestSeq: 7 }
+    })
+    await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'finalize' }), /\/receipts\.json\/serverRun.*targetKey=run\/receipt/i)
+  })
+  await t.test('effective stage', async (t) => {
+    const { runDir } = await makeFinalizeRun(t)
+    await mutateJson(runDir, 'receipts.json', (receipts) => {
+      receipts.serverRun = { data: { runId: 'run-001', status: 'completed', currentStage: 'assets' }, serverStateRequestSeq: 7 }
+    })
+    await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'finalize' }), /\/receipts\.json\/serverRun.*targetKey=run\/receipt/i)
+  })
+  await t.test('matching status and effective stage', async (t) => {
+    const { runDir } = await makeFinalizeRun(t)
+    await mutateJson(runDir, 'receipts.json', (receipts) => {
+      receipts.serverRun = { data: { runId: 'run-001', status: 'completed' }, serverStateRequestSeq: 7 }
+    })
+    assert.equal((await validateManifest({ projectRoot, runDir, stage: 'finalize' })).message, 'manifest valid')
+  })
+})
+
 test('rejects a recomputed rules hash when contracts or rule content are incomplete', async (t) => {
   await t.test('empty contracts', async (t) => {
     const runDir = await tempRun(t)
