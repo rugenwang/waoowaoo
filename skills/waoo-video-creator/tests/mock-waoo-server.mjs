@@ -49,3 +49,29 @@ export async function startMockWaooServer(handler) {
   }
 }
 
+export function parseMultipartRequest(request) {
+  const contentType = request.headers['content-type'] ?? ''
+  const boundary = /boundary=([^;]+)/i.exec(contentType)?.[1]?.replace(/^"|"$/g, '')
+  if (!boundary) throw new Error('multipart boundary is missing')
+  const separator = Buffer.from(`--${boundary}`)
+  const fields = {}
+  let file
+  let cursor = 0
+  while (cursor < request.body.length) {
+    const start = request.body.indexOf(separator, cursor)
+    if (start < 0) break
+    const headerStart = start + separator.length + 2
+    const headerEnd = request.body.indexOf(Buffer.from('\r\n\r\n'), headerStart)
+    if (headerEnd < 0) break
+    const headers = request.body.subarray(headerStart, headerEnd).toString('utf8')
+    const next = request.body.indexOf(separator, headerEnd + 4)
+    if (next < 0) break
+    const content = request.body.subarray(headerEnd + 4, next - 2)
+    const name = /name="([^"]+)"/i.exec(headers)?.[1]
+    const filename = /filename="([^"]+)"/i.exec(headers)?.[1]
+    if (name && filename) file = { name, filename, bytes: content, headers }
+    else if (name) fields[name] = content.toString('utf8')
+    cursor = next
+  }
+  return { fields, file }
+}

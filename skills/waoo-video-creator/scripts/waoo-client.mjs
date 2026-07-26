@@ -4,7 +4,6 @@ import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
 import {
   access,
-  copyFile,
   mkdir,
   open,
   readFile,
@@ -67,11 +66,20 @@ export function normalizeSourceText(value) {
   return String(value).replace(/\r\n?/g, '\n').trim()
 }
 
-function sanitizeMessage(message, token) {
+function sanitizeMessage(message, ...secrets) {
   let result = String(message || 'Agent API request failed')
-  if (token) result = result.split(token).join('[REDACTED]')
+  for (const secret of secrets.filter(Boolean)) result = result.split(String(secret)).join('[REDACTED]')
   result = result.replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
   return result
+}
+
+function sanitizeOutput(value, config) {
+  if (typeof value === 'string') return sanitizeMessage(value, config?.token, config?.userId)
+  if (Array.isArray(value)) return value.map((item) => sanitizeOutput(item, config))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [sanitizeMessage(key, config?.token, config?.userId), sanitizeOutput(item, config)]))
+  }
+  return value
 }
 
 function agentError(message, details = {}) {
@@ -83,6 +91,25 @@ function agentError(message, details = {}) {
 function isLoopback(hostname) {
   const normalized = hostname.replace(/^\[|\]$/g, '').toLowerCase()
   return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1'
+}
+
+function assertSafeIdentifier(label, value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 200 || value !== value.trim()) {
+    throw new Error(`${label} must be a nonempty safe identifier`)
+  }
+  if (value === '.' || value === '..' || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)) {
+    throw new Error(`${label} must be a safe identifier without path escapes`)
+  }
+  return value
+}
+
+function safeChildPath(root, label, ...segments) {
+  for (const segment of segments) assertSafeIdentifier(label, segment)
+  const resolvedRoot = path.resolve(root)
+  const resolved = path.resolve(resolvedRoot, ...segments)
+  const relative = path.relative(resolvedRoot, resolved)
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`${label} resolves outside its allowed root`)
+  return resolved
 }
 
 export function resolveConfig(env = process.env, overrides = {}) {
@@ -125,6 +152,17 @@ function shouldRetry(error, status) {
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
 
 export async function requestJson(config, requestPath, options = {}) {
+  const base = new URL(`${config.baseUrl}/`)
+  let requestUrl
+  try {
+    requestUrl = new URL(requestPath, base)
+  } catch {
+    throw new Error('unsafe Agent API URL')
+  }
+  if (requestUrl.origin !== base.origin || requestUrl.username || requestUrl.password) throw new Error('Agent API requests must stay same-origin with WAOO_BASE_URL')
+  if (!requestUrl.pathname.startsWith(`${API_ROOT}/`) || /[\\\0%]/.test(String(requestPath))) {
+    throw new Error('unsafe Agent API path outside /api/agent/v1')
+  }
   const method = options.method ?? 'GET'
   const headers = new Headers(options.headers)
   headers.set('Authorization', `Bearer ${config.token}`)
@@ -142,7 +180,7 @@ export async function requestJson(config, requestPath, options = {}) {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? config.timeoutMs)
     try {
-      const response = await fetch(new URL(requestPath, `${config.baseUrl}/`), {
+      const response = await fetch(requestUrl, {
         method,
         headers,
         body,
@@ -155,13 +193,14 @@ export async function requestJson(config, requestPath, options = {}) {
         throw agentError(`Agent API returned invalid JSON (${response.status})`, { status: response.status })
       }
       if (envelope?.success === true && response.ok) {
-        return options.returnEnvelope ? envelope : envelope.data
+        const safeEnvelope = sanitizeOutput(envelope, config)
+        return options.returnEnvelope ? safeEnvelope : safeEnvelope.data
       }
       const failure = envelope?.error ?? {}
-      const error = agentError(sanitizeMessage(failure.message ?? `Agent API request failed (${response.status})`, config.token), {
-        code: failure.code ?? 'AGENT_HTTP_ERROR',
-        field: failure.field ? sanitizeMessage(failure.field, config.token) : undefined,
-        requestId: envelope?.requestId,
+      const error = agentError(sanitizeMessage(failure.message ?? `Agent API request failed (${response.status})`, config.token, config.userId), {
+        code: sanitizeMessage(failure.code ?? 'AGENT_HTTP_ERROR', config.token, config.userId),
+        field: failure.field ? sanitizeMessage(failure.field, config.token, config.userId) : undefined,
+        requestId: envelope?.requestId ? sanitizeMessage(envelope.requestId, config.token, config.userId) : undefined,
         retryable: failure.retryable === true,
         status: response.status,
       })
@@ -174,7 +213,7 @@ export async function requestJson(config, requestPath, options = {}) {
     } catch (caught) {
       const error = caught?.code || caught?.status
         ? caught
-        : agentError(sanitizeMessage(`Agent API network error: ${caught?.message ?? caught}`, config.token), { network: true, code: 'NETWORK_ERROR', retryable: true })
+        : agentError(sanitizeMessage(`Agent API network error: ${caught?.message ?? caught}`, config.token, config.userId), { network: true, code: 'NETWORK_ERROR', retryable: true })
       if (attempt < retries && shouldRetry(error, error.status ?? 0)) {
         lastError = error
         await delay(config.retryDelayMs * (attempt + 1))
@@ -328,20 +367,33 @@ function assertEqual(label, left, right) {
   if (!sameCanonical(left, right)) throw new Error(`${label} mismatch; refusing to overwrite pinned run data`)
 }
 
-async function loadReceipts(runDir) {
-  const receiptPath = path.join(runDir, 'receipts.json')
-  return await pathExists(receiptPath) ? readJson(receiptPath) : { receiptVersion: 1, artifacts: {}, uploads: {} }
+function validateManifestRunId(manifest, runId) {
+  assertSafeIdentifier('manifest runId', manifest?.runId)
+  assertSafeIdentifier('manifest projectId', manifest?.projectId)
+  if (manifest.runId !== runId) throw new Error('run-id does not match run manifest')
+  return manifest
 }
 
-async function saveReceipt(runDir, updater) {
-  const receipts = await loadReceipts(runDir)
+async function loadReceipts(runDir, manifest) {
+  const receiptPath = path.join(runDir, 'receipts.json')
+  const receipts = await pathExists(receiptPath)
+    ? await readJson(receiptPath)
+    : { receiptVersion: 1, runId: manifest.runId, projectId: manifest.projectId, artifacts: {}, uploads: {} }
+  if (receipts.runId !== manifest.runId || receipts.projectId !== manifest.projectId) throw new Error(`receipts are not bound to this manifest run/project (${receipts.runId ?? 'missing'}/${receipts.projectId ?? 'missing'} != ${manifest.runId}/${manifest.projectId})`)
+  receipts.artifacts ??= {}
+  receipts.uploads ??= {}
+  return receipts
+}
+
+async function saveReceipt(runDir, manifest, updater) {
+  const receipts = await loadReceipts(runDir, manifest)
   await updater(receipts)
   await atomicWriteJson(path.join(runDir, 'receipts.json'), receipts)
   return receipts
 }
 
 function endpoint(...segments) {
-  return [API_ROOT, ...segments.map((segment) => encodeURIComponent(segment))].join('/')
+  return [API_ROOT, ...segments.map((segment) => encodeURIComponent(assertSafeIdentifier('API path identifier', segment)))].join('/')
 }
 
 async function commandDoctor(config) {
@@ -355,15 +407,18 @@ async function commandResolveProject(config, options) {
   const name = required(options, 'name').trim()
   const body = { name }
   if (options.description) body.description = String(options.description).trim()
-  return requestJson(config, endpoint('projects', 'resolve'), {
+  const data = await requestJson(config, endpoint('projects', 'resolve'), {
     method: 'POST',
     body,
     idempotencyKey: sha256Prefixed(`resolve-project:${name}`),
   })
+  assertSafeIdentifier('resolved projectId', data.projectId)
+  return data
 }
 
 async function commandFetchRules(config, projectRoot, options) {
   const projectId = required(options, 'project-id')
+  assertSafeIdentifier('projectId', projectId)
   const sourceHash = required(options, 'source-hash')
   if (!SHA256_PATTERN.test(sourceHash)) throw new Error('--source-hash must be a sha256: value')
   const locale = options.locale ?? 'zh'
@@ -374,7 +429,14 @@ async function commandFetchRules(config, projectRoot, options) {
   if (sha256Prefixed(without(rules, ['contentHash'])) !== rules.contentHash) throw new Error('creator-rules contentHash mismatch')
   const contractsData = {}
   for (const contractRef of rules.contracts ?? []) {
-    const contract = await requestJson(config, contractRef.url)
+    const contractId = assertSafeIdentifier('contract id', contractRef.id)
+    const expectedPath = endpoint('contracts', contractId)
+    const declaredUrl = new URL(contractRef.url, `${config.baseUrl}/`)
+    const baseUrl = new URL(`${config.baseUrl}/`)
+    if (declaredUrl.origin !== baseUrl.origin || declaredUrl.pathname !== expectedPath || declaredUrl.search || declaredUrl.hash || declaredUrl.username || declaredUrl.password) {
+      throw new Error(`contract URL must be the same-origin canonical contract path: ${contractId}`)
+    }
+    const contract = await requestJson(config, expectedPath)
     if (contract.id !== contractRef.id || contract.hash !== contractRef.hash || sha256Prefixed(contract.jsonSchema) !== contractRef.hash) {
       throw new Error(`contract hash mismatch: ${contractRef.id}`)
     }
@@ -383,7 +445,10 @@ async function commandFetchRules(config, projectRoot, options) {
   const snapshot = { ...rules, contractsData }
   validateRuleSnapshot(snapshot)
   const root = insideProject(projectRoot, options['preflight-root'], '.waoo-agent/preflight')
-  const rulesPath = path.join(root, projectId, sourceHash, rules.contentHash, 'rules.json')
+  const projectCache = safeChildPath(root, 'rules cache projectId', projectId)
+  const sourceCache = safeChildPath(projectCache, 'rules cache sourceHash', sourceHash)
+  const ruleCache = safeChildPath(sourceCache, 'rules cache ruleSetHash', rules.contentHash)
+  const rulesPath = path.join(ruleCache, 'rules.json')
   if (await pathExists(rulesPath)) assertEqual('existing rules snapshot', await readJson(rulesPath), snapshot)
   else await atomicWriteJson(rulesPath, snapshot)
   return { rulesPath, ruleSetVersion: rules.ruleSetVersion, ruleSetHash: rules.contentHash, contractCount: Object.keys(contractsData).length }
@@ -398,11 +463,16 @@ function optionFilterMatches(manifest, options) {
     && (!options['video-ratio-override'] || effective.videoRatio === options['video-ratio-override'])
 }
 
-async function validateFormalRunDirectory(runDir, manifest) {
+async function validateFormalRunDirectory(runDir, manifest, options = {}) {
+  const requireCreateResponse = options.requireCreateResponse !== false
+  const requireEpisodeMap = options.requireEpisodeMap !== false
+  assertSafeIdentifier('formal manifest runId', manifest?.runId)
+  assertSafeIdentifier('formal manifest projectId', manifest?.projectId)
   if (!manifest.runId || path.basename(runDir) !== manifest.runId) throw new Error(`formal run directory/runId mismatch: ${runDir}`)
   const source = normalizeSourceText(await readFile(path.join(runDir, 'source.md'), 'utf8'))
   if (sha256Prefixed(source) !== manifest.sourceHash) throw new Error(`formal run source hash mismatch: ${manifest.runId}`)
   const definitions = await readJson(path.join(runDir, 'definition.json'))
+  for (const definition of definitions) assertSafeIdentifier('formal definition episodeKey', definition.episodeKey)
   const episodes = definitions.map(stripEpisodeSourceText)
   if (sha256Prefixed(episodes) !== manifest.definitionHash || !sameCanonical(episodes, manifest.episodeDefinitions)) {
     throw new Error(`formal run definition hash mismatch: ${manifest.runId}`)
@@ -410,6 +480,7 @@ async function validateFormalRunDirectory(runDir, manifest) {
   const rules = validateRuleSnapshot(await readJson(path.join(runDir, 'rules.json')))
   if (rules.contentHash !== manifest.ruleSetHash || rules.ruleSetVersion !== manifest.ruleSetVersion) throw new Error(`formal run rule pin mismatch: ${manifest.runId}`)
   const request = await readJson(path.join(runDir, 'run-request.json'))
+  for (const episode of request.episodes ?? []) assertSafeIdentifier('formal request episodeKey', episode.episodeKey)
   const expectedFingerprint = sha256Prefixed({
     projectId: manifest.projectId,
     sourceHash: manifest.sourceHash,
@@ -422,14 +493,30 @@ async function validateFormalRunDirectory(runDir, manifest) {
   for (const key of ['sourceHash', 'inputKindHint', 'locale', 'effectiveOptions', 'ruleSetVersion', 'ruleSetHash', 'definitionHash', 'episodes']) {
     assertEqual(`formal run request ${key}`, request[key], key === 'episodes' ? episodes : manifest[key])
   }
-  const response = await readJson(path.join(runDir, 'create-run-response.json'))
-  const createdManifest = buildManifest(response, request, definitions)
-  assertEqual('formal run episode map', manifest.episodeMap, createdManifest.episodeMap)
-  return { rules, request }
+  const responsePath = path.join(runDir, 'create-run-response.json')
+  let response
+  let createdManifest
+  if (await pathExists(responsePath)) {
+    response = await readJson(responsePath)
+    createdManifest = buildManifest(response, request, definitions, manifest.projectId)
+    if (manifest.episodeMap !== undefined) assertEqual('formal run episode map', manifest.episodeMap, createdManifest.episodeMap)
+    else if (requireEpisodeMap) throw new Error(`formal run episode map is missing: ${manifest.runId}`)
+  } else if (requireCreateResponse) {
+    throw new Error(`formal run create response is missing: ${manifest.runId}`)
+  }
+  if (manifest.episodeMap === undefined && requireEpisodeMap) throw new Error(`formal run episode map is missing: ${manifest.runId}`)
+  if (manifest.episodeMap !== undefined) {
+    for (const [episodeKey, mapping] of Object.entries(manifest.episodeMap)) {
+      assertSafeIdentifier('manifest episodeKey', episodeKey)
+      assertSafeIdentifier('manifest episodeId', mapping?.episodeId)
+    }
+  }
+  return { definitions, rules, request, response, createdManifest }
 }
 
 async function commandFindLocalRun(projectRoot, options) {
   const projectId = required(options, 'project-id')
+  assertSafeIdentifier('projectId', projectId)
   const source = normalizeSourceText(await readFile(insideProject(projectRoot, required(options, 'source-file')), 'utf8'))
   const sourceHash = sha256Prefixed(source)
   const runsRoot = insideProject(projectRoot, options['runs-root'], '.waoo-agent/runs')
@@ -437,13 +524,17 @@ async function commandFindLocalRun(projectRoot, options) {
   const formal = []
   if (await pathExists(runsRoot)) {
     for (const name of await readdir(runsRoot)) {
-      const runDir = path.join(runsRoot, name)
+      assertSafeIdentifier('run directory id', name)
+      const runDir = safeChildPath(runsRoot, 'run directory id', name)
       if (!await stat(runDir).then((value) => value.isDirectory()).catch(() => false)) continue
       const manifestPath = path.join(runDir, 'manifest.json')
       if (!await pathExists(manifestPath)) continue
       const manifest = await readJson(manifestPath)
-      if (manifest.projectId === projectId && manifest.sourceHash === sourceHash && manifest.status !== COMPLETE_STATUS && optionFilterMatches(manifest, options)) {
+      if (manifest.projectId === projectId && manifest.sourceHash === sourceHash && optionFilterMatches(manifest, options)) {
         await validateFormalRunDirectory(runDir, manifest)
+        const receipts = await loadReceipts(runDir, manifest)
+        const latestStatus = receipts.finalize?.data?.status ?? receipts.serverRun?.data?.status ?? receipts.snapshot?.data?.status ?? manifest.status
+        if (latestStatus === COMPLETE_STATUS) continue
         formal.push({ status: 'resume', runId: manifest.runId, runFingerprint: manifest.runFingerprint, runDir })
       }
     }
@@ -451,10 +542,12 @@ async function commandFindLocalRun(projectRoot, options) {
   const pending = []
   if (await pathExists(intakeRoot)) {
     for (const name of await readdir(intakeRoot)) {
-      const intakeDir = path.join(intakeRoot, name)
+      assertSafeIdentifier('intake fingerprint', name)
+      const intakeDir = safeChildPath(intakeRoot, 'intake fingerprint', name)
       const requestPath = path.join(intakeDir, 'run-request.json')
       if (!await pathExists(requestPath)) continue
       const request = await readJson(requestPath)
+      for (const episode of request.episodes ?? []) assertSafeIdentifier('pending request episodeKey', episode.episodeKey)
       if (request.projectId !== undefined) throw new Error(`pending request contains forbidden projectId field: ${name}`)
       const intake = await readJson(path.join(intakeDir, 'intake.json'))
       if (intake.projectId !== projectId || request.sourceHash !== sourceHash || !optionFilterMatches({ ...request, status: 'created' }, options)) continue
@@ -488,6 +581,7 @@ function normalizeDefinitions(raw) {
   const values = Array.isArray(raw) ? raw : raw.episodes
   if (!Array.isArray(values) || values.length === 0) throw new Error('definition file must contain at least one episode')
   return values.map((episode, index) => {
+    assertSafeIdentifier('episodeKey', episode.episodeKey)
     if (episode.ordinal !== index + 1) throw new Error('episode ordinals must be continuous from 1')
     const sourceText = normalizeSourceText(episode.sourceText)
     if (!sourceText) throw new Error(`definition episode ${episode.episodeKey} has empty sourceText`)
@@ -503,14 +597,21 @@ function normalizeDefinitions(raw) {
   })
 }
 
-function buildManifest(response, request, definitions) {
+function buildManifest(response, request, definitions, expectedProjectId) {
   if (!response.runId || response.projectId === undefined || !response.status || !Array.isArray(response.episodes)) throw new Error('create-run response lacks runId/status/episode map')
+  assertSafeIdentifier('create response runId', response.runId)
+  assertSafeIdentifier('create response projectId', response.projectId)
+  if (response.projectId !== expectedProjectId) throw new Error('create-run response projectId mismatch')
   if (response.sourceHash !== request.sourceHash || response.runFingerprint !== request.runFingerprint) throw new Error('create-run response source/fingerprint mismatch')
   const responseByKey = new Map(response.episodes.map((episode) => [episode.episodeKey, episode]))
   if (responseByKey.size !== definitions.length) throw new Error('create-run response episode map is incomplete')
   const episodeMap = {}
   for (const definition of definitions) {
     const episode = responseByKey.get(definition.episodeKey)
+    if (episode) {
+      assertSafeIdentifier('create response episodeKey', episode.episodeKey)
+      assertSafeIdentifier('create response episodeId', episode.episodeId)
+    }
     if (!episode || !episode.episodeId || !Number.isInteger(episode.episodeNumber)) throw new Error(`create-run response missing episode map: ${definition.episodeKey}`)
     if (episode.name !== definition.name) throw new Error(`create-run response episode name mismatch: ${definition.episodeKey}`)
     episodeMap[definition.episodeKey] = { episodeId: episode.episodeId, episodeNumber: episode.episodeNumber }
@@ -575,6 +676,7 @@ async function prepareIntake({ intakeDir, source, definitions, rules, request, p
 
 async function commandCreateRun(config, projectRoot, options) {
   const projectId = required(options, 'project-id')
+  assertSafeIdentifier('projectId', projectId)
   const source = normalizeSourceText(await readFile(insideProject(projectRoot, required(options, 'source-file')), 'utf8'))
   const definitions = normalizeDefinitions(await readJson(insideProject(projectRoot, required(options, 'definition-file'))))
   const rules = validateRuleSnapshot(await readJson(insideProject(projectRoot, required(options, 'rules-file'))))
@@ -592,7 +694,7 @@ async function commandCreateRun(config, projectRoot, options) {
   const request = { schemaVersion: 1, sourceHash, runFingerprint, inputKindHint, locale, effectiveOptions, ruleSetVersion: rules.ruleSetVersion, ruleSetHash: rules.contentHash, definitionHash, episodes }
   const intakeRoot = insideProject(projectRoot, options['intake-root'], '.waoo-agent/intake')
   const runsRoot = insideProject(projectRoot, options['runs-root'], '.waoo-agent/runs')
-  const intakeDir = path.join(intakeRoot, runFingerprint)
+  const intakeDir = safeChildPath(intakeRoot, 'runFingerprint', runFingerprint)
   const createdIntake = await prepareIntake({ intakeDir, source, definitions, rules, request, projectId })
   let response
   try {
@@ -604,43 +706,65 @@ async function commandCreateRun(config, projectRoot, options) {
     throw error
   }
   await atomicWriteJson(path.join(intakeDir, 'create-run-response.json'), response)
-  const manifest = buildManifest(response, request, definitions)
+  const manifest = buildManifest(response, request, definitions, projectId)
   await atomicWriteJson(path.join(intakeDir, 'manifest.json'), manifest)
   const roundTripManifest = await readJson(path.join(intakeDir, 'manifest.json'))
   assertEqual('preflight manifest', roundTripManifest, manifest)
-  const runDir = path.join(runsRoot, response.runId)
+  const runDir = safeChildPath(runsRoot, 'runId', response.runId)
   await mkdir(runsRoot, { recursive: true })
   if (!await pathExists(runDir)) {
     await rename(intakeDir, runDir)
   } else {
     const existing = await readJson(path.join(runDir, 'manifest.json'))
-    await validateFormalRunDirectory(runDir, existing)
+    await validateFormalRunDirectory(runDir, existing, { requireCreateResponse: false, requireEpisodeMap: false })
     for (const key of ['runId', 'projectId', 'sourceHash', 'runFingerprint', 'ruleSetVersion', 'ruleSetHash', 'definitionHash']) {
       if (existing[key] !== manifest[key]) throw new Error(`existing run manifest ${key} mismatch; refusing to overwrite`)
     }
-    assertEqual('existing run episode map', existing.episodeMap, manifest.episodeMap)
+    if (existing.episodeMap !== undefined) assertEqual('existing run episode map', existing.episodeMap, manifest.episodeMap)
     assertEqual('existing run definitions', existing.episodeDefinitions, manifest.episodeDefinitions)
     assertEqual('existing run rules', await readJson(path.join(runDir, 'rules.json')), rules)
-    if (!await pathExists(path.join(runDir, 'create-run-response.json'))) await copyFile(path.join(intakeDir, 'create-run-response.json'), path.join(runDir, 'create-run-response.json'))
-    await rm(intakeDir, { recursive: true, force: true })
+    const responsePath = path.join(runDir, 'create-run-response.json')
+    if (!await pathExists(responsePath)) await atomicWriteJson(responsePath, response)
+    if (existing.episodeMap === undefined) await atomicWriteJson(path.join(runDir, 'manifest.json'), { ...existing, episodeMap: manifest.episodeMap })
+    await validateFormalRunDirectory(runDir, await readJson(path.join(runDir, 'manifest.json')))
+    if (createdIntake) await rm(intakeDir, { recursive: true, force: true })
   }
-  if (!await pathExists(path.join(runDir, 'receipts.json'))) await atomicWriteJson(path.join(runDir, 'receipts.json'), { receiptVersion: 1, artifacts: {}, uploads: {} })
+  if (!await pathExists(path.join(runDir, 'receipts.json'))) await atomicWriteJson(path.join(runDir, 'receipts.json'), { receiptVersion: 1, runId: response.runId, projectId: response.projectId, artifacts: {}, uploads: {} })
   return { runId: response.runId, resumed: response.resumed, runFingerprint, runDir, episodeMap: manifest.episodeMap }
 }
 
 function validateRunPins(manifest, server) {
+  assertSafeIdentifier('server runId', server?.runId)
+  assertSafeIdentifier('server projectId', server?.projectId)
+  for (const episode of server?.episodes ?? []) {
+    assertSafeIdentifier('server episodeKey', episode.episodeKey)
+    assertSafeIdentifier('server episodeId', episode.episodeId)
+  }
   for (const key of ['runId', 'projectId', 'sourceHash', 'runFingerprint', 'ruleSetVersion', 'ruleSetHash']) {
     if (manifest[key] !== server[key]) throw new Error(`server run ${key} does not match pinned manifest`)
   }
 }
 
+async function loadBoundManifest(runDir, runId) {
+  if (path.basename(runDir) !== runId) throw new Error('run-id does not match run-dir basename')
+  return validateManifestRunId(await readJson(path.join(runDir, 'manifest.json')), runId)
+}
+
+async function updateManifest(runDir, current, patch) {
+  const updated = { ...current, ...patch }
+  await atomicWriteJson(path.join(runDir, 'manifest.json'), updated)
+  return updated
+}
+
 async function commandGetRun(config, projectRoot, options) {
   const runId = required(options, 'run-id')
+  assertSafeIdentifier('runId', runId)
   const runDir = insideProject(projectRoot, required(options, 'run-dir'))
-  const manifest = await readJson(path.join(runDir, 'manifest.json'))
+  const manifest = await loadBoundManifest(runDir, runId)
   const server = await requestJson(config, endpoint('runs', runId))
   validateRunPins(manifest, server)
-  await saveReceipt(runDir, (receipts) => { receipts.serverRun = { data: server, receivedAt: new Date().toISOString() } })
+  await saveReceipt(runDir, manifest, (receipts) => { receipts.serverRun = { data: server, receivedAt: new Date().toISOString() } })
+  await updateManifest(runDir, manifest, { status: server.status, currentStage: server.currentStage })
   return server
 }
 
@@ -668,17 +792,19 @@ const RECEIPT_COLLECTION = {
 
 async function commandCommit(config, projectRoot, command, options) {
   const runId = required(options, 'run-id')
+  assertSafeIdentifier('runId', runId)
   const runDir = insideProject(projectRoot, required(options, 'run-dir'))
-  const manifest = await readJson(path.join(runDir, 'manifest.json'))
-  if (manifest.runId !== runId) throw new Error('run-id does not match run manifest')
+  const manifest = await loadBoundManifest(runDir, runId)
   const artifactPath = insideProject(projectRoot, required(options, 'artifact-file'))
+  if (options['episode-key']) assertSafeIdentifier('episodeKey', options['episode-key'])
   const artifact = artifactFor(command, await readJson(artifactPath), options['episode-key'])
   const artifactHash = sha256Prefixed(artifact)
   const dryRun = options.commit !== true
   const body = { schemaVersion: 1, ruleSetVersion: manifest.ruleSetVersion, ruleSetHash: manifest.ruleSetHash, artifactHash, dryRun, data: artifact }
   const envelope = await requestJson(config, COMMIT_PATH[command](runId, options['episode-key']), { method: 'PUT', body, idempotencyKey: artifactHash, returnEnvelope: true })
+  if (envelope.data?.artifactHash !== artifactHash || envelope.data?.dryRun !== dryRun) throw new Error(`${command} response hash/dryRun mismatch`)
   if (!dryRun) {
-    await saveReceipt(runDir, (receipts) => {
+    await saveReceipt(runDir, manifest, (receipts) => {
       const collection = RECEIPT_COLLECTION[command]
       const value = { artifactHash, data: envelope.data, requestId: envelope.requestId, committedAt: new Date().toISOString() }
       if (command === 'commit-assets') receipts.artifacts.assets = value
@@ -703,10 +829,14 @@ function mimeForFile(filePath) {
 
 async function commandUpload(config, projectRoot, options) {
   const runId = required(options, 'run-id')
+  assertSafeIdentifier('runId', runId)
   const runDir = insideProject(projectRoot, required(options, 'run-dir'))
+  const manifest = await loadBoundManifest(runDir, runId)
   const filePath = insideProject(projectRoot, required(options, 'file'))
   const targetType = required(options, 'target-type')
+  if (!['character-appearance', 'location-image', 'prop-image', 'panel-frame'].includes(targetType)) throw new Error('--target-type is invalid')
   const targetKey = required(options, 'target-key')
+  assertSafeIdentifier('targetKey', targetKey)
   const variantIndex = Number(options['variant-index'] ?? 0)
   if (!Number.isInteger(variantIndex) || variantIndex < 0) throw new Error('--variant-index must be a nonnegative integer')
   const bytes = await readFile(filePath)
@@ -719,8 +849,11 @@ async function commandUpload(config, projectRoot, options) {
   form.set('contentSha256', contentSha256)
   form.set('file', new Blob([bytes], { type: mimeForFile(filePath) }), path.basename(filePath))
   const envelope = await requestJson(config, endpoint('runs', runId, 'uploads'), { method: 'POST', body: form, idempotencyKey, returnEnvelope: true })
+  for (const [key, expected] of Object.entries({ runId, targetType, targetKey, variantIndex, contentSha256 })) {
+    if (envelope.data?.[key] !== expected) throw new Error(`upload response ${key} mismatch`)
+  }
   const receiptKey = canonicalJson({ targetType, targetKey, variantIndex, contentSha256 })
-  await saveReceipt(runDir, (receipts) => {
+  await saveReceipt(runDir, manifest, (receipts) => {
     const existing = receipts.uploads[receiptKey]
     const value = { contentSha256, targetType, targetKey, variantIndex, data: envelope.data, requestId: envelope.requestId, uploadedAt: new Date().toISOString() }
     if (existing && !sameCanonical(existing.data, value.data)) throw new Error('upload receipt conflict')
@@ -731,14 +864,19 @@ async function commandUpload(config, projectRoot, options) {
 
 async function commandSnapshot(config, projectRoot, options) {
   const runId = required(options, 'run-id')
+  assertSafeIdentifier('runId', runId)
   const runDir = insideProject(projectRoot, required(options, 'run-dir'))
+  const manifest = await loadBoundManifest(runDir, runId)
   const envelope = await requestJson(config, endpoint('runs', runId, 'snapshot'), { returnEnvelope: true })
-  await saveReceipt(runDir, (receipts) => { receipts.snapshot = { data: envelope.data, requestId: envelope.requestId, receivedAt: new Date().toISOString() } })
+  if (envelope.data?.runId !== runId) throw new Error('snapshot response runId mismatch')
+  await saveReceipt(runDir, manifest, (receipts) => { receipts.snapshot = { data: envelope.data, requestId: envelope.requestId, receivedAt: new Date().toISOString() } })
+  await updateManifest(runDir, manifest, { status: envelope.data.status })
   return envelope.data
 }
 
 function receiptHashMap(collection = {}) {
   return Object.fromEntries(Object.entries(collection).map(([key, receipt]) => {
+    assertSafeIdentifier('receipt episodeKey', key)
     if (!SHA256_PATTERN.test(receipt?.artifactHash ?? '')) throw new Error(`committed receipt is missing artifactHash: ${key}`)
     return [key, receipt.artifactHash]
   }))
@@ -746,9 +884,10 @@ function receiptHashMap(collection = {}) {
 
 async function commandFinalize(config, projectRoot, options) {
   const runId = required(options, 'run-id')
+  assertSafeIdentifier('runId', runId)
   const runDir = insideProject(projectRoot, required(options, 'run-dir'))
-  const manifest = await readJson(path.join(runDir, 'manifest.json'))
-  const receipts = await loadReceipts(runDir)
+  const manifest = await loadBoundManifest(runDir, runId)
+  const receipts = await loadReceipts(runDir, manifest)
   const assets = receipts.artifacts?.assets?.artifactHash
   if (!SHA256_PATTERN.test(assets ?? '')) throw new Error('assets committed receipt is required before finalize')
   const body = {
@@ -763,11 +902,13 @@ async function commandFinalize(config, projectRoot, options) {
   }
   const idempotencyKey = sha256Prefixed(body)
   const envelope = await requestJson(config, endpoint('runs', runId, 'finalize'), { method: 'POST', body, idempotencyKey, returnEnvelope: true })
-  await saveReceipt(runDir, (current) => { current.finalize = { expected: body.expected, data: envelope.data, requestId: envelope.requestId, finalizedAt: new Date().toISOString() } })
+  if (envelope.data?.runId !== runId || envelope.data?.status !== COMPLETE_STATUS) throw new Error('finalize response runId/status mismatch')
+  await saveReceipt(runDir, manifest, (current) => { current.finalize = { expected: body.expected, data: envelope.data, requestId: envelope.requestId, finalizedAt: new Date().toISOString() } })
+  await updateManifest(runDir, manifest, { status: COMPLETE_STATUS, currentStage: COMPLETE_STATUS, completedAt: envelope.data.completedAt })
   return envelope.data
 }
 
-export async function runCli(argv = process.argv.slice(2), context = {}) {
+async function runCliUnsafe(argv = process.argv.slice(2), context = {}) {
   const { command, options } = parseArgs(argv)
   if (!command) throw new Error('a command is required')
   const projectRoot = await resolveProjectRoot({ explicitRoot: options['project-root'], env: context.env ?? process.env, cwd: context.cwd ?? process.cwd() })
@@ -791,8 +932,22 @@ export async function runCli(argv = process.argv.slice(2), context = {}) {
     case 'finalize': result = await commandFinalize(config, projectRoot, options); break
     default: throw new Error(`unknown command: ${command}`)
   }
-  if (context.print === true) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+  const outputEnv = context.env ?? process.env
+  if (context.print === true) process.stdout.write(`${JSON.stringify(sanitizeOutput(result, { token: outputEnv.WAOO_AGENT_TOKEN, userId: outputEnv.WAOO_AGENT_USER_ID }), null, 2)}\n`)
   return result
+}
+
+export async function runCli(argv = process.argv.slice(2), context = {}) {
+  try {
+    return await runCliUnsafe(argv, context)
+  } catch (error) {
+    const env = context.env ?? process.env
+    error.message = sanitizeMessage(error.message, env.WAOO_AGENT_TOKEN, env.WAOO_AGENT_USER_ID)
+    if (error.code) error.code = sanitizeMessage(error.code, env.WAOO_AGENT_TOKEN, env.WAOO_AGENT_USER_ID)
+    if (error.field) error.field = sanitizeMessage(error.field, env.WAOO_AGENT_TOKEN, env.WAOO_AGENT_USER_ID)
+    if (error.requestId) error.requestId = sanitizeMessage(error.requestId, env.WAOO_AGENT_TOKEN, env.WAOO_AGENT_USER_ID)
+    throw error
+  }
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
@@ -801,10 +956,10 @@ if (isMain) {
     const safe = {
       success: false,
       error: {
-        code: error.code ?? 'CLIENT_ERROR',
-        message: sanitizeMessage(error.message, process.env.WAOO_AGENT_TOKEN),
-        ...(error.field ? { field: error.field } : {}),
-        ...(error.requestId ? { requestId: error.requestId } : {}),
+        code: sanitizeMessage(error.code ?? 'CLIENT_ERROR', process.env.WAOO_AGENT_TOKEN, process.env.WAOO_AGENT_USER_ID),
+        message: sanitizeMessage(error.message, process.env.WAOO_AGENT_TOKEN, process.env.WAOO_AGENT_USER_ID),
+        ...(error.field ? { field: sanitizeMessage(error.field, process.env.WAOO_AGENT_TOKEN, process.env.WAOO_AGENT_USER_ID) } : {}),
+        ...(error.requestId ? { requestId: sanitizeMessage(error.requestId, process.env.WAOO_AGENT_TOKEN, process.env.WAOO_AGENT_USER_ID) } : {}),
       },
     }
     process.stderr.write(`${JSON.stringify(safe)}\n`)
