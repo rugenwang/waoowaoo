@@ -73,15 +73,6 @@ function sanitizeMessage(message, ...secrets) {
   return result
 }
 
-function sanitizeOutput(value, config) {
-  if (typeof value === 'string') return sanitizeMessage(value, config?.token, config?.userId)
-  if (Array.isArray(value)) return value.map((item) => sanitizeOutput(item, config))
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [sanitizeMessage(key, config?.token, config?.userId), sanitizeOutput(item, config)]))
-  }
-  return value
-}
-
 function agentError(message, details = {}) {
   const error = new Error(message)
   Object.assign(error, details)
@@ -193,8 +184,7 @@ export async function requestJson(config, requestPath, options = {}) {
         throw agentError(`Agent API returned invalid JSON (${response.status})`, { status: response.status })
       }
       if (envelope?.success === true && response.ok) {
-        const safeEnvelope = sanitizeOutput(envelope, config)
-        return options.returnEnvelope ? safeEnvelope : safeEnvelope.data
+        return options.returnEnvelope ? envelope : envelope.data
       }
       const failure = envelope?.error ?? {}
       const error = agentError(sanitizeMessage(failure.message ?? `Agent API request failed (${response.status})`, config.token, config.userId), {
@@ -932,8 +922,7 @@ async function runCliUnsafe(argv = process.argv.slice(2), context = {}) {
     case 'finalize': result = await commandFinalize(config, projectRoot, options); break
     default: throw new Error(`unknown command: ${command}`)
   }
-  const outputEnv = context.env ?? process.env
-  if (context.print === true) process.stdout.write(`${JSON.stringify(sanitizeOutput(result, { token: outputEnv.WAOO_AGENT_TOKEN, userId: outputEnv.WAOO_AGENT_USER_ID }), null, 2)}\n`)
+  if (context.print === true) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
   return result
 }
 

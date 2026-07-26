@@ -123,6 +123,17 @@ test('failure metadata and CLI-safe errors redact token and user id from every f
   })
 })
 
+test('successful response data is returned byte-for-byte semantically unchanged even when it contains credential text', async (t) => {
+  const original = {
+    literalToken: 'top-secret-token',
+    literalUserId: 'user-1',
+    nested: ['prefix-top-secret-token-suffix', { value: 'user-1' }],
+  }
+  const mock = await startMockWaooServer(() => ({ body: { success: true, requestId: 'success-request', data: original } }))
+  t.after(mock.close)
+  assert.deepEqual(await requestJson(resolveConfig(envFor(mock.baseUrl)), '/api/agent/v1/contracts/x'), original)
+})
+
 test('atomic JSON IO never leaves temporary files and preserves values', async (t) => {
   const root = await tempProject(t)
   const target = path.join(root, 'nested', 'value.json')
@@ -161,12 +172,16 @@ test('CLI covers doctor, project/rules/run, dry-run commits, upload, snapshot an
   const screenplayFile = path.join(root, 'screenplay.json')
   const storyboardsFile = path.join(root, 'storyboards.json')
   const imageFile = path.join(root, 'image.png')
+  const storyArtifact = { episodeKey: 'episode-001', sourceHash: sha256Prefixed('正文'), inputKind: 'story', name: '第一集', novelText: '完整故事' }
+  const assetsArtifact = { characters: [], locations: [], props: [] }
+  const screenplayArtifact = { episodeKey: 'episode-001', clips: [] }
+  const storyboardsArtifact = { episodeKey: 'episode-001', storyboards: [] }
   await writeFile(sourceFile, ' 第一集\r\n正文 ')
   await writeFile(definitionFile, JSON.stringify([{ episodeKey: 'episode-001', ordinal: 1, sourceText: '正文', name: '第一集' }]))
-  await writeFile(artifactFile, JSON.stringify({ 'episode-001': { episodeKey: 'episode-001', sourceHash: sha256Prefixed('正文'), inputKind: 'story', name: '第一集', novelText: '完整故事' } }))
-  await writeFile(assetsFile, JSON.stringify({ characters: [], locations: [], props: [] }))
-  await writeFile(screenplayFile, JSON.stringify({ 'episode-001': { episodeKey: 'episode-001', clips: [] } }))
-  await writeFile(storyboardsFile, JSON.stringify({ 'episode-001': { episodeKey: 'episode-001', storyboards: [] } }))
+  await writeFile(artifactFile, JSON.stringify({ 'episode-001': storyArtifact }))
+  await writeFile(assetsFile, JSON.stringify(assetsArtifact))
+  await writeFile(screenplayFile, JSON.stringify({ 'episode-001': screenplayArtifact }))
+  await writeFile(storyboardsFile, JSON.stringify({ 'episode-001': storyboardsArtifact }))
   await writeFile(imageFile, Buffer.from([137, 80, 78, 71]))
 
   const schema = { type: 'object' }
@@ -254,26 +269,72 @@ test('CLI covers doctor, project/rules/run, dry-run commits, upload, snapshot an
   assert.equal(typeof completedManifest.completedAt, 'string')
 
   const [doctorRequest, resolveRequest, rulesRequest, contractRequest, createRequest] = mock.requests
+  assert.equal(mock.requests.length, 17)
+  for (const request of mock.requests) {
+    assert.equal(request.headers.authorization, 'Bearer top-secret-token')
+    assert.equal(request.headers['x-waoo-user-id'], 'user-1')
+  }
   assert.deepEqual([doctorRequest.method, doctorRequest.url, doctorRequest.headers['idempotency-key']], ['GET', '/api/agent/v1/contracts/waoo-agent-resolve-project.v1', undefined])
+  assert.equal(doctorRequest.body.length, 0)
   assert.deepEqual([resolveRequest.method, resolveRequest.url, resolveRequest.json], ['POST', '/api/agent/v1/projects/resolve', { name: '测试项目' }])
   assert.equal(resolveRequest.headers['idempotency-key'], sha256Prefixed('resolve-project:测试项目'))
   assert.deepEqual([rulesRequest.method, rulesRequest.url, rulesRequest.headers['idempotency-key']], ['GET', '/api/agent/v1/projects/project-1/creator-rules?locale=zh', undefined])
+  assert.equal(rulesRequest.body.length, 0)
   assert.deepEqual([contractRequest.method, contractRequest.url], ['GET', '/api/agent/v1/contracts/waoo-agent-resolve-project.v1'])
-  assert.deepEqual([createRequest.method, createRequest.url], ['POST', '/api/agent/v1/projects/project-1/runs'])
+  assert.equal(contractRequest.headers['idempotency-key'], undefined)
+  assert.equal(contractRequest.body.length, 0)
+  const expectedEpisodes = [{ episodeKey: 'episode-001', ordinal: 1, sourceHash: sha256Prefixed('正文'), name: '第一集' }]
+  const expectedSourceHash = sha256Prefixed('第一集\n正文')
+  const expectedOptions = { artStyle: 'realistic', videoRatio: '9:16', episodeSplitHint: 'auto' }
+  const expectedFingerprint = sha256Prefixed({ projectId: 'project-1', sourceHash: expectedSourceHash, inputKindHint: 'auto', locale: 'zh', effectiveOptions: expectedOptions, ruleSetHash: rules.contentHash })
+  const expectedCreateBody = { schemaVersion: 1, sourceHash: expectedSourceHash, runFingerprint: expectedFingerprint, inputKindHint: 'auto', locale: 'zh', effectiveOptions: expectedOptions, ruleSetVersion: rules.ruleSetVersion, ruleSetHash: rules.contentHash, definitionHash: sha256Prefixed(expectedEpisodes), episodes: expectedEpisodes }
+  assert.deepEqual([createRequest.method, createRequest.url, createRequest.json], ['POST', '/api/agent/v1/projects/project-1/runs', expectedCreateBody])
   assert.equal(createRequest.headers['idempotency-key'], createRequest.json.runFingerprint)
-  assert.equal(createRequest.json.definitionHash, sha256Prefixed(createRequest.json.episodes))
-  const uploadRequest = mock.requests.find((request) => request.url.endsWith('/uploads'))
+  const getRequest = mock.requests[5]
+  assert.deepEqual([getRequest.method, getRequest.url, getRequest.headers['idempotency-key'], getRequest.body.length], ['GET', '/api/agent/v1/runs/run-1', undefined, 0])
+
+  const commitCases = [
+    { indexes: [6, 7], path: '/api/agent/v1/runs/run-1/episodes/episode-001/story', data: storyArtifact },
+    { indexes: [8, 9], path: '/api/agent/v1/runs/run-1/assets', data: assetsArtifact },
+    { indexes: [10, 11], path: '/api/agent/v1/runs/run-1/episodes/episode-001/screenplay', data: screenplayArtifact },
+    { indexes: [12, 13], path: '/api/agent/v1/runs/run-1/episodes/episode-001/storyboards', data: storyboardsArtifact },
+  ]
+  for (const { indexes, path: requestPath, data } of commitCases) {
+    const artifactHash = sha256Prefixed(data)
+    for (const [offset, index] of indexes.entries()) {
+      const request = mock.requests[index]
+      assert.deepEqual([request.method, request.url, request.headers['idempotency-key']], ['PUT', requestPath, artifactHash])
+      assert.deepEqual(request.json, { schemaVersion: 1, ruleSetVersion: rules.ruleSetVersion, ruleSetHash: rules.contentHash, artifactHash, dryRun: offset === 0, data })
+    }
+  }
+  const uploadRequest = mock.requests[14]
+  assert.deepEqual([uploadRequest.method, uploadRequest.url], ['POST', '/api/agent/v1/runs/run-1/uploads'])
   const multipart = parseMultipartRequest(uploadRequest)
   assert.deepEqual(multipart.fields, { targetType: 'character-appearance', targetKey: 'hero.base', variantIndex: '0', contentSha256: sha256Prefixed(Buffer.from([137, 80, 78, 71])) })
   assert.deepEqual(multipart.file.bytes, Buffer.from([137, 80, 78, 71]))
   assert.equal(uploadRequest.headers['idempotency-key'], sha256Prefixed({ runId: 'run-1', targetType: 'character-appearance', targetKey: 'hero.base', variantIndex: 0, contentSha256: multipart.fields.contentSha256 }))
-  const snapshotRequest = mock.requests.find((request) => request.url.endsWith('/snapshot'))
-  assert.deepEqual([snapshotRequest.method, snapshotRequest.headers['idempotency-key']], ['GET', undefined])
-  const finalCall = mock.requests.find((request) => request.url.endsWith('/finalize'))
-  assert.deepEqual([finalCall.method, finalCall.headers['idempotency-key']], ['POST', sha256Prefixed(finalCall.json)])
+  const snapshotRequest = mock.requests[15]
+  assert.deepEqual([snapshotRequest.method, snapshotRequest.url, snapshotRequest.headers['idempotency-key'], snapshotRequest.body.length], ['GET', '/api/agent/v1/runs/run-1/snapshot', undefined, 0])
+  const finalCall = mock.requests[16]
+  assert.deepEqual([finalCall.method, finalCall.url, finalCall.headers['idempotency-key']], ['POST', '/api/agent/v1/runs/run-1/finalize', sha256Prefixed(finalCall.json)])
+  assert.deepEqual(finalCall.json, { schemaVersion: 1, ruleSetHash: rules.contentHash, expected: { assets: sha256Prefixed(assetsArtifact), stories: { 'episode-001': sha256Prefixed(storyArtifact) }, screenplays: { 'episode-001': sha256Prefixed(screenplayArtifact) }, storyboards: { 'episode-001': sha256Prefixed(storyboardsArtifact) } } })
 
+  const finalReceipts = await readJson(path.join(runDir, 'receipts.json'))
+  assert.deepEqual(finalReceipts.serverRun.data, { runId: 'run-1', projectId: 'project-1', status: 'created', currentStage: 'created', sourceHash: expectedSourceHash, runFingerprint: expectedFingerprint, ruleSetVersion: rules.ruleSetVersion, ruleSetHash: rules.contentHash, episodes: [{ episodeKey: 'episode-001', episodeId: 'ep-db-1', episodeNumber: 1, status: 'created' }] })
+  assert.equal(finalReceipts.artifacts.stories['episode-001'].artifactHash, sha256Prefixed(storyArtifact))
+  assert.equal(finalReceipts.artifacts.assets.artifactHash, sha256Prefixed(assetsArtifact))
+  assert.equal(finalReceipts.artifacts.screenplays['episode-001'].artifactHash, sha256Prefixed(screenplayArtifact))
+  assert.equal(finalReceipts.artifacts.storyboards['episode-001'].artifactHash, sha256Prefixed(storyboardsArtifact))
+  assert.equal(Object.keys(finalReceipts.uploads).length, 1)
+  assert.equal(finalReceipts.snapshot.data.runId, 'run-1')
+  assert.deepEqual(finalReceipts.finalize.expected, finalCall.json.expected)
+  assert.equal(finalReceipts.finalize.data.status, 'completed')
+  assert.ok(!(await readdir(runDir, { recursive: true })).some((name) => String(name).includes('.tmp')))
+
+  const beforeFindRequestCount = mock.requests.length
   const afterFinalize = await runCli(['find-local-run', ...common, '--project-id', 'project-1', '--source-file', sourceFile], { env })
   assert.equal(afterFinalize.status, 'not-found')
+  assert.equal(mock.requests.length, beforeFindRequestCount)
 })
 
 test('unsafe path identifiers and malicious contract URLs are rejected before credentialed requests', async (t) => {
@@ -392,7 +453,18 @@ test('resumed create-run repairs only missing create response and episode map', 
   manifest.stages = { story: { completed: true } }
   manifest.images = { kept: { contentSha256: 'sha256:' + 'd'.repeat(64) } }
   await atomicWriteJson(path.join(runDir, 'manifest.json'), manifest)
-  await atomicWriteJson(path.join(runDir, 'receipts.json'), { receiptVersion: 1, runId: 'run-repair', projectId: 'project-1', artifacts: { stories: { 'episode-001': { artifactHash: 'sha256:' + 'e'.repeat(64) } } }, uploads: {} })
+  const preservedReceipts = { receiptVersion: 1, runId: 'run-repair', projectId: 'project-1', artifacts: { stories: { 'episode-001': { artifactHash: 'sha256:' + 'e'.repeat(64), marker: 'keep-receipt' } } }, uploads: { kept: { marker: 'keep-upload' } } }
+  await atomicWriteJson(path.join(runDir, 'receipts.json'), preservedReceipts)
+  const preservedArtifacts = {
+    'story.json': '{"story":"keep"}\n',
+    'assets.json': '{"assets":"keep"}\n',
+    'screenplay.json': '{"screenplay":"keep"}\n',
+    'storyboards.json': '{"storyboards":"keep"}\n',
+  }
+  for (const [name, content] of Object.entries(preservedArtifacts)) await writeFile(path.join(runDir, name), content)
+  const preservedImage = path.join(runDir, 'images/assets/hero/variant-0.png')
+  await mkdir(path.dirname(preservedImage), { recursive: true })
+  await writeFile(preservedImage, Buffer.from([1, 2, 3, 4]))
   await rm(path.join(runDir, 'create-run-response.json'))
   const resumed = await runCli(args, { env: envFor(mock.baseUrl) })
   assert.equal(resumed.resumed, true)
@@ -400,7 +472,9 @@ test('resumed create-run repairs only missing create response and episode map', 
   assert.deepEqual(repaired.episodeMap, { 'episode-001': { episodeId: 'ep-1', episodeNumber: 1 } })
   assert.deepEqual(repaired.stages, manifest.stages)
   assert.deepEqual(repaired.images, manifest.images)
-  assert.equal((await readJson(path.join(runDir, 'receipts.json'))).artifacts.stories['episode-001'].artifactHash, 'sha256:' + 'e'.repeat(64))
+  assert.deepEqual(await readJson(path.join(runDir, 'receipts.json')), preservedReceipts)
+  for (const [name, content] of Object.entries(preservedArtifacts)) assert.equal(await readFile(path.join(runDir, name), 'utf8'), content)
+  assert.deepEqual(await readFile(preservedImage), Buffer.from([1, 2, 3, 4]))
   assert.equal(await pathExistsForTest(path.join(runDir, 'create-run-response.json')), true)
 })
 
@@ -449,6 +523,10 @@ test('find-local-run detects pinned formal rules and pending fingerprint tamperi
   const mock = await startMockWaooServer((request) => ({ body: { success: true, requestId: 'created', data: { runId: 'run-1', resumed: false, status: 'created', projectId: 'project-1', sourceHash: request.json.sourceHash, runFingerprint: request.json.runFingerprint, episodes: [{ episodeKey: 'episode-001', episodeId: 'ep-1', episodeNumber: 1, name: '第一集' }] } } }))
   t.after(mock.close)
   const created = await runCli(['create-run', '--project-root', formalRoot, '--project-id', 'project-1', '--source-file', sourceFile, '--definition-file', definitionFile, '--rules-file', rulesFile], { env: envFor(mock.baseUrl) })
+  const originalManifest = await readJson(path.join(created.runDir, 'manifest.json'))
+  await atomicWriteJson(path.join(created.runDir, 'manifest.json'), { ...originalManifest, runFingerprint: 'sha256:' + 'e'.repeat(64) })
+  await assert.rejects(runCli(['find-local-run', '--project-root', formalRoot, '--project-id', 'project-1', '--source-file', sourceFile]), /fingerprint mismatch/)
+  await atomicWriteJson(path.join(created.runDir, 'manifest.json'), originalManifest)
   const pinnedRules = await readJson(path.join(created.runDir, 'rules.json'))
   pinnedRules.rules[0].content = 'tampered'
   await atomicWriteJson(path.join(created.runDir, 'rules.json'), pinnedRules)
