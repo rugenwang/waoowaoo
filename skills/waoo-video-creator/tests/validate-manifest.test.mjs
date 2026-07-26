@@ -267,6 +267,11 @@ test('rejects committed hash drift and a manifest status not proven by the lates
     await mutateJson(runDir, 'receipts.json', (receipts) => { receipts.finalize.data.currentStage = 'assets' })
     await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'finalize' }), /currentStage.*latest.*receipt/i)
   })
+  await t.test('status fallback current stage', async (t) => {
+    const { runDir } = await makeFinalizeRun(t)
+    await mutateJson(runDir, 'manifest.json', (manifest) => { manifest.currentStage = 'assets' })
+    await assert.rejects(validateManifest({ projectRoot, runDir, stage: 'finalize' }), /currentStage.*latest.*receipt/i)
+  })
 })
 
 test('rejects a recomputed rules hash when contracts or rule content are incomplete', async (t) => {

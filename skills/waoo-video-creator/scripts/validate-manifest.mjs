@@ -145,7 +145,8 @@ function validateFormalManifest(manifest, request, response, rules, sourceText, 
     const latest = latestStateReceipt(receipts)
     if (!latest || latest.sequence !== applied) fail('/manifest.json/clientState/serverStateAppliedSeq', 'is not proven by the latest receipt')
     if (manifest.status !== latest.receipt.data.status) fail('/manifest.json/status', `does not match latest ${latest.kind} receipt`)
-    if (latest.receipt.data.currentStage !== undefined && manifest.currentStage !== latest.receipt.data.currentStage) fail('/manifest.json/currentStage', `does not match latest ${latest.kind} receipt`)
+    const expectedStage = latest.receipt.data.currentStage ?? latest.receipt.data.status
+    if (manifest.currentStage !== expectedStage) fail('/manifest.json/currentStage', `does not match latest ${latest.kind} receipt`)
   } else if (manifest.status !== response.status || manifest.currentStage !== response.status) {
     fail('/manifest.json/status', 'is not backed by create-run-response.json')
   }
