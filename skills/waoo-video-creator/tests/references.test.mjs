@@ -56,6 +56,12 @@ test('pipeline 固定阶段、恢复候选与 Artifact 引用规则', async () =
   assert.match(artifacts, /appearanceKey[\s\S]*(location|场景)[\s\S]*(prop|道具)[\s\S]*(clip|片段)[\s\S]*(storyboard|分镜)[\s\S]*(panel|面板)[\s\S]*(frame|帧)/i)
   assert.match(artifacts, /引用[\s\S]*(存在|可解析)/i)
   assert.doesNotMatch(artifacts, /\$schema[\s\S]*"properties"/i, '不得手抄完整 JSON Schema')
+  assert.match(artifacts, /Clip\.locationKey.*可选.*null/i)
+  assert.match(artifacts, /Panel\.locationKey.*可选.*null/i)
+  assert.match(artifacts, /character.*appearance.*可以为空/i)
+  assert.match(artifacts, /可选引用.*提供.*必须.*可解析/i)
+  assert.doesNotMatch(artifacts, /场景站位只能使用.*有效 slot/i, '不得虚构 location availableSlots 的归属校验')
+  assert.doesNotMatch(artifacts, /每个分镜角色必须引用 appearanceKey/i, 'appearance 不是强制字段')
 
   assert.match(recovery, /find-local-run[\s\S]*\.waoo-agent\/runs[\s\S]*\.waoo-agent\/intake/i)
   assert.match(recovery, /pending-create[\s\S]*完全相同[\s\S]*create-run/i)
