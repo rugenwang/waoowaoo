@@ -684,7 +684,7 @@ async function commandFindLocalRun(projectRoot, options) {
         await validateFormalRunDirectory(projectRoot, runDir, manifest)
         if (await pathExists(path.join(runDir, 'receipts.json'))) await secureReadPath(projectRoot, path.join(runDir, 'receipts.json'))
         const receipts = await loadReceipts(runDir, manifest)
-        const latestStatus = receipts.finalize?.data?.status ?? receipts.serverRun?.data?.status ?? receipts.snapshot?.data?.status ?? manifest.status
+        const latestStatus = latestServerStateStatus(manifest, receipts)
         if (latestStatus === COMPLETE_STATUS) continue
         formal.push({ status: 'resume', runId: manifest.runId, runFingerprint: manifest.runFingerprint, runDir })
       }
@@ -917,8 +917,51 @@ async function loadBoundManifest(projectRoot, runDir, runId) {
   return validateManifestRunId(await readJson(path.join(runDir, 'manifest.json')), runId)
 }
 
+function serverStateSequenceOrNull(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
 function serverStateSequence(value) {
-  return Number.isSafeInteger(value) && value >= 0 ? value : 0
+  return serverStateSequenceOrNull(value) ?? 0
+}
+
+function latestServerStateStatus(manifest, receipts) {
+  const candidates = [
+    {
+      kind: 'manifest',
+      status: manifest.status,
+      sequence: serverStateSequenceOrNull(manifest.clientState?.serverStateAppliedSeq),
+    },
+    {
+      kind: 'finalize',
+      status: receipts.finalize?.data?.status,
+      sequence: serverStateSequenceOrNull(receipts.finalize?.serverStateRequestSeq),
+      timestamp: receipts.finalize?.finalizedAt,
+    },
+    {
+      kind: 'serverRun',
+      status: receipts.serverRun?.data?.status,
+      sequence: serverStateSequenceOrNull(receipts.serverRun?.serverStateRequestSeq),
+      timestamp: receipts.serverRun?.receivedAt,
+    },
+    {
+      kind: 'snapshot',
+      status: receipts.snapshot?.data?.status,
+      sequence: serverStateSequenceOrNull(receipts.snapshot?.serverStateRequestSeq),
+      timestamp: receipts.snapshot?.receivedAt,
+    },
+  ].filter((candidate) => typeof candidate.status === 'string' && candidate.status.length > 0)
+  const sequenced = candidates.filter((candidate) => candidate.sequence !== null)
+  if (sequenced.length > 0) {
+    const highestSequence = Math.max(...sequenced.map((candidate) => candidate.sequence))
+    const newest = sequenced.filter((candidate) => candidate.sequence === highestSequence)
+    return newest.find((candidate) => candidate.kind === 'manifest')?.status ?? newest[0].status
+  }
+  const timestamped = candidates
+    .map((candidate) => ({ ...candidate, time: Date.parse(candidate.timestamp ?? '') }))
+    .filter((candidate) => Number.isFinite(candidate.time))
+    .sort((left, right) => right.time - left.time)
+  return timestamped[0]?.status ?? manifest.status
 }
 
 async function reserveServerStateRequest(projectRoot, runDir, current) {

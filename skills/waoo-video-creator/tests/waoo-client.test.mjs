@@ -261,6 +261,7 @@ test('CLI covers doctor, project/rules/run, dry-run commits, upload, snapshot an
   }
   const rules = { ...rulesWithoutHash, contentHash: sha256Prefixed(rulesWithoutHash) }
   let runRequest
+  let snapshotCalls = 0
   const mock = await startMockWaooServer((request) => {
     const success = (data) => ({ body: { success: true, requestId: 'req-1', data } })
     if (request.url.includes('/contracts/')) return success({ id: 'waoo-agent-resolve-project.v1', hash: contractHash, jsonSchema: schema })
@@ -275,7 +276,16 @@ test('CLI covers doctor, project/rules/run, dry-run commits, upload, snapshot an
     if (request.url.endsWith('/assets')) return success({ dryRun: request.json.dryRun, artifactHash: request.json.artifactHash })
     if (request.url.endsWith('/screenplay')) return success({ dryRun: request.json.dryRun, episodeKey: 'episode-001', artifactHash: request.json.artifactHash })
     if (request.url.endsWith('/storyboards')) return success({ dryRun: request.json.dryRun, episodeKey: 'episode-001', artifactHash: request.json.artifactHash })
-    if (request.url.endsWith('/snapshot')) return success({ runId: 'run-1', status: 'story_committed', committedArtifactHashes: { stories: {}, screenplays: {}, storyboards: {} }, uploads: [], missing: [] })
+    if (request.url.endsWith('/snapshot')) {
+      snapshotCalls += 1
+      return success({
+        runId: 'run-1',
+        status: snapshotCalls === 1 ? 'story_committed' : 'incomplete',
+        committedArtifactHashes: { stories: {}, screenplays: {}, storyboards: {} },
+        uploads: [],
+        missing: snapshotCalls === 1 ? [] : [{ code: 'FRAME_IMAGE_MISSING', targetType: 'panel-frame', targetKey: 'frame-1', message: 'missing' }],
+      })
+    }
     if (request.url.endsWith('/uploads')) return success({ runId: 'run-1', targetType: 'character-appearance', targetKey: 'hero.base', variantIndex: 0, contentSha256: request.headers['idempotency-key'] ? sha256Prefixed(Buffer.from([137, 80, 78, 71])) : '', mediaId: 'media-1', storageKey: 'x', url: '/x.png', reused: false })
     if (request.url.endsWith('/finalize')) return success({ runId: 'run-1', status: 'completed', completedAt: new Date().toISOString(), counts: { episodes: 1, characters: 0, locations: 0, props: 0, clips: 0, storyboards: 0, panels: 0, frames: 0, uploadedImages: 1 } })
     return success({})
@@ -400,6 +410,29 @@ test('CLI covers doctor, project/rules/run, dry-run commits, upload, snapshot an
   const afterFinalize = await runCli(['find-local-run', ...common, '--project-id', 'project-1', '--source-file', sourceFile], { env })
   assert.equal(afterFinalize.status, 'not-found')
   assert.equal(mock.requests.length, beforeFindRequestCount)
+
+  await runCli(['snapshot', ...common, '--run-id', 'run-1', '--run-dir', runDir], { env })
+  const incompleteManifest = await readJson(path.join(runDir, 'manifest.json'))
+  assert.equal(incompleteManifest.status, 'incomplete')
+  assert.ok(incompleteManifest.clientState.serverStateAppliedSeq > finalReceipts.finalize.serverStateRequestSeq)
+  const afterIncomplete = await runCli(['find-local-run', ...common, '--project-id', 'project-1', '--source-file', sourceFile], { env })
+  assert.deepEqual(
+    { status: afterIncomplete.status, runId: afterIncomplete.runId },
+    { status: 'resume', runId: 'run-1' },
+  )
+
+  const legacyManifest = await readJson(path.join(runDir, 'manifest.json'))
+  delete legacyManifest.clientState
+  legacyManifest.status = 'completed'
+  await atomicWriteJson(path.join(runDir, 'manifest.json'), legacyManifest)
+  const legacyReceipts = await readJson(path.join(runDir, 'receipts.json'))
+  for (const receipt of [legacyReceipts.serverRun, legacyReceipts.snapshot, legacyReceipts.finalize]) delete receipt.serverStateRequestSeq
+  legacyReceipts.serverRun.receivedAt = '2026-07-26T09:00:00.000Z'
+  legacyReceipts.finalize.finalizedAt = '2026-07-26T10:00:00.000Z'
+  legacyReceipts.snapshot.receivedAt = '2026-07-26T11:00:00.000Z'
+  await atomicWriteJson(path.join(runDir, 'receipts.json'), legacyReceipts)
+  const legacyAfterIncomplete = await runCli(['find-local-run', ...common, '--project-id', 'project-1', '--source-file', sourceFile], { env })
+  assert.equal(legacyAfterIncomplete.status, 'resume')
 })
 
 test('unsafe path identifiers and malicious contract URLs are rejected before credentialed requests', async (t) => {
