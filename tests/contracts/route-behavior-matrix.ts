@@ -8,6 +8,7 @@ export type RouteBehaviorMatrixEntry = {
 }
 
 const CONTRACT_TEST_BY_GROUP: Record<RouteCatalogEntry['contractGroup'], string> = {
+  'agent-data-routes': 'tests/integration/api/contract/agent-data-routes.test.ts',
   'llm-observe-routes': 'tests/integration/api/contract/llm-observe-routes.test.ts',
   'direct-submit-routes': 'tests/integration/api/contract/direct-submit-routes.test.ts',
   'crud-assets-routes': 'tests/integration/api/contract/crud-routes.test.ts',
@@ -20,6 +21,9 @@ const CONTRACT_TEST_BY_GROUP: Record<RouteCatalogEntry['contractGroup'], string>
 }
 
 function resolveChainTest(routeFile: string): string {
+  if (routeFile.startsWith('src/app/api/agent/')) {
+    return 'tests/regression/agent-api-legacy-isolation.test.ts'
+  }
   if (routeFile.includes('/generate-video/') || routeFile.includes('/lip-sync/')) {
     return 'tests/integration/chain/video.chain.test.ts'
   }

@@ -11,6 +11,19 @@ export type RequirementCoverageEntry = {
 
 export const REQUIREMENTS_MATRIX: ReadonlyArray<RequirementCoverageEntry> = [
   {
+    id: 'REQ-AGENT-CREATOR-DATA-ONLY',
+    feature: 'Agent creator data-only boundary',
+    userValue: 'Codex可按WAOO规则落库并上传资源，同时不触发旧模型、任务或队列链路',
+    risk: 'Agent入口绕过边界调用旧AI链路，污染任务队列或改变原有页面行为',
+    priority: 'P0',
+    tests: [
+      'tests/integration/api/contract/agent-data-routes.test.ts',
+      'tests/integration/agent-api/finalize.integration.test.ts',
+      'tests/unit/guards/no-agent-api-generation-bypass.test.ts',
+      'tests/regression/agent-api-legacy-isolation.test.ts',
+    ],
+  },
+  {
     id: 'REQ-ASSETHUB-CHARACTER-EDIT',
     feature: 'Asset Hub character edit',
     userValue: '角色信息编辑后立即可见并正确保存',

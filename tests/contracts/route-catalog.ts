@@ -1,4 +1,5 @@
 export type RouteCategory =
+  | 'agent'
   | 'assets'
   | 'asset-hub'
   | 'novel-promotion'
@@ -10,6 +11,7 @@ export type RouteCategory =
   | 'system'
 
 export type RouteContractGroup =
+  | 'agent-data-routes'
   | 'llm-observe-routes'
   | 'direct-submit-routes'
   | 'crud-assets-routes'
@@ -27,6 +29,18 @@ export type RouteCatalogEntry = {
 }
 
 const ROUTE_FILES = [
+  'src/app/api/agent/v1/contracts/[contractId]/route.ts',
+  'src/app/api/agent/v1/projects/[projectId]/creator-rules/route.ts',
+  'src/app/api/agent/v1/projects/[projectId]/runs/route.ts',
+  'src/app/api/agent/v1/projects/resolve/route.ts',
+  'src/app/api/agent/v1/runs/[runId]/assets/route.ts',
+  'src/app/api/agent/v1/runs/[runId]/episodes/[episodeKey]/screenplay/route.ts',
+  'src/app/api/agent/v1/runs/[runId]/episodes/[episodeKey]/story/route.ts',
+  'src/app/api/agent/v1/runs/[runId]/episodes/[episodeKey]/storyboards/route.ts',
+  'src/app/api/agent/v1/runs/[runId]/finalize/route.ts',
+  'src/app/api/agent/v1/runs/[runId]/route.ts',
+  'src/app/api/agent/v1/runs/[runId]/snapshot/route.ts',
+  'src/app/api/agent/v1/runs/[runId]/uploads/route.ts',
   'src/app/api/admin/download-logs/route.ts',
   'src/app/api/console/local/sse/route.ts',
   'src/app/api/console/local/tasks/[taskId]/logs/route.ts',
@@ -177,6 +191,7 @@ const ROUTE_FILES = [
 ] as const
 
 function resolveCategory(routeFile: string): RouteCategory {
+  if (routeFile.startsWith('src/app/api/agent/')) return 'agent'
   if (routeFile.startsWith('src/app/api/assets/')) return 'assets'
   if (routeFile.startsWith('src/app/api/asset-hub/')) return 'asset-hub'
   if (routeFile.startsWith('src/app/api/novel-promotion/')) return 'novel-promotion'
@@ -195,6 +210,7 @@ function resolveCategory(routeFile: string): RouteCategory {
 }
 
 function resolveContractGroup(routeFile: string): RouteContractGroup {
+  if (routeFile.startsWith('src/app/api/agent/')) return 'agent-data-routes'
   if (
     routeFile.includes('/ai-')
     || routeFile.includes('/analyze')
