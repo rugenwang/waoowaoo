@@ -108,6 +108,16 @@ function sanitizeMessage(message, ...secrets) {
   return result
 }
 
+function sanitizeErrorDetails(value, ...secrets) {
+  if (typeof value === 'string') return sanitizeMessage(value, ...secrets)
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') return value
+  if (Array.isArray(value)) return value.map((entry) => sanitizeErrorDetails(entry, ...secrets))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, sanitizeErrorDetails(entry, ...secrets)]))
+  }
+  return undefined
+}
+
 function agentError(message, details = {}) {
   const error = new Error(message)
   Object.assign(error, details)
@@ -303,6 +313,7 @@ export async function requestJson(config, requestPath, options = {}) {
         code: sanitizeMessage(failure.code ?? 'AGENT_HTTP_ERROR', config.token, config.userId),
         field: failure.field ? sanitizeMessage(failure.field, config.token, config.userId) : undefined,
         requestId: envelope?.requestId ? sanitizeMessage(envelope.requestId, config.token, config.userId) : undefined,
+        details: failure.details === undefined ? undefined : sanitizeErrorDetails(failure.details, config.token, config.userId),
         retryable: failure.retryable === true,
         status: response.status,
       })
@@ -1285,6 +1296,7 @@ export async function runCli(argv = process.argv.slice(2), context = {}) {
     if (error.code) error.code = sanitizeMessage(error.code, env.WAOO_AGENT_TOKEN, env.WAOO_AGENT_USER_ID)
     if (error.field) error.field = sanitizeMessage(error.field, env.WAOO_AGENT_TOKEN, env.WAOO_AGENT_USER_ID)
     if (error.requestId) error.requestId = sanitizeMessage(error.requestId, env.WAOO_AGENT_TOKEN, env.WAOO_AGENT_USER_ID)
+    if (error.details !== undefined) error.details = sanitizeErrorDetails(error.details, env.WAOO_AGENT_TOKEN, env.WAOO_AGENT_USER_ID)
     throw error
   }
 }
@@ -1299,6 +1311,7 @@ if (isMain) {
         message: sanitizeMessage(error.message, process.env.WAOO_AGENT_TOKEN, process.env.WAOO_AGENT_USER_ID),
         ...(error.field ? { field: sanitizeMessage(error.field, process.env.WAOO_AGENT_TOKEN, process.env.WAOO_AGENT_USER_ID) } : {}),
         ...(error.requestId ? { requestId: sanitizeMessage(error.requestId, process.env.WAOO_AGENT_TOKEN, process.env.WAOO_AGENT_USER_ID) } : {}),
+        ...(error.details !== undefined ? { details: sanitizeErrorDetails(error.details, process.env.WAOO_AGENT_TOKEN, process.env.WAOO_AGENT_USER_ID) } : {}),
       },
     }
     process.stderr.write(`${JSON.stringify(safe)}\n`)

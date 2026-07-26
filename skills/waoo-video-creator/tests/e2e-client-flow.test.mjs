@@ -145,7 +145,27 @@ test('full creator flow is resumable, pinned, upload-only, and never reaches gen
       }, 'snapshot')
     }
     if (request.url === '/api/agent/v1/runs/run-1/finalize' && request.method === 'POST') {
-      if (state.uploadTargets.size !== allowedUploadTargets.size) return response({ runId: 'run-1', status: 'images_in_progress', missing: ['images'] }, 'finalize-missing')
+      if (state.uploadTargets.size !== allowedUploadTargets.size) {
+        const missingCount = allowedUploadTargets.size - state.uploadTargets.size
+        return {
+          status: 422,
+          body: {
+            success: false,
+            requestId: 'finalize-missing',
+            error: {
+              code: 'RUN_INCOMPLETE',
+              message: 'Run is incomplete',
+              retryable: false,
+              details: {
+                missingCount,
+                summaryCount: missingCount,
+                truncated: false,
+                snapshotEndpoint: '/api/agent/v1/runs/run-1/snapshot',
+              },
+            },
+          },
+        }
+      }
       return response({ runId: 'run-1', status: 'completed', completedAt: '2026-07-26T00:00:00.000Z', counts: { uploadedImages: 4 } }, 'finalize-complete')
     }
     throw new Error(`unexpected endpoint: ${request.method} ${request.url}`)
@@ -205,7 +225,15 @@ test('full creator flow is resumable, pinned, upload-only, and never reaches gen
   assert.equal(mock.requests.filter((request) => request.method === 'PUT').length, 8, 'completed artifact stages were not submitted again after resume')
 
   await runCli(['snapshot', ...runArgs], { env, configOverrides: { retries: 0 } })
-  await assert.rejects(runCli(['finalize', ...runArgs], { env, configOverrides: { retries: 0 } }), /status mismatch/i)
+  await assert.rejects(
+    runCli(['finalize', ...runArgs], { env, configOverrides: { retries: 0 } }),
+    (error) => error.code === 'RUN_INCOMPLETE'
+      && error.status === 422
+      && error.details?.missingCount === 4
+      && error.details?.summaryCount === 4
+      && error.details?.truncated === false
+      && error.details?.snapshotEndpoint === '/api/agent/v1/runs/run-1/snapshot',
+  )
   const afterMissingFinalize = await readJson(path.join(runDir, 'receipts.json'))
   assert.equal(afterMissingFinalize.finalize, undefined)
 
