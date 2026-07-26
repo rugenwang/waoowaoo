@@ -12,8 +12,8 @@
 
 ## 引用图
 
-`characterKey` 可关联具体 `appearanceKey`，但 Character 的 `appearances` 列表可以为空；不得为满足文档而虚构形象。`Clip.locationKey` 可选且可为 `null`；`Panel.locationKey` 可选且可为 `null`。场景、道具、形象和帧的引用是否出现、是否允许 `null`，以运行时下载的 Schema 为准；本文不增加 slot 必须归属 location 的规则。`episodeKey → clipKey → storyboardKey → panelKey → frameKey` 构成顺序拓扑；每个 Clip 恰好一个 storyboard，Frame 依赖只可指向更早 frame。
+`characterKey` 可关联具体 `appearanceKey`，但 Character 的 `appearances` 列表可以为空；不得为满足文档而虚构形象。`Clip.locationKey` 和 `Panel.locationKey` 字段必须提供，值可为 `null`；非 `null` 时必须解析到存在的 location。其他场景、道具、形象和帧引用是否出现、是否允许 `null`，以运行时下载的 Schema 为准；本文不增加 slot 必须归属 location 的规则。`episodeKey → clipKey → storyboardKey → panelKey → frameKey` 构成顺序拓扑；每个 Clip 恰好一个 storyboard，Frame 依赖只可指向更早 frame。
 
-图片参考以目标类型加 key 表达：角色形象用 appearanceKey，场景/道具用 locationKey/propKey，画面连续性用 frameKey。可选引用可以缺失或为 `null`；提供时必须存在、类型正确且可解析。external key 全局按其领域唯一，禁止同键重名或悬空引用。
+图片参考以目标类型加 key 表达：角色形象用 appearanceKey，场景/道具用 locationKey/propKey，画面连续性用 frameKey。nullable 引用字段必须提供，值为 `null` 时不解析；非 `null` 时必须存在、类型正确且可解析。仅在运行时 Schema 明确标为可选的属性才可缺失。external key 全局按其领域唯一，禁止同键重名或悬空引用。
 
 业务约束：剧本锚点回到 `novelText`，不得新增事实/对白/时间顺序；panelNumber 与 frameIndex 连续，首帧时间为 0，frame 时间不越过 Panel 时长。图片只上传本 run 的本地合格文件和对应 receipt。
